@@ -27,6 +27,7 @@ enlarge=no
 swap_zize="4G"
 grub_efi_dev="(hd0,gpt1)"
 hide_grub_menu="yes" #hold shift during boot
+command_line="defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1"
 
 #Do you want a separated boot partition?
 	#yes
@@ -296,7 +297,7 @@ secureboot_state() {
 
 setup_refind(){
 	echo "Install $bootloader"
-	cd ~
+	
 	root_uuid="$(blkid --output export /dev/"$root_dev" | grep ^UUID=)"
 
 	echo "refind refind/install_to_esp boolean true" | debconf-set-selections
@@ -355,12 +356,13 @@ setup_grub(){
 	echo "Install $bootloader"
 	if [[ $hide_grub_menu = "yes" ]]; then
 		sed -i 's/^GRUB_TIMEOUT_STYLE=menu$/GRUB_TIMEOUT_STYLE=hidden/' /etc/default/grub
-		sed -i 's/^GRUB_TIMEOUT=10$/GRUB_TIMEOUT=0/' /etc/default/grub
+		sed -i 's/^GRUB_TIMEOUT=10$/GRUB_TIMEOUT=1/' /etc/default/grub
 	else
 		sed -i 's/^GRUB_TIMEOUT_STYLE=hidden$/GRUB_TIMEOUT_STYLE=menu/' /etc/default/grub
 		sed -i 's/^GRUB_TIMEOUT=0$/GRUB_TIMEOUT=10/' /etc/default/grub
 	fi
-	
+	#TODO
+	#command line rootflags=defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1,subvol=@ quiet splash
 	
 	if [[ ( $only_subvols = "yes" || -n $boot_dev ) && ( -z $tpm_unlock || $tpm_unlock = "no" )   ]]; then
 		update-grub
@@ -452,9 +454,11 @@ setup_grub(){
 		fi
 
 		update-grub
-		cd ~
+		
 
-	fi      
+	fi
+
+	cd /     
 		
 }
 
@@ -483,7 +487,7 @@ setup_grub_btrfs_snapshot_menu(){
 		GRUB_BTRFS_SYSTEMD_VOLATILE="true"
 	EOF
 
-	cd ~
+	cd /
 
 }
 
@@ -492,6 +496,7 @@ setup_refind_btrfs_sanpshot_menu(){
 
 	apt install asciidoc-base pkgconf pkgconf-bin curl jq libpcsclite-dev libpcsclite1 golang-go git
 	
+	cd ~
 	git clone https://github.com/jmylchreest/refind-btrfs-snapshots.git
 	cd refind-btrfs-snapshots
 	go build -o refind-btrfs-snapshots ./cmd/refind-btrfs-snapshots
@@ -504,6 +509,8 @@ setup_refind_btrfs_sanpshot_menu(){
 	systemctl enable --now refind-btrfs-snapshots.path
 	
 	echo "include refind-btrfs-snapshots.conf" >> /boot/efi/EFI/refind.conf
+	cd /
+
 	   
 }
 
@@ -558,7 +565,7 @@ setup_custom_secure_boot_key(){
 		find /boot -type f -name 'vm*' -exec sudo sbctl sign -s '{}' \;
 	fi
 
-	cd ~
+	cd /
 
 
 	
@@ -572,7 +579,9 @@ setup_tpm_luks_auto_ulock(){
 	
 	echo "root $root_uuid none tpm2-device=auto,tpm2-measure-pcr=yes,discard,no-read-workqueue,no-write-workqueue,nofail" > /etc/crypttab
 	echo 'add_dracutmodules+=" tpm2-tss crypt "' > /etc/dracut.conf.d/crypt.conf
-	dracut --regenerate-all --force -v    
+	dracut --regenerate-all --force -v
+
+	cd /    
 }
 
 seal_luks_disk_tpm_unlock_to_secure_boot(){
@@ -592,6 +601,8 @@ seal_luks_disk_tpm_unlock_to_secure_boot(){
 		cryptsetup luksAddKey /dev/$root_dev /etc/luks-key/luks-key-grub --pbkdf=pbkdf2 --hash=sha512
 		grub-protect --action=add --protector=tpm2  --tpm2key --tpm2-keyfile=/etc/luks-key/luks-key-grub --tpm2-outfile=/boot/efi/EFI/ubuntu/sealed.tpm --tpm2-pcrs=7
 	fi
+
+	cd /
 
 	#echo "test" | cryptsetup luksDump /dev/sda2 --debug 2>&1 | grep -i token
 }
@@ -829,7 +840,7 @@ while :; do
 	esac
 	shift
 done
-#rubic
+
 
 if [[ -z $root_dev ]] || [[ -z $efi_dev ]]; then
 	echo "You must pass the device of the root, efi, and optionally"
