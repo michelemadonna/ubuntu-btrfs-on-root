@@ -754,6 +754,14 @@ if [[ "$1" = "//inner" ]]; then
 			fi
 		fi
 	fi
+
+	apt install -y mythes-en-au mythes-en-us \
+		thunderbird-locale-en thunderbird-locale-en-gb thunderbird-locale-en-us \
+		ubuntu-desktop ubuntu-restricted-addons \
+		wbritish \
+		libreoffice-help-common libreoffice-help-en-gb libreoffice-help-en-us libreoffice-l10n-en-gb libreoffice-l10n-en-za \
+		open-vm-tools-desktop openssh-server \
+
 	umount proc 2>/dev/null || true
 	umount home 2>/dev/null || true
 	exit
