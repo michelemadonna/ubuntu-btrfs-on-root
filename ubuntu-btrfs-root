@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -e
-set -x
 
 # https://github.com/paadza/Ubuntu-encrypted-btrfs-with-and-home-subvolumes-swap-and-Timeshift
 # https://gist.github.com/TheHarold/27d87e9e027718a0f60db7ff04c4d104
@@ -27,7 +26,7 @@ keyslot_size="32m"
 enlarge=no
 swap_zize="4G"
 grub_efi_dev="(hd0,gpt1)"
-
+hide_grub_menu="yes" #hold shift during boot
 
 #Do you want a separated boot partition?
 	#yes
@@ -74,7 +73,7 @@ grub_efi_dev="(hd0,gpt1)"
 #                           tpm_unlock=yes #yes #no
 				   #secure boot enabled
 					   #Chose your bootloader
-						   bootloader=grub #grub (rfind is not available because we can't install a MOK)
+						   bootloader="grub+refind" #grub (rfind is not available because we can't install a MOK)
 					   #Do you want enable tpm root partition autounlock
 						   tpm_unlock=yes #yes #no
 #                   #secureboot is disabled
@@ -175,10 +174,10 @@ chroot_and_mkinitramfs() {
 	mount /dev/$efi_dev $mp/boot/efi
 	mkdir -p /mnt/root/sys/firmware/efi/efivars && mount --bind /sys/firmware/efi/efivars /mnt/root/sys/firmware/efi/efivars   
 	
-	cp "$script" "$mp/tmp/$scriptname"
-	chmod a+x "$mp/tmp/$scriptname"
+	cp "$script" "$mp/usr/bin/$scriptname"
+	chmod a+x "$mp/usr/bin/$scriptname"
 	echo "Chrooting and call the script in the other root"
-	unshare --mount --fork chroot $mp /tmp/"$scriptname" //inner
+	unshare --mount --fork chroot $mp "$scriptname" //inner
 }
 
 unmount_everything() {
@@ -300,10 +299,13 @@ setup_refind(){
 	cd ~
 	root_uuid="$(blkid --output export /dev/"$root_dev" | grep ^UUID=)"
 
-	apt install refind
-	unzip ~/refind_themes.zip -d /boot/efi/EFI/refind/themes
+	echo "refind refind/install_to_esp boolean true" | debconf-set-selections
+	DEBIAN_FRONTEND=noninteractive apt install -y refind
+	
+	wget https://github.com/michelemadonna/ubuntu-btrfs-on-root/raw/refs/heads/main/refind_themes.zip
+	unzip ~/refind_themes.zip -d /boot/efi/EFI/refind/
 
-	cat >> /boot/efi/EFI/refind/refind.config <<-EOF
+	cat >> /boot/efi/EFI/refind/refind.conf <<-EOF
 		enable_touch
 		enable_mouse
 		use_graphics_for osx,linux
@@ -351,9 +353,14 @@ setup_refind(){
 
 setup_grub(){
 	echo "Install $bootloader"
-
-	sed -i 's/^GRUB_TIMEOUT_STYLE=hidden$/GRUB_TIMEOUT_STYLE=menu/' /etc/default/grub
-	sed -i 's/^GRUB_TIMEOUT=0$/GRUB_TIMEOUT=10/' /etc/default/grub
+	if [[ $hide_grub_menu = "yes" ]]; then
+		sed -i 's/^GRUB_TIMEOUT_STYLE=menu$/GRUB_TIMEOUT_STYLE=hidden/' /etc/default/grub
+		sed -i 's/^GRUB_TIMEOUT=10$/GRUB_TIMEOUT=0/' /etc/default/grub
+	else
+		sed -i 's/^GRUB_TIMEOUT_STYLE=hidden$/GRUB_TIMEOUT_STYLE=menu/' /etc/default/grub
+		sed -i 's/^GRUB_TIMEOUT=0$/GRUB_TIMEOUT=10/' /etc/default/grub
+	fi
+	
 	
 	if [[ ( $only_subvols = "yes" || -n $boot_dev ) && ( -z $tpm_unlock || $tpm_unlock = "no" )   ]]; then
 		update-grub
@@ -442,6 +449,7 @@ setup_grub(){
 
 				
 			EOF
+		fi
 
 		update-grub
 		cd ~
@@ -738,7 +746,8 @@ if [[ "$1" = "//inner" ]]; then
 					if [[ $tpm_unlock = yes ]]; then
 						setup_tpm_luks_auto_ulock
 					fi
-				elif [[ $bootloader = "refind" || $bootloader = "grub+refind" ]]; then
+				fi
+				if [[ $bootloader = "refind" || $bootloader = "grub+refind" ]]; then
 					setup_refind
 
 				fi
@@ -754,14 +763,6 @@ if [[ "$1" = "//inner" ]]; then
 			fi
 		fi
 	fi
-
-	apt install -y mythes-en-au mythes-en-us \
-		thunderbird-locale-en thunderbird-locale-en-gb thunderbird-locale-en-us \
-		ubuntu-desktop ubuntu-restricted-addons \
-		wbritish \
-		libreoffice-help-common libreoffice-help-en-gb libreoffice-help-en-us libreoffice-l10n-en-gb libreoffice-l10n-en-za \
-		open-vm-tools-desktop openssh-server \
-
 	umount proc 2>/dev/null || true
 	umount home 2>/dev/null || true
 	exit
@@ -828,6 +829,7 @@ while :; do
 	esac
 	shift
 done
+#rubic
 
 if [[ -z $root_dev ]] || [[ -z $efi_dev ]]; then
 	echo "You must pass the device of the root, efi, and optionally"
