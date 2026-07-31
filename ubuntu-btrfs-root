@@ -18,14 +18,15 @@ scriptname="$(basename "$script")"
 
 [[ "$(id -u)" -eq 0 ]] || { echo "ERROR: Must be run as root."; exit 1; }
 
-root_dev="sda2"
-efi_dev="sda1"
+root_dev="sda3"
+efi_dev="sda2"
 mp="/mnt/root"
 boot_dev=""
+rescue_dev="sda1"
 keyslot_size="32m"
 enlarge=no
 swap_zize="4G"
-grub_efi_dev="(hd0,gpt1)"
+grub_efi_dev="(hd0,gpt2)"
 hide_grub_menu="yes" #hold shift during boot
 btrfs_options="defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1"
 installation_type="wipe"
@@ -308,7 +309,8 @@ setup_refind(){
 
 	echo "refind refind/install_to_esp boolean true" | debconf-set-selections
 	DEBIAN_FRONTEND=noninteractive apt install -y refind
-	cp /usr/share/refind/refind/drivers_x64/* /boot/efi/EFI/refind/drivers_x64/
+
+	cp /usr/share/refind/refind/drivers_x64/{btrfs,iso9660,ext2,ext4}_x64.efi /boot/efi/EFI/refind/drivers_x64/
 
 	if [[ $pre_download = "no" ]]; then
 		wget https://github.com/michelemadonna/ubuntu-btrfs-on-root/raw/refs/heads/main/refind_themes.zip -O /tmp/refind_themes.zip
@@ -346,25 +348,32 @@ setup_refind(){
 	EOF
 
 	if [[ $secure_boot_status = "setup" ]]; then
-		sbctl sign -s /boot/efi/EFI/refind/refind_x64.efi
-		sbctl sign -s /boot/efi/EFI/refind/drivers_x64/btrfs_x64.efi
-		sbctl sign -s /boot/efi/EFI/refind/drivers_x64/ext4_x64.efi
-	elif [[ $secure_boot_status = "enabled" ]]; then
-		cat >> "$(which update-grub)" <<- EOF
-			sbsign --key /etc/efikeys/MOK.key \
-				--cert /etc/efikeys/MOK.pem \
-				/boot/efi/EFI/refind/drivers_x64/btrfs_x64.efi \
-				--output /boot/efi/EFI/refind/drivers_x64/btrfs_x64.efi.signed
+		for f in btrfs_x64.efi iso9660_x64.efi ext2_x64.efi ext4_x64.efi ; do
+    	sbctl sign -s "/boot/efi/EFI/refind/drivers_x64/$f"
+		done
 
-			mv /boot/efi/EFI/refind/drivers_x64/btrfs_x64.efi.signed /boot/efi/EFI/refind/drivers_x64/btrfs_x64.efi.efi
+		sbctl sign -s "/boot/efi/EFI/refind/refind_x64.efi"
+		
+	elif [[ $secure_boot_status = "enabled" ]]; then
+
+			for f in btrfs_x64.efi iso9660_x64.efi ext2_x64.efi ext4_x64.efi ; do
+    		sbsign --key /etc/efikeys/MOK.key \
+				--cert /etc/efikeys/MOK.pem \
+				"/boot/efi/EFI/refind/drivers_x64/$f" \
+				--output "/boot/efi/EFI/refind/drivers_x64/$f.signed"
+
+				mv "/boot/efi/EFI/refind/drivers_x64/$f.signed" "/boot/efi/EFI/refind/drivers_x64/$f"
+
+			done
 
 			sbsign --key /etc/efikeys/MOK.key \
 				--cert /etc/efikeys/MOK.pem \
 				/boot/efi/EFI/refind/refind_x64.efi \
 				--output /boot/efi/EFI/refind/refind_x64.efi.signed
 
-			mv /boot/efi/EFI/refind/refind_x64.efi.signed /boot/efi/EFI/refind/refind_x64.efi.efi
-		EOF
+			mv /boot/efi/EFI/refind/refind_x64.efi.signed /boot/efi/EFI/refind/refind_x64.efi
+
+
 	fi
 	apt-mark hold refind
 
@@ -452,31 +461,35 @@ setup_grub(){
 		
 		
 
-		cat > "$(which update-grub)" <<- EOF
-			#!/bin/sh
-			set -e
-			grub-mkconfig -o /boot/grub/grub.cfg "\$@"
-			grub-mkstandalone -v --disable-shim-lock -O x86_64-efi -o /boot/efi/EFI/ubuntu/grubx64.efi --sbat /boot/grub/SBAT.csv "/boot/grub/fonts/unicode.pf2=/boot/grub/fonts/unicode.pf2" \
+		#cat > "$(which update-grub)" <<- EOF
+		#	#!/bin/sh
+		#	set -e
+		#	grub-mkconfig -o /boot/grub/grub.cfg "\$@"
+		#	grub-mkstandalone -v --disable-shim-lock -O x86_64-efi -o /boot/efi/EFI/ubuntu/grubx64.efi --sbat /boot/grub/SBAT.csv "/boot/grub/fonts/unicode.pf2=/boot/grub/fonts/unicode.pf2" \
+		#		--modules="linux normal terminal efi_gop all_video part_gpt cryptodisk luks2 argon2 gcry_rijndael gcry_sha256 btrfs gfxterm gettext gzio boot loadenv video test luks pbkdf2 gcry_sha512 tpm tpm2_key_protector configfile echo search cpuid efifwsetup raid5rec diskfilter mdraid1x mdraid09 lvm crypto afsplitter gcry_twofish gcry_tiger gcry_hwfeatures gcry_serpent gcry_seed gcry_rsa gcry_rmd160 gcry_rfc2268 gcry_md5 gcry_md4 pubkey mpi gcry_idea gcry_dsa mpi pubkey gcry_keccak gcry_des gcry_camellia gcry_blowfish gcry_arcfour play extcmd zfsinfo zfs zfscrypt gcry_sha1 gcry_rijndael xfs true squash4 xzio lzopio fshelp smbios sleep serial terminfo search_label search_fs_uuid search_fs_file regexp reboot probe png peimage setjmp password_pbkdf2 part_msdos part_apple minicmd memdisk lssal lsefisystab lsefimmap lsefi ls datetime relocator mmap loopback disk keystatus jpeg bufio bitmap iso9660 hfsplus help halt acpi gfxterm_background video_colors bitmap_scale gfxmenu trig font fat ext2 video_fb net procfs key_protector archelp chain efinet priority_queue cat gcry_crc"
+		#	
+		#EOF
+
+		grub-mkstandalone -v --disable-shim-lock -O x86_64-efi -o /boot/efi/EFI/ubuntu/grubx64.efi --sbat /boot/grub/SBAT.csv "/boot/grub/fonts/unicode.pf2=/boot/grub/fonts/unicode.pf2" \
 				--modules="linux normal terminal efi_gop all_video part_gpt cryptodisk luks2 argon2 gcry_rijndael gcry_sha256 btrfs gfxterm gettext gzio boot loadenv video test luks pbkdf2 gcry_sha512 tpm tpm2_key_protector configfile echo search cpuid efifwsetup raid5rec diskfilter mdraid1x mdraid09 lvm crypto afsplitter gcry_twofish gcry_tiger gcry_hwfeatures gcry_serpent gcry_seed gcry_rsa gcry_rmd160 gcry_rfc2268 gcry_md5 gcry_md4 pubkey mpi gcry_idea gcry_dsa mpi pubkey gcry_keccak gcry_des gcry_camellia gcry_blowfish gcry_arcfour play extcmd zfsinfo zfs zfscrypt gcry_sha1 gcry_rijndael xfs true squash4 xzio lzopio fshelp smbios sleep serial terminfo search_label search_fs_uuid search_fs_file regexp reboot probe png peimage setjmp password_pbkdf2 part_msdos part_apple minicmd memdisk lssal lsefisystab lsefimmap lsefi ls datetime relocator mmap loopback disk keystatus jpeg bufio bitmap iso9660 hfsplus help halt acpi gfxterm_background video_colors bitmap_scale gfxmenu trig font fat ext2 video_fb net procfs key_protector archelp chain efinet priority_queue cat gcry_crc"
 			
-		EOF
 		
 		if [[ $secure_boot_status = "setup" ]]; then
-			echo "sbctl sign /boot/efi/EFI/ubuntu/grubx64.efi" >> "$(which update-grub)"
+
+			sbctl sign /boot/efi/EFI/ubuntu/grubx64.efi
+			
 		elif [[ $secure_boot_status = "enabled" ]]; then
-			cat >> "$(which update-grub)" <<- EOF
-				sbsign --key /etc/efikeys/MOK.key \
-					--cert /etc/efikeys/MOK.pem \
-					/boot/efi/EFI/ubuntu/grubx64.efi \
-					--output /boot/efi/EFI/ubuntu/grubx64.efi.signed
 
-				mv /boot/efi/EFI/ubuntu/grubx64.efi.signed /boot/efi/EFI/ubuntu/grubx64.efi.efi
+			sbsign --key /etc/efikeys/MOK.key \
+				--cert /etc/efikeys/MOK.pem \
+				/boot/efi/EFI/ubuntu/grubx64.efi \
+				--output /boot/efi/EFI/ubuntu/grubx64.efi.signed
+			mv /boot/efi/EFI/ubuntu/grubx64.efi.signed /boot/efi/EFI/ubuntu/grubx64.efi
 
-				
-			EOF
 		fi
 
 		update-grub
+
 		if [[ $bootloader = "grub+refind" ]]; then
 			echo -e "\e[32mINFO:\e[0mNow copy existing grubx64.efi for refind to directo boot into the os without the grub menu.."
 			mkdir /boot/efi/EFI/direct
@@ -993,4 +1006,8 @@ chroot_and_mkinitramfs
 unmount_everything
 
 echo "Finished"
+#mkdir ~/rescue-iso
+#apt --no-install-recommends -y install btrfs-assistant btrfsmaintenance snapper shim-signed
+#find ~/rescue-iso/custom-* -name grub*.efi -exec sudo sbctl sign -s {} \;
+#sudo dd if=ubuntu-26.04.0-2026.07.31-desktop-amd64.iso of=/dev/$rescue_dev bs=100k status=progress
 
