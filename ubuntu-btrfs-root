@@ -133,7 +133,7 @@ create_subvols() {
 	
 	btrfs subvolume create $root_sub_vol/@log
 	mv $root_sub_vol/var/log/* $root_sub_vol/@log
-	btrfs subvolume create $root_sub_vol/@temp
+	btrfs subvolume create $root_sub_vol/@tmp
 	btrfs subvolume create $root_sub_vol/@libvirt
 	
 	btrfs subvolume create $root_sub_vol/@swap
@@ -277,7 +277,7 @@ setup_fstab_crpttab(){
 	EOF
 	
 	echo "root $root_uuid none luks,discard,nofail" > /etc/crypttab 
-	
+
 	apt-get install -y cryptsetup-initramfs
 
 }
@@ -516,8 +516,8 @@ setup_grub(){
 				else
 				  search --no-floppy --fs-uuid --set=root $root_btrfs_uuid
 				fi
-				linux   /@/boot/vmlinuz root=UUID=$root_btrfs_uuid ro rootflags=defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1,subvol=$root_sub_vol  quiet splash crashkernel=2G-4G:320M,4G-32G:512M,32G-64G:1024M,64G-128G:2048M,128G-:4096M
-				initrd  /@/boot/initrd.img
+				linux   /$root_sub_vol/boot/vmlinuz root=UUID=$root_btrfs_uuid ro rootflags=defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1,subvol=$root_sub_vol  quiet splash crashkernel=2G-4G:320M,4G-32G:512M,32G-64G:1024M,64G-128G:2048M,128G-:4096M
+				initrd  /$root_sub_vol/boot/initrd.img
 
 				boot
 			EOF
