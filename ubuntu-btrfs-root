@@ -30,9 +30,11 @@ grub_efi_dev="(hd0,gpt2)"
 hide_grub_menu="yes" #hold shift during boot
 btrfs_options="defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1"
 installation_type="wipe"
+suite="ubuntu"
 suite_type="minimal"
 PASSPHRASE="password"
 pre_download="yes"
+root_sub_vol="@$suite"
 
 #Do you want a separated boot partition?
 	#yes
@@ -122,25 +124,25 @@ create_subvols() {
 	echo -e "\e[32mINFO:\e[0mCreate subvolumes"
 	mount /dev/$root_dev $mp
 	cd $mp
-	btrfs subvolume snapshot . @
+	btrfs subvolume snapshot . $root_sub_vol
 	
-	btrfs subvolume create @home
-	mv @/home/* @home/
-	btrfs subvolume create @cache
-	mv @/var/cache/* @cache/
+	btrfs subvolume create $root_sub_vol/@home
+	mv $root_sub_vol/home/* $root_sub_vol/@home
+	btrfs subvolume create $root_sub_vol/@cache
+	mv $root_sub_vol/var/cache/* $root_sub_vol/@cache
 	
-	btrfs subvolume create @log
-	mv @/var/log/* @log/
-	btrfs subvolume create @tmp
-	btrfs subvolume create @libvirt
+	btrfs subvolume create $root_sub_vol/@log
+	mv $root_sub_vol/var/log/* $root_sub_vol/@log
+	btrfs subvolume create $root_sub_vol/@temp
+	btrfs subvolume create $root_sub_vol/@libvirt
 	
-	btrfs subvolume create @swap
-	btrfs filesystem mkswapfile --size $swap_zize @swap/swapfile
+	btrfs subvolume create $root_sub_vol/@swap
+	btrfs filesystem mkswapfile --size $swap_zize $root_sub_vol/@swap/swapfile
 	find . -maxdepth 1 ! -name "@*" ! -name . -exec rm -Rf {} \;
 	cd /
 	umount $mp
 	echo -e "\e[32mINFO:\e[0mMount @ instead of /"
-	mount /dev/$root_dev -o subvol=@ $mp
+	mount /dev/$root_dev -o subvol=$root_sub_vol $mp
 }
 
 encrypt_and_enlarge() {
@@ -161,7 +163,7 @@ encrypt_and_enlarge() {
 		parted --script /dev/"$disk" resizepart "$partition_number" "100%"
 	fi
 	echo "${PASSPHRASE}" | cryptsetup open /dev/$root_dev root
-	mount /dev/mapper/root -o subvol=@ $mp
+	mount /dev/mapper/root -o subvol=$root_sub_vol $mp
 	btrfs filesystem resize max $mp
 }
 
@@ -217,7 +219,7 @@ setup_snapper(){
 	snapper -c root set-config 'ALLOW_GROUPS=sudo'
 	snapper -c root set-config 'SYNC_ACL=yes'
 	
-	mount -o subvol=@home /dev/mapper/root /home
+	mount -o subvol=$root_sub_vol/@home /dev/mapper/root /home
 	snapper -c home create-config /home
 	
 	snapper -c home set-config 'TIMELINE_CREATE=yes'
@@ -239,16 +241,16 @@ setup_fstab(){
 	root_uuid="$(blkid --output export /dev/$root_dev | grep ^UUID=)"   
 	
 	sed --in-place \
-		"s|^.* / btrfs defaults 0 1\$!$root_uuid / btrfs ${btrfs_options},subvol=@ 0 1|" \
+		"s|^.* / btrfs defaults 0 1\$!$root_uuid / btrfs ${btrfs_options},subvol=${root_sub_vol} 0 1|" \
 		/etc/fstab  
 	
 	cat >> /etc/fstab <<- EOF
-		$root_uuid /home              btrfs $btrfs_options,subvol=@home 0 2
-		$root_uuid /var/log           btrfs $btrfs_options,subvol=@log 0 0 
-		$root_uuid /var/cache         btrfs $btrfs_options,subvol=@cache 0 0
-		$root_uuid /tmp               btrfs $btrfs_options,subvol=@tmp 0 0
-		$root_uuid /var/lib/libvirt/  btrfs defaults,ssd,discard=async,noatime,space_cache=v2,subvol=@libvirt 0 0
-		$root_uuid /swap              btrfs defaults,subvol=@swap 0 0
+		$root_uuid /home              btrfs $btrfs_options,subvol=$root_sub_vol/@home 0 2
+		$root_uuid /var/log           btrfs $btrfs_options,subvol=$root_sub_vol/@log 0 0 
+		$root_uuid /var/cache         btrfs $btrfs_options,subvol=$root_sub_vol/@cache 0 0
+		$root_uuid /tmp               btrfs $btrfs_options,subvol=$root_sub_vol/@tmp 0 0
+		$root_uuid /var/lib/libvirt/  btrfs defaults,ssd,discard=async,noatime,space_cache=v2,subvol=$root_sub_vol/@libvirt 0 0
+		$root_uuid /swap              btrfs defaults,subvol=$root_sub_vol/@swap 0 0
 		/swap/swapfile   none         swap  defaults,ssd,discard=async,noatime 0 0  
 	EOF
 
@@ -261,16 +263,16 @@ setup_fstab_crpttab(){
 	root_uuid="$(blkid --output export /dev/$root_dev | grep ^UUID=)"
 	
 	sed -i \
-		"s|^.* / btrfs defaults 0 1\$|/dev/mapper/root / btrfs ${btrfs_options},subvol=@ 0 1|" \
+		"s|^.* / btrfs defaults 0 1\$|/dev/mapper/root / btrfs ${btrfs_options},subvol=${root_sub_vol} 0 1|" \
 		/etc/fstab  
 	
 	cat >> /etc/fstab <<- EOF
-		/dev/mapper/root /home              btrfs $btrfs_options,subvol=@home 0 2
-		/dev/mapper/root /var/log           btrfs $btrfs_options,subvol=@log 0 0 
-		/dev/mapper/root /var/cache         btrfs $btrfs_options,subvol=@cache 0 0
-		/dev/mapper/root /tmp               btrfs $btrfs_options,subvol=@tmp 0 0
-		/dev/mapper/root /var/lib/libvirt/  btrfs defaults,ssd,discard=async,noatime,space_cache=v2,subvol=@libvirt 0 0
-		/dev/mapper/root /swap              btrfs defaults,subvol=@swap 0 0
+		/dev/mapper/root /home              btrfs $btrfs_options,subvol=$root_sub_vol/@home 0 2
+		/dev/mapper/root /var/log           btrfs $btrfs_options,subvol=$root_sub_vol/@log 0 0 
+		/dev/mapper/root /var/cache         btrfs $btrfs_options,subvol=$root_sub_vol/@cache 0 0
+		/dev/mapper/root /tmp               btrfs $btrfs_options,subvol=$root_sub_vol/@tmp 0 0
+		/dev/mapper/root /var/lib/libvirt/  btrfs defaults,ssd,discard=async,noatime,space_cache=v2,subvol=$root_sub_vol/@libvirt 0 0
+		/dev/mapper/root /swap              btrfs defaults,subvol=$root_sub_vol/@swap 0 0
 		/swap/swapfile   none               swap  defaults,ssd,discard=async,noatime 0 0    
 	EOF
 	
@@ -382,13 +384,13 @@ setup_refind(){
 
 setup_grub(){
 	echo -e "\e[32mINFO:\e[0mInstall $bootloader"
-	if [[ $hide_grub_menu = "yes" ]]; then
-		sed -i 's/^GRUB_TIMEOUT_STYLE=menu$/GRUB_TIMEOUT_STYLE=hidden/' /etc/default/grub
-		sed -i 's/^GRUB_TIMEOUT=10$/GRUB_TIMEOUT=1/' /etc/default/grub
-	else
-		sed -i 's/^GRUB_TIMEOUT_STYLE=hidden$/GRUB_TIMEOUT_STYLE=menu/' /etc/default/grub
-		sed -i 's/^GRUB_TIMEOUT=0$/GRUB_TIMEOUT=10/' /etc/default/grub
-	fi
+	#if [[ $hide_grub_menu = "yes" ]]; then
+	#	sed -i 's/^GRUB_TIMEOUT_STYLE=menu$/GRUB_TIMEOUT_STYLE=hidden/' /etc/default/grub
+	#	sed -i 's/^GRUB_TIMEOUT=10$/GRUB_TIMEOUT=1/' /etc/default/grub
+	#else
+	#	sed -i 's/^GRUB_TIMEOUT_STYLE=hidden$/GRUB_TIMEOUT_STYLE=menu/' /etc/default/grub
+	#	sed -i 's/^GRUB_TIMEOUT=0$/GRUB_TIMEOUT=10/' /etc/default/grub
+	#fi
 
 	#sed -i "s/^GRUB_CMDLINE_LINUX_DEFAULT=\"quiet splash\"$/GRUB_CMDLINE_LINUX_DEFAULT=\"$grub_options\"/" /etc/default/grub
 	
@@ -454,7 +456,7 @@ setup_grub(){
 				cryptomount -u $crypt_uuid
 			fi
 			set root='cryptouuid/$crypt_uuid'
-			set prefix=(\$root)/@/boot/grub
+			set prefix=(\$root)/$root_sub_vol/boot/grub
 			configfile \$prefix/grub.cfg
 		EOF
 
@@ -477,7 +479,7 @@ setup_grub(){
 		if [[ $secure_boot_status = "setup" ]]; then
 
 			sbctl sign /boot/efi/EFI/ubuntu/grubx64.efi
-			
+
 		elif [[ $secure_boot_status = "enabled" ]]; then
 
 			sbsign --key /etc/efikeys/MOK.key \
@@ -514,7 +516,7 @@ setup_grub(){
 				else
 				  search --no-floppy --fs-uuid --set=root $root_btrfs_uuid
 				fi
-				linux   /@/boot/vmlinuz root=UUID=$root_btrfs_uuid ro rootflags=defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1,subvol=@  quiet splash crashkernel=2G-4G:320M,4G-32G:512M,32G-64G:1024M,64G-128G:2048M,128G-:4096M
+				linux   /@/boot/vmlinuz root=UUID=$root_btrfs_uuid ro rootflags=defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1,subvol=$root_sub_vol  quiet splash crashkernel=2G-4G:320M,4G-32G:512M,32G-64G:1024M,64G-128G:2048M,128G-:4096M
 				initrd  /@/boot/initrd.img
 
 				boot
@@ -1001,6 +1003,7 @@ create_subvols
 if [[ $only_subvols = no ]]; then
     encrypt_and_enlarge $root_dev
 fi
+
 prepare_chroot
 chroot_and_mkinitramfs
 unmount_everything
@@ -1010,4 +1013,22 @@ echo "Finished"
 #apt --no-install-recommends -y install btrfs-assistant btrfsmaintenance snapper shim-signed
 #find ~/rescue-iso/custom-* -name grub*.efi -exec sudo sbctl sign -s {} \;
 #sudo dd if=ubuntu-26.04.0-2026.07.31-desktop-amd64.iso of=/dev/$rescue_dev bs=100k status=progress
-
+#menuentry "Ubuntu Linux" {
+#	loader /EFI/direct/grubx64.efi
+#    icon /EFI/refind/themes/refind-theme-regular/icons/256-96/os_ubuntu.png
+#    ostype Linux
+#}
+#
+#menuentry "Ubuntu Linux (Grub-btrfs)" {
+#	loader /EFI/ubuntu/grubx64.efi
+#    icon /EFI/refind/themes/refind-theme-regular/icons/256-96/tool_apple_rescue.png
+#    ostype Linux
+#}
+#
+#menuentry "Ubuntu Linux (Grub-btrfs)" {
+#	volume "Ubuntu 26.04.0 RESCUE amd64"
+#	loader /EFI/boot/bootx64.efi
+#    icon /EFI/refind/themes/refind-theme-regular/icons/256-96/tool_apple_rescue.png
+#    ostype Linux
+#}
+#echo 'Subsystem sftp internal-sftp' | sudo tee -a /etc/ssh/sshd_config >/dev/null
