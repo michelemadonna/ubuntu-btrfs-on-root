@@ -320,10 +320,12 @@ setup_refind(){
 	unzip /tmp/refind_themes.zip -d /boot/efi/EFI/refind/
 
 	cat >> /boot/efi/EFI/refind/refind.conf <<-EOF
+		scanfor external,optical,manual
 		enable_touch
 		enable_mouse
 		use_graphics_for osx,linux
 		include themes/refind-theme-regular/theme.conf
+		
 	EOF
 
 
@@ -343,9 +345,23 @@ setup_refind(){
 
 	cat >> /boot/efi/EFI/refind/refind.conf  <<- EOF
 		menuentry "Ubuntu Linux" {
-			loader /EFI/direct/grubx64.efi
-    	icon /EFI/refind/themes/refind-theme-regular/icons/256-96/os_ubuntu.png
-    	ostype Linux
+			loader /EFI/direct_$suite/grubx64.efi
+			icon /EFI/refind/themes/refind-theme-regular/icons/256-96/os_ubuntu.png
+			ostype Linux
+		}
+
+		menuentry "Ubuntu Linux (Grub-btrfs)" {
+			loader /EFI/$suite/grubx64.efi
+			icon /EFI/refind/themes/refind-theme-regular/icons/256-96/tool_apple_rescue.png
+			ostype Linux
+		}
+
+		menuentry "Ubuntu Linux (Grub-btrfs)" {
+			volume "Ubuntu 26.04.0 RESCUE amd64"
+			loader /EFI/boot/bootx64.efi
+			#icon /EFI/refind/themes/refind-theme-regular/icons/256-96/tool_apple_rescue.png
+			ostype Linux
+			disabled
 		}
 	EOF
 
@@ -424,12 +440,12 @@ setup_grub(){
 		#
 		
 		apt install -y grub-efi-amd64-unsigned
-		rm -R /boot/efi/EFI/ubuntu
+		rm -R /boot/efi/EFI/$suite
 
 		grub-install \
 		   --target=x86_64-efi \
 		   --efi-directory=/boot/efi \
-		   --bootloader-id=ubuntu \
+		   --bootloader-id=$suite \
 		   --no-uefi-secure-boot
 		   
 		objcopy --dump-section .sbat=/boot/grub/SBAT.csv /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed
@@ -445,7 +461,7 @@ setup_grub(){
 		
 		echo -e "\e[32mINFO:\e[0m>>>>>>>> $root_btrfs_uuid"
 
-		cat > /boot/efi/EFI/ubuntu/grub.cfg <<- EOF
+		cat > /boot/efi/EFI/$suite/grub.cfg <<- EOF
 			set feature_default_font_path=
 			loadfont unicode
 
@@ -472,21 +488,21 @@ setup_grub(){
 		#	
 		#EOF
 
-		grub-mkstandalone -v --disable-shim-lock -O x86_64-efi -o /boot/efi/EFI/ubuntu/grubx64.efi --sbat /boot/grub/SBAT.csv "/boot/grub/fonts/unicode.pf2=/boot/grub/fonts/unicode.pf2" \
+		grub-mkstandalone -v --disable-shim-lock -O x86_64-efi -o /boot/efi/EFI/$suite/grubx64.efi --sbat /boot/grub/SBAT.csv "/boot/grub/fonts/unicode.pf2=/boot/grub/fonts/unicode.pf2" \
 				--modules="linux normal terminal efi_gop all_video part_gpt cryptodisk luks2 argon2 gcry_rijndael gcry_sha256 btrfs gfxterm gettext gzio boot loadenv video test luks pbkdf2 gcry_sha512 tpm tpm2_key_protector configfile echo search cpuid efifwsetup raid5rec diskfilter mdraid1x mdraid09 lvm crypto afsplitter gcry_twofish gcry_tiger gcry_hwfeatures gcry_serpent gcry_seed gcry_rsa gcry_rmd160 gcry_rfc2268 gcry_md5 gcry_md4 pubkey mpi gcry_idea gcry_dsa mpi pubkey gcry_keccak gcry_des gcry_camellia gcry_blowfish gcry_arcfour play extcmd zfsinfo zfs zfscrypt gcry_sha1 gcry_rijndael xfs true squash4 xzio lzopio fshelp smbios sleep serial terminfo search_label search_fs_uuid search_fs_file regexp reboot probe png peimage setjmp password_pbkdf2 part_msdos part_apple minicmd memdisk lssal lsefisystab lsefimmap lsefi ls datetime relocator mmap loopback disk keystatus jpeg bufio bitmap iso9660 hfsplus help halt acpi gfxterm_background video_colors bitmap_scale gfxmenu trig font fat ext2 video_fb net procfs key_protector archelp chain efinet priority_queue cat gcry_crc"
 			
 		
 		if [[ $secure_boot_status = "setup" ]]; then
 
-			sbctl sign /boot/efi/EFI/ubuntu/grubx64.efi
+			sbctl sign /boot/efi/EFI/$suite/grubx64.efi
 
 		elif [[ $secure_boot_status = "enabled" ]]; then
 
 			sbsign --key /etc/efikeys/MOK.key \
 				--cert /etc/efikeys/MOK.pem \
-				/boot/efi/EFI/ubuntu/grubx64.efi \
-				--output /boot/efi/EFI/ubuntu/grubx64.efi.signed
-			mv /boot/efi/EFI/ubuntu/grubx64.efi.signed /boot/efi/EFI/ubuntu/grubx64.efi
+				/boot/efi/EFI/$suite/grubx64.efi \
+				--output /boot/efi/EFI/$suite/grubx64.efi.signed
+			mv /boot/efi/EFI/$suite/grubx64.efi.signed /boot/efi/EFI/$suite/grubx64.efi
 
 		fi
 
@@ -494,12 +510,12 @@ setup_grub(){
 
 		if [[ $bootloader = "grub+refind" ]]; then
 			echo -e "\e[32mINFO:\e[0mNow copy existing grubx64.efi for refind to directo boot into the os without the grub menu.."
-			mkdir /boot/efi/EFI/direct
-			cp -R /boot/efi/EFI/ubuntu/* /boot/efi/EFI/direct/
+			mkdir /boot/efi/EFI/direct_$suite
+			cp -R /boot/efi/EFI/$suite/* /boot/efi/EFI/direct_$suite/
 			
 			feature_platform_search_hint="y"
 			
-			cat > /boot/efi/EFI/direct/grub.cfg <<- EOF
+			cat > /boot/efi/EFI/$suite/grub.cfg <<- EOF
 				set feature_default_font_path=
 				loadfont unicode
 	
@@ -673,10 +689,10 @@ seal_luks_disk_tpm_unlock_to_secure_boot(){
 	
 	
 	cd ~
-	if [[ -f /boot/efi/EFI/ubuntu/sealed.tpm ]]; then
+	if [[ -f /boot/efi/EFI/$suite/sealed.tpm ]]; then
 		
-		rm /boot/efi/EFI/ubuntu/sealed.tpm
-		grub-protect --action=add --protector=tpm2  --tpm2key --tpm2-keyfile=/etc/luks-key/luks-key-grub --tpm2-outfile=/boot/efi/EFI/ubuntu/sealed.tpm --tpm2-pcrs=7
+		rm /boot/efi/EFI/$suite/sealed.tpm
+		grub-protect --action=add --protector=tpm2  --tpm2key --tpm2-keyfile=/etc/luks-key/luks-key-grub --tpm2-outfile=/boot/efi/EFI/$suite/sealed.tpm --tpm2-pcrs=7
 	else
 		mkdir /etc/luks-key
 		dd if=/dev/urandom of=/etc/luks-key/luks-key-grub bs=1 count=32
