@@ -449,8 +449,8 @@ setup_grub(){
 			set feature_default_font_path=
 			loadfont unicode
 
-			if [ -e "$grub_efi_dev/EFI/ubuntu/sealed.tpm" ]; then
-				tpm2_key_protector_init --tpm2key=$grub_efi_dev/EFI/ubuntu/sealed.tpm
+			if [ -e "$grub_efi_dev/EFI/$suite/sealed.tpm" ]; then
+				tpm2_key_protector_init --tpm2key=$grub_efi_dev/EFI/$suite/sealed.tpm
 				cryptomount -u $crypt_uuid -P tpm2
 			else
 				cryptomount -u $crypt_uuid
@@ -503,8 +503,8 @@ setup_grub(){
 				set feature_default_font_path=
 				loadfont unicode
 	
-				if [ -e "$grub_efi_dev/EFI/ubuntu/sealed.tpm" ]; then
-					tpm2_key_protector_init --tpm2key=$grub_efi_dev/EFI/ubuntu/sealed.tpm
+				if [ -e "$grub_efi_dev/EFI/$suite/sealed.tpm" ]; then
+					tpm2_key_protector_init --tpm2key=$grub_efi_dev/EFI/$suite/sealed.tpm
 					cryptomount -u $crypt_uuid -P tpm2
 				else
 					cryptomount -u $crypt_uuid
@@ -682,7 +682,7 @@ seal_luks_disk_tpm_unlock_to_secure_boot(){
 		dd if=/dev/urandom of=/etc/luks-key/luks-key-grub bs=1 count=32
 		chmod 0400 /etc/luks-key/luks-key-grub
 		cryptsetup luksAddKey /dev/$root_dev /etc/luks-key/luks-key-grub --pbkdf=pbkdf2 --hash=sha512
-		grub-protect --action=add --protector=tpm2  --tpm2key --tpm2-keyfile=/etc/luks-key/luks-key-grub --tpm2-outfile=/boot/efi/EFI/ubuntu/sealed.tpm --tpm2-pcrs=7
+		grub-protect --action=add --protector=tpm2  --tpm2key --tpm2-keyfile=/etc/luks-key/luks-key-grub --tpm2-outfile=/boot/efi/EFI/$suite/sealed.tpm --tpm2-pcrs=7
 	fi
 
 	cd /
