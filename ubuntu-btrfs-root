@@ -133,9 +133,11 @@ create_subvols() {
 	
 	btrfs subvolume create $root_sub_vol/@log
 	mv $root_sub_vol/var/log/* $root_sub_vol/@log
+	
 	btrfs subvolume create $root_sub_vol/@tmp
 	btrfs subvolume create $root_sub_vol/@libvirt
-	
+	btrfs subvolume create $root_sub_vol/@docker
+
 	btrfs subvolume create $root_sub_vol/@swap
 	btrfs filesystem mkswapfile --size $swap_zize $root_sub_vol/@swap/swapfile
 	find . -maxdepth 1 ! -name "@*" ! -name . -exec rm -Rf {} \;
