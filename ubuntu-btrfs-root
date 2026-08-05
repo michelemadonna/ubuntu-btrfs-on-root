@@ -250,6 +250,7 @@ setup_fstab(){
 		$root_uuid /var/cache         btrfs $btrfs_options,subvol=$root_sub_vol/@cache 0 0
 		$root_uuid /tmp               btrfs $btrfs_options,subvol=$root_sub_vol/@tmp 0 0
 		$root_uuid /var/lib/libvirt/  btrfs defaults,ssd,discard=async,noatime,space_cache=v2,subvol=$root_sub_vol/@libvirt 0 0
+		$root_uuid /var/lib/docker		btrfs  defaults,ssd,discard=async,noatime,compress=zstd:1,subvol=$root_sub_vol/@docker  0 0
 		$root_uuid /swap              btrfs defaults,subvol=$root_sub_vol/@swap 0 0
 		/swap/swapfile   none         swap  defaults,ssd,discard=async,noatime 0 0  
 	EOF
@@ -272,6 +273,7 @@ setup_fstab_crpttab(){
 		/dev/mapper/root /var/cache         btrfs $btrfs_options,subvol=$root_sub_vol/@cache 0 0
 		/dev/mapper/root /tmp               btrfs $btrfs_options,subvol=$root_sub_vol/@tmp 0 0
 		/dev/mapper/root /var/lib/libvirt/  btrfs defaults,ssd,discard=async,noatime,space_cache=v2,subvol=$root_sub_vol/@libvirt 0 0
+		/dev/mapper/root /var/lib/docker		btrfs	defaults,ssd,discard=async,noatime,compress=zstd:1,subvol=$root_sub_vol/@docker  0 0
 		/dev/mapper/root /swap              btrfs defaults,subvol=$root_sub_vol/@swap 0 0
 		/swap/swapfile   none               swap  defaults,ssd,discard=async,noatime 0 0    
 	EOF
@@ -488,7 +490,7 @@ setup_grub(){
 		#	
 		#EOF
 
-		grub-mkstandalone -v --disable-shim-lock -O x86_64-efi -o /boot/efi/EFI/$suite/grubx64.efi --sbat /boot/grub/SBAT.csv "/boot/grub/fonts/unicode.pf2=/boot/grub/fonts/unicode.pf2" \
+		grub-mkstandalone -v --disable-shim-lock -O x86_64-efi -o /boot/efi/EFI/$suite/grubx64.efi --sbat /boot/grub/SBAT.csv "/boot/grub=/boot/grub" \
 				--modules="linux normal terminal efi_gop all_video part_gpt cryptodisk luks2 argon2 gcry_rijndael gcry_sha256 btrfs gfxterm gettext gzio boot loadenv video test luks pbkdf2 gcry_sha512 tpm tpm2_key_protector configfile echo search cpuid efifwsetup raid5rec diskfilter mdraid1x mdraid09 lvm crypto afsplitter gcry_twofish gcry_tiger gcry_hwfeatures gcry_serpent gcry_seed gcry_rsa gcry_rmd160 gcry_rfc2268 gcry_md5 gcry_md4 pubkey mpi gcry_idea gcry_dsa mpi pubkey gcry_keccak gcry_des gcry_camellia gcry_blowfish gcry_arcfour play extcmd zfsinfo zfs zfscrypt gcry_sha1 gcry_rijndael xfs true squash4 xzio lzopio fshelp smbios sleep serial terminfo search_label search_fs_uuid search_fs_file regexp reboot probe png peimage setjmp password_pbkdf2 part_msdos part_apple minicmd memdisk lssal lsefisystab lsefimmap lsefi ls datetime relocator mmap loopback disk keystatus jpeg bufio bitmap iso9660 hfsplus help halt acpi gfxterm_background video_colors bitmap_scale gfxmenu trig font fat ext2 video_fb net procfs key_protector archelp chain efinet priority_queue cat gcry_crc"
 			
 		
@@ -789,7 +791,7 @@ if [[ "$1" = "//inner" ]]; then
 	
 	if [[ -n $boot_dev ]]; then
 		echo -e "\e[32mINFO:\e[0mConfig Boot partition separated"
-		e2label /dev/"$boot_dev" "BOOT_UBUNTU"
+		e2label /dev/"$boot_dev" "BOOT_$suite"
 		
 		if [[ $only_subvols  = "yes" ]]; then
 			 echo -e "\e[32mINFO:\e[0mConfig NON Encrypt"
