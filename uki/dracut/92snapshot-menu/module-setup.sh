@@ -27,27 +27,15 @@ install() {
         stty \
         touch
 
-    #
-    # NON CAMBIARE:
-    # la validazione UKI si aspetta /usr/libexec/snapshot-menu
-    #
     inst_simple \
         "$moddir/snapshot-menu.sh" \
         "/usr/libexec/snapshot-menu"
 
-    #
-    # NON CAMBIARE:
-    # la validazione UKI si aspetta /etc/snapshot-menu.conf
-    #
     inst_simple \
-        "$moddir/snapshot-menu.conf" \
-        "/etc/snapshot-menu.conf"
+            "$moddir/snapshot-menu.conf" \
+            "/etc/snapshot-menu.conf"
+    
 
-    #
-    # Deve precedere:
-    #
-    # 70overlayfs -> pre-mount 01
-    #
     inst_hook \
         pre-mount \
         00 \

@@ -9,14 +9,14 @@ SNAPSHOT_SELECTION="/run/snapshot-menu-selected"
 
 #
 # Dracut hooks are sourced.
-# Mai usare exit in questo script.
+# Never use exit here.
 #
 
 [ -e "$SNAPSHOT_MENU_DONE" ] && return 0
 
 #
 # ------------------------------------------------------------
-# Configuration
+# Load configuration
 # ------------------------------------------------------------
 #
 
@@ -29,7 +29,7 @@ fi
 
 #
 # ------------------------------------------------------------
-# Determine unlocked root block device
+# Determine unlocked root device
 # ------------------------------------------------------------
 #
 
@@ -40,7 +40,7 @@ if [ -e /dev/root ]; then
 fi
 
 #
-# Fallback.
+# Fallback to Dracut's root variable.
 #
 if [ -z "$root_dev" ] && [ -n "${root:-}" ]; then
 
@@ -59,14 +59,15 @@ if [ -z "$root_dev" ] && [ -n "${root:-}" ]; then
 fi
 
 #
-# LUKS/root device not ready yet.
+# At pre-mount the LUKS mapper should already be available.
+# If not, don't mark the hook as completed.
 #
 if [ -z "$root_dev" ] || [ ! -b "$root_dev" ]; then
     return 0
 fi
 
 #
-# Execute menu only once.
+# From this point onward execute only once.
 #
 touch "$SNAPSHOT_MENU_DONE"
 
@@ -78,19 +79,22 @@ touch "$SNAPSHOT_MENU_DONE"
 
 plymouth_active=0
 
-if command -v plymouth >/dev/null 2>&1 &&
-   plymouth --ping >/dev/null 2>&1; then
+if command -v plymouth >/dev/null 2>&1; then
 
-    plymouth_active=1
+    if plymouth --ping >/dev/null 2>&1; then
 
-    plymouth hide-splash \
-        >/dev/null 2>&1 || :
+        plymouth_active=1
+
+        plymouth hide-splash \
+            >/dev/null 2>&1 || :
+
+    fi
 
 fi
 
 #
 # ------------------------------------------------------------
-# Console
+# Switch to the menu VT
 # ------------------------------------------------------------
 #
 
@@ -99,8 +103,7 @@ menu_tty="${TTY:-/dev/tty1}"
 if [ "$menu_tty" = "/dev/tty1" ] &&
    [ -c /dev/tty1 ]; then
 
-    chvt 1 \
-        >/dev/null 2>&1 || :
+    chvt 1 >/dev/null 2>&1 || :
 
 fi
 
@@ -115,7 +118,7 @@ fi
 
 #
 # ------------------------------------------------------------
-# Menu
+# Run menu
 # ------------------------------------------------------------
 #
 
@@ -134,7 +137,7 @@ fi
 
 #
 # ------------------------------------------------------------
-# Snapshot boot
+# Apply selected Btrfs subvolume
 # ------------------------------------------------------------
 #
 
@@ -145,57 +148,62 @@ if [ "$menu_rc" -eq 0 ] &&
 
     if [ -n "$selected_subvol" ]; then
 
-        info "snapshot-menu: selected root: $selected_subvol"
+        #
+        # rflags contains the options rootfs-block will use
+        # for the real root mount.
+        #
+        # Keep every existing option except:
+        #
+        #   subvol=
+        #   subvolid=
+        #
+        # and then add our selected subvolume.
+        #
 
-        #
-        # Current system:
-        #
-        # Leave root completely untouched and let the normal
-        # dracut/systemd root mount continue.
-        #
-        if [ "$selected_subvol" = "$ROOT_SUBVOL" ]; then
+        old_rflags="${rflags:-}"
+        new_rflags=""
 
-            info "snapshot-menu: normal root boot"
+        old_ifs="$IFS"
+        IFS=','
+
+        for opt in $old_rflags; do
+
+            case "$opt" in
+
+                subvol=*|subvolid=*)
+                    ;;
+
+                "")
+                    ;;
+
+                *)
+                    if [ -n "$new_rflags" ]; then
+                        new_rflags="${new_rflags},${opt}"
+                    else
+                        new_rflags="$opt"
+                    fi
+                    ;;
+
+            esac
+
+        done
+
+        IFS="$old_ifs"
+
+        if [ -n "$new_rflags" ]; then
+
+            rflags="${new_rflags},subvol=${selected_subvol}"
 
         else
 
-            #
-            # Snapshot boot.
-            #
-            # rd.overlay=1 has already been added by snapshot-menu.
-            #
-            # Mount the selected snapshot directly as NEWROOT.
-            #
-            # Snapshot is explicitly RO; overlayfs will provide
-            # the writable volatile layer.
-            #
-
-            info "snapshot-menu: mounting snapshot $selected_subvol"
-
-            mkdir -p "$NEWROOT"
-
-            if ! mount \
-                -t btrfs \
-                -o "ro,subvol=${selected_subvol}" \
-                "$root_dev" \
-                "$NEWROOT"
-            then
-
-                warn "snapshot-menu: cannot mount selected snapshot"
-
-                #
-                # Do not leave overlay enabled if snapshot mount failed.
-                #
-                rm -f "$SNAPSHOT_CMDLINE"
-
-            else
-
-                info "snapshot-menu: snapshot mounted on $NEWROOT"
-                info "snapshot-menu: overlay enabled"
-
-            fi
+            rflags="subvol=${selected_subvol}"
 
         fi
+
+        export rflags
+
+        info "snapshot-menu: selected ${selected_subvol}"
+        info "snapshot-menu: rflags=${rflags}"
 
     fi
 
@@ -203,7 +211,7 @@ fi
 
 #
 # ------------------------------------------------------------
-# Plymouth
+# Restore Plymouth
 # ------------------------------------------------------------
 #
 
@@ -222,11 +230,17 @@ if [ "$plymouth_active" -eq 1 ]; then
 fi
 
 if [ "$menu_rc" -ne 0 ]; then
-    warn "snapshot-menu: menu failed; continuing normal boot"
+
+    warn "snapshot-menu: menu failed; using normal root"
+
 fi
 
 unset root_dev
 unset selected_subvol
+unset old_rflags
+unset new_rflags
+unset old_ifs
+unset opt
 unset menu_tty
 unset menu_rc
 unset plymouth_active
