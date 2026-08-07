@@ -1,535 +1,520 @@
-#!/bin/sh
+#!/bin/bash
+
 set -u
 
-PATH=/usr/sbin:/usr/bin:/sbin:/bin
-export PATH TERM=linux
+CONFIG="/etc/snapshot-menu.conf"
 
-. /etc/snapshot-menu.conf
+#
+# ------------------------------------------------------------
+# Defaults
+# ------------------------------------------------------------
+#
 
-STATE_DIR="/run/snapshot-menu"
-BTRFS_TOP="${STATE_DIR}/top"
-MENU_FILE="${STATE_DIR}/menu"
-DETAIL_FILE="${STATE_DIR}/details"
-CONSOLE="/dev/console"
+ROOT_SUBVOL="@ubuntu"
+SNAPSHOT_DIR=".snapshots"
 
-mkdir -p "$STATE_DIR" "$BTRFS_TOP"
+TTY="/dev/tty1"
 
-log() {
-    printf '[snapshot-menu] %s\n' "$*" >"$CONSOLE"
-}
+MOUNTPOINT="/run/snapshot-menu-root"
+RESULT="/run/snapshot-menu-selected"
 
-sanitize() {
-    printf '%s' "$1" |
-        tr '\n\r\t' '   ' |
-        sed -e 's/[[:space:]][[:space:]]*/ /g' \
-            -e 's/^ *//' \
-            -e 's/ *$//'
-}
+#
+# ------------------------------------------------------------
+# Read configuration
+# ------------------------------------------------------------
+#
 
-xml_unescape() {
-    sed -e 's/&amp;/\&/g' \
-        -e 's/&lt;/</g' \
-        -e 's/&gt;/>/g' \
-        -e 's/&quot;/"/g' \
-        -e "s/&apos;/'/g"
-}
+if [[ -r "$CONFIG" ]]; then
 
-xml_value() {
-    file="$1"
-    tag="$2"
+    # shellcheck disable=SC1090
+    source "$CONFIG"
 
-    sed -n "s:.*<${tag}>\(.*\)</${tag}>.*:\1:p" "$file" |
-        head -n 1 |
-        xml_unescape
-}
+fi
 
-xml_userdata() {
-    file="$1"
+#
+# ------------------------------------------------------------
+# Root device
+# ------------------------------------------------------------
+#
 
-    awk '
-        /<userdata>/ {
-            active=1
-            next
-        }
+ROOT_DEV="${1:-}"
 
-        /<\/userdata>/ {
-            exit
-        }
+if [[ -z "$ROOT_DEV" ]]; then
+    exit 1
+fi
 
-        active {
-            print
-        }
-    ' "$file" |
-        sed -e 's/<entry>//g' \
-            -e 's/<\/entry>/ /g' \
-            -e 's/<key>//g' \
-            -e 's/<\/key>/=/g' \
-            -e 's/<value>//g' \
-            -e 's/<\/value>/ /g' \
-            -e 's/<[^>]*>//g' |
-        xml_unescape |
-        tr '\n\r\t' '   ' |
-        sed -e 's/[[:space:]][[:space:]]*/ /g' \
-            -e 's/^ *//' \
-            -e 's/ *$//'
-}
+if [[ ! -b "$ROOT_DEV" ]]; then
+    exit 1
+fi
 
-cmdline_value() {
-    wanted="$1"
-    value=""
+#
+# tty1 normally exists in initrd.
+# Fall back to console if necessary.
+#
+if [[ ! -c "$TTY" ]]; then
+    TTY="/dev/console"
+fi
 
-    for item in $(cat /proc/cmdline); do
-        case "$item" in
-            "$wanted"=*)
-                value="${item#*=}"
-                ;;
-        esac
-    done
+mkdir -p "$MOUNTPOINT"
 
-    printf '%s\n' "$value"
-}
+#
+# ------------------------------------------------------------
+# Open terminal
+#
+# FD 3 is used for BOTH input and output.
+# ------------------------------------------------------------
+#
 
-resolve_root_device() {
-    if [ -n "${ROOT_DEVICE:-}" ] && [ -b "$ROOT_DEVICE" ]; then
-        printf '%s\n' "$ROOT_DEVICE"
-        return 0
+exec 3<>"$TTY"
+
+mounted=0
+
+#
+# ------------------------------------------------------------
+# Cleanup
+# ------------------------------------------------------------
+#
+
+cleanup() {
+
+    #
+    # Restore cursor.
+    #
+    printf '\033[?25h' >&3 2>/dev/null || true
+
+    #
+    # Restore sane terminal state.
+    #
+    stty sane <&3 2>/dev/null || true
+
+    #
+    # Remove temporary Btrfs mount.
+    #
+    if (( mounted )); then
+
+        umount "$MOUNTPOINT" \
+            >/dev/null 2>&1 || true
+
     fi
 
-    root_arg="$(cmdline_value root)"
+    exec 3>&- 2>/dev/null || true
+}
 
-    case "$root_arg" in
-        block:*)
-            root_arg="${root_arg#block:}"
-            ;;
-    esac
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 
-    case "$root_arg" in
-        UUID=*|LABEL=*|PARTUUID=*|PARTLABEL=*)
-            blkid -l -t "$root_arg" -o device 2>/dev/null |
+#
+# ------------------------------------------------------------
+# Mount Btrfs top-level
+# ------------------------------------------------------------
+#
+
+if ! mount \
+    -t btrfs \
+    -o ro,subvolid=5 \
+    "$ROOT_DEV" \
+    "$MOUNTPOINT"
+then
+
+    printf '\nUnable to mount Btrfs root: %s\n' \
+        "$ROOT_DEV" >&3
+
+    sleep 2
+
+    exit 1
+fi
+
+mounted=1
+
+SNAPDIR="${MOUNTPOINT}/${ROOT_SUBVOL}/${SNAPSHOT_DIR}"
+
+#
+# ------------------------------------------------------------
+# Menu entries
+# ------------------------------------------------------------
+#
+
+declare -a SUBVOLS
+declare -a LABELS
+
+SUBVOLS=()
+LABELS=()
+
+#
+# First entry = normal root.
+#
+SUBVOLS+=(
+    "$ROOT_SUBVOL"
+)
+
+LABELS+=(
+    "Ubuntu - current system"
+)
+
+#
+# ------------------------------------------------------------
+# Read Snapper snapshots
+# ------------------------------------------------------------
+#
+
+if [[ -d "$SNAPDIR" ]]; then
+
+    while IFS= read -r snap; do
+
+        [[ -n "$snap" ]] ||
+            continue
+
+        [[ "$snap" =~ ^[0-9]+$ ]] ||
+            continue
+
+        snapshot="${SNAPDIR}/${snap}/snapshot"
+        info="${SNAPDIR}/${snap}/info.xml"
+
+        [[ -d "$snapshot" ]] ||
+            continue
+
+        description=""
+        date=""
+
+        #
+        # Read Snapper metadata.
+        #
+        if [[ -r "$info" ]]; then
+
+            description="$(
+                sed -n \
+                    's:.*<description>\(.*\)</description>.*:\1:p' \
+                    "$info" |
                 head -n 1
+            )"
+
+            date="$(
+                sed -n \
+                    's:.*<date>\(.*\)</date>.*:\1:p' \
+                    "$info" |
+                head -n 1
+            )"
+
+        fi
+
+        if [[ -z "$description" ]]; then
+            description="Snapshot"
+        fi
+
+        #
+        # Path relative to Btrfs top-level.
+        #
+        SUBVOLS+=(
+            "${ROOT_SUBVOL}/${SNAPSHOT_DIR}/${snap}/snapshot"
+        )
+
+        if [[ -n "$date" ]]; then
+
+            LABELS+=(
+                "#${snap}   ${date}   ${description}"
+            )
+
+        else
+
+            LABELS+=(
+                "#${snap}   ${description}"
+            )
+
+        fi
+
+    done < <(
+
+        #
+        # Numeric snapshot directories,
+        # newest first.
+        #
+        for path in "$SNAPDIR"/*; do
+
+            [[ -d "$path" ]] ||
+                continue
+
+            snap="${path##*/}"
+
+            [[ "$snap" =~ ^[0-9]+$ ]] ||
+                continue
+
+            printf '%s\n' "$snap"
+
+        done | sort -rn
+
+    )
+
+fi
+
+COUNT=${#SUBVOLS[@]}
+
+#
+# ------------------------------------------------------------
+# Configure terminal
+# ------------------------------------------------------------
+#
+
+stty \
+    -echo \
+    -icanon \
+    min 1 \
+    time 0 \
+    <&3
+
+#
+# Hide cursor.
+#
+printf '\033[?25l' >&3
+
+selected=0
+
+#
+# ------------------------------------------------------------
+# Draw menu
+# ------------------------------------------------------------
+#
+
+draw_menu() {
+
+    local i
+
+    #
+    # Clear screen + cursor home.
+    #
+    printf '\033[2J\033[H' >&3
+
+    #
+    # Header.
+    #
+    printf '\033[1;36m' >&3
+    printf 'Ubuntu Snapshot Boot\n' >&3
+    printf '\033[0m' >&3
+
+    printf '\n' >&3
+
+    printf 'Select root filesystem:\n\n' >&3
+
+    #
+    # Entries.
+    #
+    for ((i = 0; i < COUNT; i++)); do
+
+        if (( i == selected )); then
+
+            #
+            # Selected entry: reverse video.
+            #
+            printf '\033[7m' >&3
+
+            printf ' > %-74s' \
+                "${LABELS[$i]}" >&3
+
+            printf '\033[0m\n' >&3
+
+        else
+
+            printf '   %-74s\n' \
+                "${LABELS[$i]}" >&3
+
+        fi
+
+    done
+
+    printf '\n' >&3
+
+    printf '\033[2m' >&3
+    printf 'Up/Down: select    Enter: boot    j/k: select\n' >&3
+    printf '\033[0m' >&3
+}
+
+#
+# ------------------------------------------------------------
+# Keyboard
+# ------------------------------------------------------------
+#
+
+read_key() {
+
+    local key=""
+    local seq=""
+
+    #
+    # Read exactly ONE key.
+    #
+    # This is intentionally blocking because the menu
+    # remains visible until the user chooses an entry.
+    #
+    IFS= read \
+        -r \
+        -s \
+        -n 1 \
+        -u 3 \
+        key || true
+
+    case "$key" in
+
+        $'\e')
+
+            #
+            # ANSI cursor keys:
+            #
+            # UP    ESC [ A
+            # DOWN  ESC [ B
+            # RIGHT ESC [ C
+            # LEFT  ESC [ D
+            #
+            # The remaining bytes have a timeout.
+            # Therefore an incomplete ESC sequence cannot
+            # leave us blocked as happened with dd.
+            #
+            seq=""
+
+            IFS= read \
+                -r \
+                -s \
+                -n 2 \
+                -t 0.15 \
+                -u 3 \
+                seq || true
+
+            case "$seq" in
+
+                '[A')
+                    printf '%s' "UP"
+                    ;;
+
+                '[B')
+                    printf '%s' "DOWN"
+                    ;;
+
+                '[C')
+                    printf '%s' "RIGHT"
+                    ;;
+
+                '[D')
+                    printf '%s' "LEFT"
+                    ;;
+
+                *)
+                    printf '%s' "ESC"
+                    ;;
+
+            esac
             ;;
 
-        /dev/*)
-            printf '%s\n' "$root_arg"
+        "")
+
+            #
+            # Enter.
+            #
+            printf '%s' "ENTER"
+            ;;
+
+        j|J)
+
+            printf '%s' "DOWN"
+            ;;
+
+        k|K)
+
+            printf '%s' "UP"
             ;;
 
         *)
-            return 1
+
+            printf '%s' "OTHER"
             ;;
+
     esac
 }
 
-snapshot_rootflags() {
-    selected="$1"
-    original="$(cmdline_value rootflags)"
+#
+# ------------------------------------------------------------
+# Main loop
+# ------------------------------------------------------------
+#
 
-    filtered="$(
-        printf '%s\n' "$original" |
-            tr ',' '\n' |
-            awk '
-                /^subvol=/ || /^subvolid=/ || /^ro$/ || /^rw$/ {
-                    next
-                }
+draw_menu
 
-                NF && !seen[$0]++ {
-                    if (out != "")
-                        out=out ","
+while true; do
 
-                    out=out $0
-                }
+    key="$(read_key)"
 
-                END {
-                    print out
-                }
-            '
-    )"
+    case "$key" in
 
-    if [ -n "$filtered" ]; then
-        printf '%s,subvol=%s,ro\n' "$filtered" "$selected"
-    else
-        printf 'subvol=%s,ro\n' "$selected"
-    fi
-}
+        UP)
 
-b_pressed() {
-    tty="${MENU_TTY:-/dev/tty1}"
-    [ -c "$tty" ] || tty="$CONSOLE"
+            if (( selected > 0 )); then
 
-    old_stty="$(stty -g <"$tty" 2>/dev/null || true)"
+                ((selected--))
 
-    stty -echo -icanon min 0 time 1 <"$tty" 2>/dev/null ||
-        return 1
+            else
 
-    count=0
-    result=1
+                selected=$((COUNT - 1))
 
-    while [ "$count" -lt "${KEY_TIMEOUT_DS:-20}" ]; do
-        key="$(dd if="$tty" bs=1 count=1 2>/dev/null)"
-
-        case "$key" in
-            b|B)
-                result=0
-                break
-                ;;
-        esac
-
-        count=$((count + 1))
-    done
-
-    if [ -n "$old_stty" ]; then
-        stty "$old_stty" <"$tty" 2>/dev/null || true
-    else
-        stty sane <"$tty" 2>/dev/null || true
-    fi
-
-    return "$result"
-}
-
-prepare_console() {
-    PREVIOUS_VT="$(fgconsole 2>/dev/null || printf '1')"
-    PLYMOUTH_ACTIVE="no"
-
-    if [ "${PLYMOUTH_INTEGRATION:-yes}" = "yes" ] &&
-       command -v plymouth >/dev/null 2>&1 &&
-       plymouth --ping >/dev/null 2>&1; then
-        PLYMOUTH_ACTIVE="yes"
-
-        plymouth pause-progress >/dev/null 2>&1 || true
-        plymouth hide-splash >/dev/null 2>&1 || true
-    fi
-
-    chvt "${MENU_VT:-1}" >/dev/null 2>&1 || true
-    sleep 1
-
-    stty sane <"${MENU_TTY:-/dev/tty1}" 2>/dev/null || true
-
-    setterm \
-        --cursor on \
-        --blank 0 \
-        >"${MENU_TTY:-/dev/tty1}" \
-        2>/dev/null ||
-        true
-
-    clear >"${MENU_TTY:-/dev/tty1}" 2>/dev/null || true
-}
-
-restore_console() {
-    tty="${MENU_TTY:-/dev/tty1}"
-
-    clear >"$tty" 2>/dev/null || true
-    setterm --cursor off >"$tty" 2>/dev/null || true
-
-    if [ "${PREVIOUS_VT:-1}" != "${MENU_VT:-1}" ]; then
-        chvt "$PREVIOUS_VT" >/dev/null 2>&1 || true
-    fi
-
-    if [ "${PLYMOUTH_ACTIVE:-no}" = "yes" ]; then
-        plymouth show-splash >/dev/null 2>&1 || true
-        plymouth unpause-progress >/dev/null 2>&1 || true
-    fi
-}
-
-kernel_status() {
-    snapshot="$1"
-    version="$2"
-
-    if [ -d "$snapshot/usr/lib/modules/$version" ] ||
-       [ -d "$snapshot/lib/modules/$version" ]; then
-        printf 'OK\n'
-    else
-        printf 'MISSING\n'
-    fi
-}
-
-build_menu() {
-    kernel="$1"
-    snapshots="${BTRFS_TOP}/${NORMAL_ROOT_SUBVOL}/${SNAPSHOT_DIRECTORY}"
-
-    : >"$MENU_FILE"
-    : >"$DETAIL_FILE"
-
-    [ -d "$snapshots" ] || return 1
-
-    numbers="$(
-        find "$snapshots" \
-            -mindepth 1 \
-            -maxdepth 1 \
-            -type d \
-            -printf '%f\n' |
-            grep '^[0-9][0-9]*$'
-    )"
-
-    if [ "${NEWEST_FIRST:-yes}" = "yes" ]; then
-        numbers="$(
-            printf '%s\n' "$numbers" |
-                sort -rn |
-                head -n "${MAX_SNAPSHOTS:-100}"
-        )"
-    else
-        numbers="$(
-            printf '%s\n' "$numbers" |
-                sort -n |
-                head -n "${MAX_SNAPSHOTS:-100}"
-        )"
-    fi
-
-    [ -n "$numbers" ] || return 1
-
-    printf '%s\n' "$numbers" |
-    while IFS= read -r number; do
-        directory="${snapshots}/${number}"
-        snapshot="${directory}/snapshot"
-        info="${directory}/info.xml"
-
-        [ -d "$snapshot" ] || continue
-
-        type="-"
-        pre_number="-"
-        date_value="-"
-        user_value="-"
-        cleanup_value="-"
-        description_value="-"
-        userdata_value="-"
-
-        if [ -r "$info" ]; then
-            type="$(xml_value "$info" type)"
-            pre_number="$(xml_value "$info" pre-number)"
-            date_value="$(xml_value "$info" date)"
-            user_value="$(xml_value "$info" user)"
-            cleanup_value="$(xml_value "$info" cleanup)"
-            description_value="$(xml_value "$info" description)"
-            userdata_value="$(xml_userdata "$info")"
-        fi
-
-        type="$(sanitize "${type:--}")"
-        pre_number="$(sanitize "${pre_number:--}")"
-        date_value="$(sanitize "${date_value:--}")"
-        user_value="$(sanitize "${user_value:--}")"
-        cleanup_value="$(sanitize "${cleanup_value:--}")"
-        description_value="$(sanitize "${description_value:--}")"
-        userdata_value="$(sanitize "${userdata_value:--}")"
-        status="$(kernel_status "$snapshot" "$kernel")"
-
-        if [ "$status" = "OK" ]; then
-            marker="[kernel OK]"
-        else
-            marker="[KERNEL MISSING]"
-        fi
-
-        short_description="$description_value"
-
-        if [ "${#short_description}" -gt 46 ]; then
-            short_description="$(printf '%.43s...' "$short_description")"
-        fi
-
-        printf '%s\n%s\n' \
-            "$number" \
-            "$marker | $date_value | $type | $short_description" \
-            >>"$MENU_FILE"
-
-        {
-            printf 'NUMBER=%s\n' "$number"
-            printf 'TYPE=%s\n' "$type"
-            printf 'PRE_NUMBER=%s\n' "$pre_number"
-            printf 'DATE=%s\n' "$date_value"
-            printf 'USER=%s\n' "$user_value"
-            printf 'CLEANUP=%s\n' "$cleanup_value"
-            printf 'DESCRIPTION=%s\n' "$description_value"
-            printf 'USERDATA=%s\n' "$userdata_value"
-            printf 'KERNEL_STATUS=%s\n' "$status"
-            printf '%s\n' "---"
-        } >>"$DETAIL_FILE"
-    done
-
-    [ -s "$MENU_FILE" ]
-}
-
-detail() {
-    selected="$1"
-    key="$2"
-
-    awk -v selected="$selected" -v key="$key" '
-        $0 == "NUMBER=" selected {
-            active=1
-        }
-
-        active && index($0, key "=") == 1 {
-            sub("^" key "=", "")
-            print
-            exit
-        }
-
-        active && $0 == "---" {
-            exit
-        }
-    ' "$DETAIL_FILE"
-}
-
-show_menu() {
-    kernel="$1"
-    tty="${MENU_TTY:-/dev/tty1}"
-
-    set -- \
-        --clear \
-        --title "Snapshot boot - Snapper ${SNAPPER_CONFIG}" \
-        --backtitle "UKI ${kernel} | Arrow keys: navigate | Enter: select | Esc: normal boot" \
-        --cancel-label "Normal boot" \
-        --menu "Select a snapshot:" \
-        26 116 18
-
-    while IFS= read -r tag && IFS= read -r text; do
-        set -- "$@" "$tag" "$text"
-    done <"$MENU_FILE"
-
-    dialog "$@" <"$tty" 2>&1 1>"$tty"
-}
-
-confirm_snapshot() {
-    selected="$1"
-    kernel="$2"
-    tty="${MENU_TTY:-/dev/tty1}"
-    status="$(detail "$selected" KERNEL_STATUS)"
-
-    if [ "$status" = "OK" ]; then
-        kernel_line="UKI kernel ${kernel}: module directory found"
-    else
-        kernel_line="WARNING: /usr/lib/modules/${kernel} is missing"
-    fi
-
-    message="Number:         ${selected}
-Type:           $(detail "$selected" TYPE)
-Pre-number:     $(detail "$selected" PRE_NUMBER)
-Date:           $(detail "$selected" DATE)
-User:           $(detail "$selected" USER)
-Cleanup:        $(detail "$selected" CLEANUP)
-Description:    $(detail "$selected" DESCRIPTION)
-Userdata:       $(detail "$selected" USERDATA)
-
-${kernel_line}
-
-The snapshot will be mounted read-only.
-The existing Dracut overlay module will provide the writable layer."
-
-    if [ "$status" != "OK" ] &&
-       [ "${REQUIRE_MATCHING_KERNEL:-no}" = "yes" ]; then
-        dialog \
-            --title "Incompatible snapshot" \
-            --msgbox "$message
-
-Boot is blocked by the current configuration." \
-            25 90 \
-            <"$tty" \
-            >"$tty" \
-            2>"$tty"
-
-        return 1
-    fi
-
-    dialog \
-        --title "Confirm snapshot boot" \
-        --yes-label "Boot" \
-        --no-label "Back" \
-        --yesno "$message" \
-        25 90 \
-        <"$tty" \
-        >"$tty" \
-        2>"$tty"
-}
-
-mount_snapshot() {
-    device="$1"
-    selected="$2"
-
-    subvolume="${NORMAL_ROOT_SUBVOL}/${SNAPSHOT_DIRECTORY}/${selected}/snapshot"
-    flags="$(snapshot_rootflags "$subvolume")"
-
-    mkdir -p /sysroot
-
-    mount \
-        -t btrfs \
-        -o "$flags" \
-        "$device" \
-        /sysroot
-
-    printf '%s\n' "$selected" >"${STATE_DIR}/snapshot-number"
-    printf '%s\n' "$subvolume" >"${STATE_DIR}/selected-subvolume"
-    printf '%s\n' "$flags" >"${STATE_DIR}/rootflags"
-
-    log "snapshot ${selected} mounted on /sysroot"
-}
-
-main() {
-    b_pressed || exit 0
-
-    prepare_console
-
-    device="$(resolve_root_device)" || {
-        dialog \
-            --msgbox "Unable to resolve the Btrfs root device." \
-            10 70 \
-            <"$MENU_TTY" \
-            >"$MENU_TTY" \
-            2>"$MENU_TTY"
-
-        restore_console
-        exit 0
-    }
-
-    if ! mount \
-        -t btrfs \
-        -o ro,subvolid=5 \
-        "$device" \
-        "$BTRFS_TOP"
-    then
-        dialog \
-            --msgbox "Unable to mount the Btrfs top level: ${device}" \
-            10 78 \
-            <"$MENU_TTY" \
-            >"$MENU_TTY" \
-            2>"$MENU_TTY"
-
-        restore_console
-        exit 0
-    fi
-
-    kernel="$(uname -r)"
-
-    if ! build_menu "$kernel"; then
-        dialog \
-            --msgbox "No usable Snapper snapshots were found." \
-            10 70 \
-            <"$MENU_TTY" \
-            >"$MENU_TTY" \
-            2>"$MENU_TTY"
-
-        umount "$BTRFS_TOP" 2>/dev/null || true
-        restore_console
-        exit 0
-    fi
-
-    while :; do
-        selected="$(show_menu "$kernel")" || {
-            umount "$BTRFS_TOP" 2>/dev/null || true
-            restore_console
-            exit 0
-        }
-
-        if confirm_snapshot "$selected" "$kernel"; then
-            umount "$BTRFS_TOP" 2>/dev/null || true
-
-            if ! mount_snapshot "$device" "$selected"; then
-                dialog \
-                    --msgbox "Snapshot mount failed. Continuing with normal boot." \
-                    11 78 \
-                    <"$MENU_TTY" \
-                    >"$MENU_TTY" \
-                    2>"$MENU_TTY"
             fi
 
-            restore_console
-            exit 0
-        fi
-    done
-}
+            draw_menu
+            ;;
 
-main "$@"
+        DOWN)
+
+            if (( selected < COUNT - 1 )); then
+
+                ((selected++))
+
+            else
+
+                selected=0
+
+            fi
+
+            draw_menu
+            ;;
+
+        ENTER)
+
+            break
+            ;;
+
+    esac
+
+done
+
+#
+# ------------------------------------------------------------
+# Save selected root
+# ------------------------------------------------------------
+#
+
+SELECTED_SUBVOL="${SUBVOLS[$selected]}"
+SELECTED_LABEL="${LABELS[$selected]}"
+
+#
+# Write through temporary file so the consumer never sees
+# a partially-written selection.
+#
+printf '%s\n' \
+    "$SELECTED_SUBVOL" \
+    >"${RESULT}.tmp"
+
+mv \
+    "${RESULT}.tmp" \
+    "$RESULT"
+
+#
+# ------------------------------------------------------------
+# Restore terminal
+# ------------------------------------------------------------
+#
+
+printf '\033[?25h' >&3
+
+stty sane <&3
+
+printf '\nBooting: %s\n' \
+    "$SELECTED_LABEL" >&3
+
+sleep 0.4
+
+exit 0

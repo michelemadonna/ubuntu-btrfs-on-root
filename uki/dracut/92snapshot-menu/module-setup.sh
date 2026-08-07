@@ -1,40 +1,56 @@
 #!/bin/bash
 
 check() {
-    require_binaries \
-        dialog mount umount find sort sed grep tr dd stty uname awk \
-        blkid head chvt fgconsole setterm sleep clear cat ||
-        return 1
-
     return 0
 }
 
 depends() {
-    echo "base rootfs-block btrfs"
+    echo "btrfs rootfs-block plymouth"
     return 0
 }
 
 install() {
     inst_multiple \
-        dialog mount umount find sort sed grep tr dd stty uname awk \
-        blkid head chvt fgconsole setterm sleep clear cat
+        /bin/bash \
+        mount \
+        umount \
+        mkdir \
+        mv \
+        sort \
+        sed \
+        head \
+        sleep \
+        readlink \
+        chvt \
+        plymouth \
+        stty
 
-    if command -v plymouth >/dev/null 2>&1; then
-        inst_multiple plymouth
-    fi
-
-    inst_simple \
-        "$moddir/snapshot-menu.conf" \
-        "/etc/snapshot-menu.conf"
-
-    # The actual menu runs as a separate process.
+    #
+    # Source:
+    #   snapshot-menu.sh
+    #
+    # Installed inside initrd as:
+    #   /usr/libexec/snapshot-menu
+    #
+    # DO NOT change this destination:
+    # the UKI validation expects it.
+    #
     inst_simple \
         "$moddir/snapshot-menu.sh" \
         "/usr/libexec/snapshot-menu"
 
-    # Only this tiny wrapper is sourced by Dracut.
+    #
+    # Configuration.
+    #
+    inst_simple \
+            "$moddir/snapshot-menu.conf" \
+            "/etc/snapshot-menu.conf"
+
+    #
+    # Run before root is mounted.
+    #
     inst_hook \
         pre-mount \
-        05 \
+        20 \
         "$moddir/snapshot-menu-hook.sh"
 }

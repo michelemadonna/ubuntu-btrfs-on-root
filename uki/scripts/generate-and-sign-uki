@@ -152,8 +152,6 @@ grep -qE 'etc/snapshot-menu.conf$' <<<"$initrd_listing" ||
 grep -qE 'hooks/pre-mount/.+snapshot-menu-hook\.sh$' <<<"$initrd_listing" ||
     die "Snapshot menu pre-mount hook is missing from the initrd"
 
-grep -qE '/dialog$' <<<"$initrd_listing" ||
-    die "dialog is missing from the initrd"
 
 log "Signing UKI with sbctl"
 
