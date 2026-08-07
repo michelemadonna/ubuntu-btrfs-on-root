@@ -67,9 +67,7 @@ if [[ $pre_download = "no" ]]; then
 fi
 mv -f ~/go/bin/sbctl /usr/sbin/
     
-sbctl setup --migrate
+
 sbctl create-keys
 sbctl enroll-keys --microsoft
 sbctl status
-
-cd ~

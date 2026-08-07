@@ -26,6 +26,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./setup.conf
 . "$script_dir/setup.conf"
 
+export root_uuid="$(blkid --output export /dev/"$root_dev" | grep ^UUID=)"
 
 preparation() {
 	echo -e "\e[32mINFO:\e[0mPrepare"
@@ -145,12 +146,15 @@ setup_fstab_crpttab(){
 		/dev/mapper/root /var/cache         btrfs $btrfs_options,subvol=$root_sub_vol/@cache 0 0
 		/dev/mapper/root /tmp               btrfs $btrfs_options,subvol=$root_sub_vol/@tmp 0 0
 		/dev/mapper/root /var/lib/libvirt/  btrfs defaults,ssd,discard=async,noatime,space_cache=v2,subvol=$root_sub_vol/@libvirt 0 0
-		/dev/mapper/root /var/lib/docker		btrfs	defaults,ssd,discard=async,noatime,compress=zstd:1,subvol=$root_sub_vol/@docker  0 0
+		/dev/mapper/root /var/lib/docker	btrfs	defaults,ssd,discard=async,noatime,compress=zstd:1,subvol=$root_sub_vol/@docker  0 0
 		/dev/mapper/root /swap              btrfs defaults,noatime,subvol=$root_sub_vol/@swap 0 0
 		/swap/swapfile   none               swap  defaults,pri=10 0 0
 	EOF
 	
+	echo -e "\e[32mINFO:\e[0mPatch /etc/crypttab"
 	echo "root $root_uuid none luks,discard" > /etc/crypttab 
+
+	
 
 	apt-get install -y cryptsetup-initramfs
 
@@ -207,12 +211,15 @@ if [[ "$1" = "//inner" ]]; then
 	apt install -y  git
 	git clone https://github.com/michelemadonna/ubuntu-btrfs-on-root.git ~/ubuntu-btrfs-on-root
 	cd ~/ubuntu-btrfs-on-root
-	# shellcheck source=setup.conf
+	# shellcheck source=./setup.conf
 	. ./setup.conf	
 	
 	if [[ $pre_download = "yes" ]]; then
 		pre_download_all
 	fi
+
+	setup_fstab_crpttab
+
 	# shellcheck source=./secure-boot/scripts/sbctl-install
 	. ./secure-boot/scripts/sbctl-install
 	# shellcheck source=./refind/scripts/refind-install

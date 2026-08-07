@@ -12,6 +12,8 @@ repository_root="$(
         pwd
 )"
 
+source $repository_root/setup.conf
+
 apt-get update
 
 apt-get install -y \
@@ -22,38 +24,46 @@ apt-get install -y \
     rsync \
     openssl
 
-read -r -p "Distribution identifier [ubuntu]: " distro_id
-distro_id="${distro_id:-ubuntu}"
 
-[[ "$distro_id" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || {
-    echo "Invalid distribution identifier: $distro_id" >&2
-    exit 1
-}
 
-read -r -p "ESP mount point [/boot/efi]: " esp_directory
-esp_directory="${esp_directory:-/boot/efi}"
+#read -r -p "Distribution identifier [ubuntu]: " distro_id
+#distro_id="${distro_id:-ubuntu}"
+#
+#[[ "$distro_id" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || {
+#    echo "Invalid distribution identifier: $distro_id" >&2
+#    exit 1
+#}
+#
+#read -r -p "ESP mount point [/boot/efi]: " esp_directory
+#esp_directory="${esp_directory:-/boot/efi}"
+#
+#mountpoint -q "$esp_directory" || {
+#    echo "ESP is not mounted: $esp_directory" >&2
+#    exit 1
+#}
+#
+#read -r -p "Btrfs root filesystem UUID: " btrfs_uuid
+#
+#[[ -n "$btrfs_uuid" ]] || {
+#    echo "The Btrfs UUID is required." >&2
+#    exit 1
+#}
+#
+#read -r -p "Root LUKS UUID: " luks_uuid
+#
+#[[ -n "$luks_uuid" ]] || {
+#    echo "The LUKS UUID is required." >&2
+#    exit 1
+#}
+#
+#read -r -p "Normal root subvolume [@ubuntu]: " root_subvolume
+#root_subvolume="${root_subvolume:-@ubuntu}"
 
-mountpoint -q "$esp_directory" || {
-    echo "ESP is not mounted: $esp_directory" >&2
-    exit 1
-}
-
-read -r -p "Btrfs root filesystem UUID: " btrfs_uuid
-
-[[ -n "$btrfs_uuid" ]] || {
-    echo "The Btrfs UUID is required." >&2
-    exit 1
-}
-
-read -r -p "Root LUKS UUID: " luks_uuid
-
-[[ -n "$luks_uuid" ]] || {
-    echo "The LUKS UUID is required." >&2
-    exit 1
-}
-
-read -r -p "Normal root subvolume [@ubuntu]: " root_subvolume
-root_subvolume="${root_subvolume:-@ubuntu}"
+export distro_id=$suite
+export esp_directory=/boot/efi
+export btrfs_uuid="$(blkid --output export /dev/mapper/root | grep ^UUID= | cut -c 6-)"
+export luks_uuid=$(cryptsetup luksUUID /dev/$root_dev)
+export root_subvolume=$root_sub_vol
 
 install -d -m 0755 /etc/ubuntu-uki
 install -d -m 0700 /etc/ubuntu-uki/keys
