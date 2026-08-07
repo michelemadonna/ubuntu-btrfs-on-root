@@ -209,6 +209,7 @@ if [[ "$1" = "//inner" ]]; then
 	apt install -y  git
 	git clone https://github.com/michelemadonna/ubuntu-btrfs-on-root.git ~/ubuntu-btrfs-on-root
 	cd ~/ubuntu-btrfs-on-root
+	git checkout 
 	# shellcheck source=./setup.conf
 	. ./setup.conf	
 	
