@@ -17,16 +17,13 @@ fi
 # shellcheck disable=SC1090
 source "$CONFIG"
 
-#
-# Required configuration.
-#
-: "${ROOT_SUBVOL:?ROOT_SUBVOL is not configured}"
-: "${SNAPSHOT_DIR:?SNAPSHOT_DIR is not configured}"
-: "${TTY:?TTY is not configured}"
-: "${MOUNTPOINT:?MOUNTPOINT is not configured}"
-: "${RESULT:?RESULT is not configured}"
-: "${CMDLINE_DIR:?CMDLINE_DIR is not configured}"
-: "${SNAPSHOT_CMDLINE:?SNAPSHOT_CMDLINE is not configured}"
+: "${ROOT_SUBVOL:?}"
+: "${SNAPSHOT_DIR:?}"
+: "${TTY:?}"
+: "${MOUNTPOINT:?}"
+: "${RESULT:?}"
+: "${CMDLINE_DIR:?}"
+: "${SNAPSHOT_CMDLINE:?}"
 
 #
 # ------------------------------------------------------------
@@ -40,9 +37,6 @@ if [[ -z "$ROOT_DEV" || ! -b "$ROOT_DEV" ]]; then
     exit 1
 fi
 
-#
-# TTY fallback.
-#
 if [[ ! -c "$TTY" ]]; then
     TTY="/dev/console"
 fi
@@ -50,17 +44,11 @@ fi
 mkdir -p "$MOUNTPOINT"
 
 #
-# One file descriptor for both keyboard and display.
+# Input/output terminal FD.
 #
 exec 3<>"$TTY"
 
 mounted=0
-
-#
-# ------------------------------------------------------------
-# Cleanup
-# ------------------------------------------------------------
-#
 
 cleanup() {
 
@@ -83,7 +71,7 @@ trap 'exit 130' INT TERM
 
 #
 # ------------------------------------------------------------
-# Mount Btrfs top-level
+# Mount Btrfs top level
 # ------------------------------------------------------------
 #
 
@@ -107,7 +95,7 @@ SNAPDIR="${MOUNTPOINT}/${ROOT_SUBVOL}/${SNAPSHOT_DIR}"
 
 #
 # ------------------------------------------------------------
-# Menu entries
+# Entries
 # ------------------------------------------------------------
 #
 
@@ -118,7 +106,7 @@ SUBVOLS=()
 LABELS=()
 
 #
-# Entry 0 = normal root.
+# Current system.
 #
 SUBVOLS+=(
     "$ROOT_SUBVOL"
@@ -149,9 +137,6 @@ if [[ -d "$SNAPDIR" ]]; then
         description=""
         date=""
 
-        #
-        # Read Snapper metadata.
-        #
         if [[ -r "$info" ]]; then
 
             description="$(
@@ -173,9 +158,6 @@ if [[ -d "$SNAPDIR" ]]; then
         [[ -n "$description" ]] ||
             description="Snapshot"
 
-        #
-        # Path relative to Btrfs top-level.
-        #
         SUBVOLS+=(
             "${ROOT_SUBVOL}/${SNAPSHOT_DIR}/${snap}/snapshot"
         )
@@ -206,8 +188,7 @@ if [[ -d "$SNAPDIR" ]]; then
 
             printf '%s\n' "$snap"
 
-        done |
-            sort -rn
+        done | sort -rn
 
     )
 
@@ -217,7 +198,7 @@ COUNT=${#SUBVOLS[@]}
 
 #
 # ------------------------------------------------------------
-# Configure terminal
+# Terminal
 # ------------------------------------------------------------
 #
 
@@ -228,16 +209,13 @@ stty \
     time 0 \
     <&3
 
-#
-# Hide cursor.
-#
 printf '\033[?25l' >&3
 
 selected=0
 
 #
 # ------------------------------------------------------------
-# Draw
+# Draw menu
 # ------------------------------------------------------------
 #
 
@@ -249,26 +227,21 @@ draw_menu() {
 
     printf '\033[1;36m' >&3
     printf 'Ubuntu Snapshot Boot\n' >&3
-    printf '\033[0m' >&3
+    printf '\033[0m\n' >&3
 
-    printf '\n' >&3
-    printf 'Select root filesystem:\n\n' >&3
+    printf '\nSelect root filesystem:\n\n' >&3
 
     for ((i = 0; i < COUNT; i++)); do
 
         if (( i == selected )); then
 
             printf '\033[7m' >&3
-
-            printf ' > %-74s' \
-                "${LABELS[$i]}" >&3
-
+            printf ' > %-74s' "${LABELS[$i]}" >&3
             printf '\033[0m\n' >&3
 
         else
 
-            printf '   %-74s\n' \
-                "${LABELS[$i]}" >&3
+            printf '   %-74s\n' "${LABELS[$i]}" >&3
 
         fi
 
@@ -293,7 +266,7 @@ read_key() {
     local seq=""
 
     #
-    # First byte blocks intentionally.
+    # Wait for first key.
     #
     IFS= read \
         -r \
@@ -307,7 +280,9 @@ read_key() {
         $'\e')
 
             #
-            # ESC sequence continuation MUST NOT block.
+            # ESC [ A/B.
+            #
+            # Timeout prevents the old dd-style blocking issue.
             #
             seq=""
 
@@ -369,7 +344,7 @@ read_key() {
 
 #
 # ------------------------------------------------------------
-# Main loop
+# Menu
 # ------------------------------------------------------------
 #
 
@@ -414,16 +389,13 @@ done
 
 #
 # ------------------------------------------------------------
-# Selected entry
+# Selection
 # ------------------------------------------------------------
 #
 
 SELECTED_SUBVOL="${SUBVOLS[$selected]}"
 SELECTED_LABEL="${LABELS[$selected]}"
 
-#
-# Save the subvolume for snapshot-menu-hook.sh.
-#
 printf '%s\n' \
     "$SELECTED_SUBVOL" \
     >"${RESULT}.tmp"
@@ -434,19 +406,17 @@ mv \
 
 #
 # ------------------------------------------------------------
-# Dynamic Dracut command line
+# Overlay
 # ------------------------------------------------------------
 #
 
 if [[ "$SELECTED_SUBVOL" != "$ROOT_SUBVOL" ]]; then
 
-    #
-    # Snapshot:
-    #
-    # enable volatile overlay.
-    #
     mkdir -p "$CMDLINE_DIR"
 
+    #
+    # getargbool rd.overlay will see this.
+    #
     printf '%s\n' \
         'rd.overlay=1' \
         >"$SNAPSHOT_CMDLINE"
@@ -454,9 +424,8 @@ if [[ "$SELECTED_SUBVOL" != "$ROOT_SUBVOL" ]]; then
 else
 
     #
-    # Current root:
-    #
-    # normal RW boot, no overlay.
+    # Normal boot:
+    # absolutely no overlay.
     #
     rm -f "$SNAPSHOT_CMDLINE"
 
@@ -464,11 +433,12 @@ fi
 
 #
 # ------------------------------------------------------------
-# Restore terminal
+# Terminal restore
 # ------------------------------------------------------------
 #
 
 printf '\033[?25h' >&3
+
 stty sane <&3
 
 printf '\nBooting: %s\n' \
