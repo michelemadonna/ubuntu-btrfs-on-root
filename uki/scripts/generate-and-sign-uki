@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-source /etc/ubuntu-uki/uki.conf
+source /etc/uki/uki.conf
 
 kernel_version="${1:?Usage: generate-and-sign-uki <kernel-version>}"
 
@@ -86,7 +86,12 @@ dracut \
 
 log "Validating UKI sections"
 
-sections="$(objcopy -h "$temporary_uki")"
+# Use ukify itself to inspect the generated UKI. GNU objcopy -h prints
+# command help and must not be used as a PE/COFF section listing command.
+uki_inspection="$(ukify inspect --all "$temporary_uki" 2>&1)" || {
+    printf '%s\n' "$uki_inspection" >&2
+    die "ukify failed to inspect the generated UKI"
+}
 
 for section in \
     .linux \
@@ -96,7 +101,7 @@ for section in \
     .pcrpkey \
     .pcrsig
 do
-    grep -q "\\${section}" <<<"$sections" ||
+    grep -Fq "$section" <<<"$uki_inspection" ||
         die "Required UKI section is missing: ${section}"
 done
 

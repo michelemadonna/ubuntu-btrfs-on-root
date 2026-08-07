@@ -64,6 +64,7 @@ export esp_directory=/boot/efi
 export btrfs_uuid="$(blkid --output export /dev/mapper/root | grep ^UUID= | cut -c 6-)"
 export luks_uuid=$(cryptsetup luksUUID /dev/$root_dev)
 export root_subvolume=$root_sub_vol
+export repository_root=~/ubuntu-btrfs-on-root/uki
 
 install -d -m 0755 /etc/uki
 install -d -m 0700 /etc/uki/keys
