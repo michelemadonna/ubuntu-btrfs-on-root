@@ -26,8 +26,6 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./setup.conf
 . "$script_dir/setup.conf"
 
-export root_uuid="$(blkid --output export /dev/"$root_dev" | grep ^UUID=)"
-
 preparation() {
 	echo -e "\e[32mINFO:\e[0mPrepare"
 	
