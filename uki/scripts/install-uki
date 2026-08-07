@@ -97,7 +97,7 @@ cat >/etc/systemd/ukify.conf<<-'EOF'
 EOF
 
 chmod 600 /etc/systemd/ukify.conf
-ln -s \
+ln -sf \
     /etc/systemd/ukify.conf \
     /etc/kernel/uki.conf
 
@@ -157,9 +157,6 @@ cat > /etc/dracut.conf.d/53-uki-cmdline.conf <<-'EOF'
 EOF
 
 
-
-
-
 if [[ ! -s /etc/uki/keys/pcr-private.pem ]]; then
     openssl genpkey \
         -algorithm RSA \
@@ -175,7 +172,7 @@ fi
 chmod 0600 /etc/uki/keys/pcr-private.pem
 chmod 0644 /etc/uki/keys/pcr-public.pem
 
-if [[ ! -e /etc/kernel/cmdline ]]; then
+#if [[ ! -e /etc/kernel/cmdline ]]; then
     sed \
         -e "s/__BTRFS_UUID__/${btrfs_uuid}/g" \
         -e "s/__LUKS_UUID__/${luks_uuid}/g" \
@@ -184,9 +181,9 @@ if [[ ! -e /etc/kernel/cmdline ]]; then
         >/etc/kernel/cmdline
 
     chmod 0644 /etc/kernel/cmdline
-else
-    echo "Keeping the existing /etc/kernel/cmdline file."
-fi
+#else
+#    echo "Keeping the existing /etc/kernel/cmdline file."
+#fi
 
 echo
 echo "UKI support installed."
