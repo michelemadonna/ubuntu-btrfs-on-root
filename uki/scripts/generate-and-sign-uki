@@ -125,13 +125,18 @@ objcopy \
 
 initrd_listing="$(lsinitrd "${work_directory}/initrd")"
 
-grep -q 'snapshot-menu.sh' <<<"$initrd_listing" ||
-    die "snapshot-menu.sh is missing from the initrd"
+log "Validating snapshot menu inside initrd"
 
-grep -q 'snapshot-menu.conf' <<<"$initrd_listing" ||
-    die "snapshot-menu.conf is missing from the initrd"
+grep -qE 'usr/libexec/snapshot-menu$' <<<"$initrd_listing" ||
+    die "Snapshot menu executable is missing from the initrd"
 
-grep -q '/dialog' <<<"$initrd_listing" ||
+grep -qE 'etc/snapshot-menu.conf$' <<<"$initrd_listing" ||
+    die "Snapshot menu configuration is missing from the initrd"
+
+grep -qE 'hooks/pre-mount/.+snapshot-menu-hook\.sh$' <<<"$initrd_listing" ||
+    die "Snapshot menu pre-mount hook is missing from the initrd"
+
+grep -qE '/dialog$' <<<"$initrd_listing" ||
     die "dialog is missing from the initrd"
 
 log "Signing UKI with sbctl"
