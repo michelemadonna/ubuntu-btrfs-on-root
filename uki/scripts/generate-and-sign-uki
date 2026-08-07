@@ -24,6 +24,7 @@ for command in \
     ukify \
     sbctl \
     objcopy \
+    objdump \
     lsinitrd \
     flock \
     find \
@@ -86,11 +87,8 @@ dracut \
 
 log "Validating UKI sections"
 
-# Use ukify itself to inspect the generated UKI. GNU objcopy -h prints
-# command help and must not be used as a PE/COFF section listing command.
-uki_inspection="$(ukify inspect --all "$temporary_uki" 2>&1)" || {
-    printf '%s\n' "$uki_inspection" >&2
-    die "ukify failed to inspect the generated UKI"
+sections="$(objdump -h "$temporary_uki")" || {
+    die "Unable to inspect generated UKI"
 }
 
 for section in \
@@ -101,7 +99,7 @@ for section in \
     .pcrpkey \
     .pcrsig
 do
-    grep -Fq "$section" <<<"$uki_inspection" ||
+    grep -Fq "$section" <<<"$sections" ||
         die "Required UKI section is missing: ${section}"
 done
 

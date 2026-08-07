@@ -85,17 +85,21 @@ sed -i \
     -e "s|^ESP_DIR=.*|ESP_DIR=\"${esp_directory}\"|" \
     /etc/uki/uki.conf
 
-cat >/etc/kernel/uki.conf <<'EOF'
-[UKI]
-PCRBanks=sha256
-
-[PCRSignature:root]
-PCRPrivateKey=/etc/uki/keys/pcr-private.pem
-PCRPublicKey=/etc/uki/keys/pcr-public.pem
-Phases=enter-initrd
+cat >/etc/systemd/ukify.conf<<-'EOF'
+    [UKI]
+    PCRBanks=sha256
+    Cmdline=@/etc/kernel/cmdline
+    
+    [PCRSignature:root]
+    PCRPrivateKey=/etc/uki/keys/pcr-private.pem
+    PCRPublicKey=/etc/uki/keys/pcr-public.pem
+    Phases=enter-initrd
 EOF
 
-chmod 0600 /etc/kernel/uki.conf
+chmod 600 /etc/systemd/ukify.conf
+ln -s \
+    /etc/systemd/ukify.conf \
+    /etc/kernel/uki.conf
 
 install \
     -m 0755 \
@@ -128,18 +132,33 @@ rsync \
     "$repository_root/dracut/92snapshot-menu/" \
     /usr/lib/dracut/modules.d/92snapshot-menu/
 
+chmod 0755 \
+    /usr/lib/dracut/modules.d/92snapshot-menu/module-setup.sh \
+    /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu-hook.sh \
+    /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.sh
+
 install \
     -m 0644 \
     "$repository_root/config/snapshot-menu.conf" \
     /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf
 
+
+
 sed -i \
     "s|^NORMAL_ROOT_SUBVOL=.*|NORMAL_ROOT_SUBVOL=\"${root_subvolume}\"|" \
     /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf
 
-cat >/etc/dracut.conf.d/52-snapshot-menu.conf <<'EOF'
-force_add_dracutmodules+=" snapshot-menu "
+cat >/etc/dracut.conf.d/52-snapshot-menu.conf <<-'EOF'
+    force_add_dracutmodules+=" snapshot-menu "
 EOF
+
+cat > /etc/dracut.conf.d/53-uki-cmdline.conf <<-'EOF'
+    hostonly_cmdline="no"
+EOF
+
+
+
+
 
 if [[ ! -s /etc/uki/keys/pcr-private.pem ]]; then
     openssl genpkey \
