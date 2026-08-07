@@ -17,9 +17,14 @@ set -e
 
 [[ "$(id -u)" -eq 0 ]] || { echo "ERROR: Must be run as root."; exit 1; }
 
-export script="$(readlink -f "$0")"
-export scriptname="$(basename "$script")"
+script="$(readlink -f "$0")"
+scriptname="$(basename "$script")"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+
+
+# shellcheck source=./setup.conf
+. "$script_dir/setup.conf"
 
 
 preparation() {
@@ -175,40 +180,22 @@ suite_selction(){
 }
 
 pre_download_all(){
-	if [[ $suite != "kali" ]]; then
-		apt install -y --download-only refind
-	else
-		printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" >/etc/resolv.conf
-		apt install dracut dracut-core systemd-cryptsetup btrfs-progs
-	fi
 	
-	
-	apt install -y --download-only build-essential snapper inotify-tools cryptsetup-initramfs libtasn1-6 libdevmapper1.02.1 \
+	apt install -y --download-only refind build-essential snapper inotify-tools cryptsetup-initramfs libtasn1-6 libdevmapper1.02.1 \
 		libc6 libselinux1 libudev1 libpcre2-8-0 gawk git make asciidoc-base pkgconf pkgconf-bin curl jq \
 		libpcsclite-dev libpcsclite1 golang-go sbsigntool tpm2-tools tpm2-tss libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64 libtss2-tcti-tabrmd0
-	apt-get -qq --no-install-recommends --yes --download-only install btrfs-assistant btrfsmaintenance
+	apt install --no-install-recommends -y --download-only btrfs-assistant btrfsmaintenance
 	
-	apt install -y --download-only openssh-server grub-efi-amd64-unsigned
+	apt install -y --download-only openssh-server
 	apt install -y asciidoc-base pkgconf pkgconf-bin curl jq libpcsclite-dev libpcsclite1 golang-go sbsigntool git build-essential pcscd
 
 	go install github.com/foxboron/sbctl/cmd/sbctl@latest
-
-
-	wget https://github.com/michelemadonna/ubuntu-btrfs-on-root/raw/refs/heads/main/refind_themes.zip -O /tmp/refind_themes.zip
-	wget https://github.com/michelemadonna/ubuntu-btrfs-on-root/raw/refs/heads/main/grub-protect -O /usr/bin/grub-protect 
-
-	
-	cd /opt
-	git clone https://github.com/Antynea/grub-btrfs.git 
-	cd ~
-	git clone https://github.com/jmylchreest/refind-btrfs-snapshots.git 
 
 	#apt install -y --download-only mythes-en-au mythes-en-us  \
 	#			thunderbird-locale-en thunderbird-locale-en-gb thunderbird-locale-en-us \
 	#			ubuntu-desktop ubuntu-restricted-addons wbritish \
 	#			libreoffice-help-common libreoffice-help-en-gb libreoffice-help-en-us libreoffice-l10n-en-gb libreoffice-l10n-en-za \
 	#			open-vm-tools-desktop openssh-server
-
 
 }
 
@@ -217,19 +204,22 @@ pre_download_all(){
 # ------------------------------
 
 if [[ "$1" = "//inner" ]]; then
+	apt install -y  git
+	git clone https://github.com/michelemadonna/ubuntu-btrfs-on-root.git ~/ubuntu-btrfs-on-root
+	cd ~/ubuntu-btrfs-on-root
+	# shellcheck source=setup.conf
+	. ./setup.conf	
+	
 	if [[ $pre_download = "yes" ]]; then
 		pre_download_all
 	fi
-	    
-	cd ~
-	git clone https://github.com/michelemadonna/ubuntu-btrfs-on-root.git .
-	
-
-	suite_selction
+	# shellcheck source=./secure-boot/scripts/sbctl-install
+	. ./secure-boot/scripts/sbctl-install
+	# shellcheck source=./refind/scripts/refind-install
+	. ./refind/scripts/refind-install
 
 	umount proc 2>/dev/null || true
 	umount home 2>/dev/null || true
-
 
 	exit
 
@@ -311,7 +301,7 @@ fi
 
 preparation
 create_subvols
-encrypt_and_enlarge $root_dev
+encrypt_and_enlarge
 prepare_chroot
 #chroot_and_mkinitramfs
 #unmount_everything
