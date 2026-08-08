@@ -20,6 +20,7 @@ set -e
 script="$(readlink -f "$0")"
 scriptname="$(basename "$script")"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+script_dir_name="$(basename "$script_dir")"
 
 
 
@@ -108,9 +109,9 @@ prepare_chroot() {
 
 chroot_and_mkinitramfs() {
 	cp -Rf "$script_dir" "$mp/root/"
-	chmod a+x "$mp/root/$scriptname"
+	chmod a+x "$mp/root/$script_dir_name/$scriptname"
 	echo -e "\e[32mINFO:\e[0mChrooting and call the script in the other root"
-	unshare --mount --fork chroot $mp /root/"$scriptname" //inner
+	unshare --mount --fork chroot $mp /root/"$script_dir_name/$scriptname" //inner
 }
 
 unmount_everything() {
@@ -186,7 +187,12 @@ pre_download_all(){
 		libpcsclite-dev libpcsclite1 golang-go sbsigntool tpm2-tools tpm2-tss libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64 libtss2-tcti-tabrmd0
 	apt install --no-install-recommends -y --download-only btrfs-assistant btrfsmaintenance
 	
-	apt install -y --download-only openssh-server
+	apt install -y --download-only openssh-server dracut \
+    dialog \
+    systemd-ukify \
+    binutils \
+    rsync \
+    openssl
 	apt install -y asciidoc-base pkgconf pkgconf-bin curl jq libpcsclite-dev libpcsclite1 golang-go sbsigntool git build-essential pcscd
 
 	go install github.com/foxboron/sbctl/cmd/sbctl@latest
