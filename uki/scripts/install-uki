@@ -63,7 +63,7 @@ distro_id=$suite
 esp_directory=/boot/efi
 btrfs_uuid="$(blkid --output export /dev/mapper/root | grep ^UUID= | cut -c 6-)"
 luks_uuid=$(cryptsetup luksUUID /dev/$root_dev)
-root_subvolume=$root_sub_vol
+root_subvolume=$root_sub_vol/@
 repository_root=$repository_root/uki
 
 

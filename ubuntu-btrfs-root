@@ -44,29 +44,30 @@ create_subvols() {
 	mount /dev/$root_dev $mp
 
 	cd $mp
-	
-	btrfs subvolume snapshot . $root_sub_vol
+	btrfs subvolume create $root_sub_vol
+	btrfs subvolume create $root_sub_vol/@
+	btrfs subvolume snapshot . $root_sub_vol/@
 	
 	btrfs subvolume create $root_sub_vol/@home
-	mv $root_sub_vol/home/* $root_sub_vol/@home
+	mv $root_sub_vol/@/home/* $root_sub_vol/@home
 	btrfs subvolume create $root_sub_vol/@cache
-	mv $root_sub_vol/var/cache/* $root_sub_vol/@cache
+	mv $root_sub_vol/@/var/cache/* $root_sub_vol/@cache
 	
 	btrfs subvolume create $root_sub_vol/@log
-	mv $root_sub_vol/var/log/* $root_sub_vol/@log
+	mv $root_sub_vol/@/var/log/* $root_sub_vol/@log
 	btrfs subvolume create $root_sub_vol/@tmp
 	btrfs subvolume create $root_sub_vol/@libvirt
 	btrfs subvolume create $root_sub_vol/@docker
 
 	btrfs subvolume create $root_sub_vol/@swap
-	btrfs filesystem mkswapfile --size $swap_zize $root_sub_vol/@swap/swapfile
+	btrfs filesystem mkswapfile --size $swap_size $root_sub_vol/@swap/swapfile
 	find . -maxdepth 1 ! -name "@*" ! -name . -exec rm -Rf {} \;
 	
 	cd /
 	umount $mp
 
 	echo -e "\e[32mINFO:\e[0mMount @ instead of /"
-	mount /dev/$root_dev -o subvol=$root_sub_vol $mp
+	mount /dev/$root_dev -o subvol=$root_sub_vol/@ $mp
 	
 }
 
@@ -92,7 +93,7 @@ encrypt_and_enlarge() {
 	fi
 	
 	echo "${PASSPHRASE}" | cryptsetup open /dev/$root_dev root
-	mount /dev/mapper/root -o subvol=$root_sub_vol $mp
+	mount /dev/mapper/root -o subvol=$root_sub_vol/@ $mp
 	btrfs filesystem resize max $mp
 }
 
@@ -133,7 +134,7 @@ setup_fstab_crpttab(){
 	
 	
 	sed -i \
-	"s|^.* / btrfs defaults 0 1\$|/dev/mapper/root / btrfs ${btrfs_options},subvol=${root_sub_vol} 0 1|" \
+	"s|^.* / btrfs defaults 0 1\$|/dev/mapper/root / btrfs ${btrfs_options},subvol=${root_sub_vol}/@ 0 1|" \
 	/etc/fstab  
 	
 	
@@ -210,10 +211,12 @@ pre_download_all(){
 # ------------------------------
 
 if [[ "$1" = "//inner" ]]; then
-	#apt install -y  git
-	#git clone https://github.com/michelemadonna/ubuntu-btrfs-on-root.git ~/ubuntu-btrfs-on-root
+	apt install -y  git
+	git clone https://github.com/michelemadonna/ubuntu-btrfs-on-root.git ~/ubuntu-btrfs-on-root
 	cd ~/ubuntu-btrfs-on-root
-	#git checkout one-subvol-per-distro
+	git checkout one-subvol-per-distro
+	chmod a+x ubuntu-btrfs-root
+	#
 	# shellcheck source=./setup.conf
 	. ./setup.conf	
 	
