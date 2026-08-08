@@ -214,7 +214,7 @@ if [[ "$1" = "//inner" ]]; then
 	# shellcheck source=./setup.conf
 	cd ~/ubuntu-btrfs-on-root
 	. ./setup.conf	
-	
+	apt-get update
 	if [[ $pre_download = "yes" ]]; then
 		pre_download_all
 	fi

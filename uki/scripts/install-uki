@@ -14,7 +14,7 @@ repository_root="$(
 
 source $repository_root/setup.conf
 
-apt-get update
+
 
 apt-get install -y \
     dracut \
