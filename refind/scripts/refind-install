@@ -51,6 +51,9 @@ done
 
 sbctl sign -s "/boot/efi/EFI/refind/refind_x64.efi"
 sbctl sign -s "/boot/efi/EFI/BOOT/BOOTX64.EFI"
+
+
+rm -rf /boot/efi/EFI/$suite
 apt-mark hold \
     refind \
     grub-common \
