@@ -202,6 +202,8 @@ chmod 0644 /etc/kernel/cmdline
 #    echo "Keeping the existing /etc/kernel/cmdline file."
 #fi
 
+echo 'add_dracutmodules+=" overlayfs "' | tee /etc/dracut.conf.d/99_overlayfs.conf
+
 echo
 echo "UKI support installed."
 echo "UKI destination: ${esp_directory}/EFI/Linux/${distro_id}"

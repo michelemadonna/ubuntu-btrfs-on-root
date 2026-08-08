@@ -36,7 +36,7 @@ snapper -c home set-config 'ALLOW_GROUPS=sudo'
 snapper -c home set-config 'SYNC_ACL=yes'   
 
 #TODO check if overlayfs can be added later with dracut -f
-echo 'add_dracutmodules+=" overlayfs "' | tee /etc/dracut.conf.d/99_overlayfs.conf
-dracut -H --hostonly-mode=sloppy --add overlayfs --force
+#echo 'add_dracutmodules+=" overlayfs "' | tee /etc/dracut.conf.d/99_overlayfs.conf
+#dracut -H --hostonly-mode=sloppy --add overlayfs --force
     
 apt --no-install-recommends -y install btrfs-assistant btrfsmaintenance
