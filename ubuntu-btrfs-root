@@ -114,18 +114,18 @@ chroot_and_mkinitramfs() {
 	unshare --mount --fork chroot $mp /root/"$script_dir_name/$scriptname" //inner
 }
 
-unmount_everything() {
-	echo -e "\e[32mINFO:\e[0mUnmounting..."    
-	cd /
-	findmnt -R $mp  
-	for dir in sys/firmware/efi/efivars dev/pts proc sys dev run boot/efi; do
-		umount $mp/$dir
-	done
-	umount "$mp"    
-
-	sleep 2
-	cryptsetup close root
-}
+#unmount_everything() {
+#	echo -e "\e[32mINFO:\e[0mUnmounting..."    
+#	cd /
+#	findmnt -R $mp  
+#	for dir in sys/firmware/efi/efivars dev/pts proc sys dev run boot/efi; do
+#		umount $mp/$dir
+#	done
+#	umount "$mp"    
+#
+#	sleep 2
+#	cryptsetup close root
+#}
 
 
 setup_fstab_crpttab(){
@@ -231,7 +231,7 @@ if [[ "$1" = "//inner" ]]; then
 	#umount proc 2>/dev/null || true
 	#umount home 2>/dev/null || true
 
-	#exit
+	exit
 
 fi
 
@@ -296,6 +296,56 @@ while :; do
 	shift
 done
 
+unmount_everything() {
+    local root="${mp}"
+    local lazy_fallback="${2:-false}"
+    local target
+    local i
+    local failed=0
+
+    [[ -e "$root" ]] || return 0
+
+    mapfile -t mounts < <(
+        findmnt -Rrn -o TARGET "$root" 2>/dev/null
+    )
+
+    ((${#mounts[@]})) || return 0
+
+    for ((i = ${#mounts[@]} - 1; i >= 0; i--)); do
+        target="${mounts[i]}"
+
+        mountpoint -q "$target" || continue
+
+        echo "Unmounting: $target"
+
+        if umount "$target"; then
+            continue
+        fi
+
+        echo "Retrying: $target" >&2
+        sync
+
+        sleep 0.2
+
+        if umount "$target"; then
+            continue
+        fi
+
+        if [[ "$lazy_fallback" == true ]]; then
+            echo "Lazy unmount: $target" >&2
+
+            if umount -l "$target"; then
+                continue
+            fi
+        fi
+
+        echo "ERROR: unable to unmount $target" >&2
+        failed=1
+    done
+	sleep 2
+	cryptsetup close root
+    return "$failed"
+}
 
 if [[ -z $PASSPHRASE ]]; then
 	echo "You must pass the PASSPHRASE of the root volume to encrypt"
