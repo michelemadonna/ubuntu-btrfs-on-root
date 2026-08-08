@@ -8,7 +8,7 @@ umask 077
 }
 
 repository_root="$(
-    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." &&
+    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
         pwd
 )"
 
@@ -59,12 +59,14 @@ apt-get install -y \
 #read -r -p "Normal root subvolume [@ubuntu]: " root_subvolume
 #root_subvolume="${root_subvolume:-@ubuntu}"
 
-export distro_id=$suite
-export esp_directory=/boot/efi
-export btrfs_uuid="$(blkid --output export /dev/mapper/root | grep ^UUID= | cut -c 6-)"
-export luks_uuid=$(cryptsetup luksUUID /dev/$root_dev)
-export root_subvolume=$root_sub_vol
-export repository_root=~/ubuntu-btrfs-on-root/uki
+distro_id=$suite
+esp_directory=/boot/efi
+btrfs_uuid="$(blkid --output export /dev/mapper/root | grep ^UUID= | cut -c 6-)"
+luks_uuid=$(cryptsetup luksUUID /dev/$root_dev)
+root_subvolume=$root_sub_vol
+repository_root=$repository_root/uki
+
+
 
 install -d -m 0755 /etc/uki
 install -d -m 0700 /etc/uki/keys
@@ -75,15 +77,26 @@ install -d -m 0755 /etc/dracut.conf.d
 install -d -m 0755 /usr/local/sbin
 install -d -m 0755 /usr/lib/dracut/modules.d/92snapshot-menu
 
-install \
-    -m 0644 \
-    "$repository_root/config/uki.conf" \
-    /etc/uki/uki.conf
+cat > /etc/uki/uki.conf <<-EOF
+    DISTRO_ID="${distro_id}"
 
-sed -i \
-    -e "s|^DISTRO_ID=.*|DISTRO_ID=\"${distro_id}\"|" \
-    -e "s|^ESP_DIR=.*|ESP_DIR=\"${esp_directory}\"|" \
-    /etc/uki/uki.conf
+    ESP_DIR="/boot/efi"
+    UKI_RELATIVE_DIR="EFI/Linux/\${DISTRO_ID}"
+    UKI_PREFIX="\${DISTRO_ID}"
+    KEEP_UKIS="2"
+
+    CMDLINE_FILE="/etc/kernel/cmdline"
+    UKIFY_CONFIG="/etc/kernel/uki.conf"
+
+    # Keep these keys shared between Ubuntu and Kali when both systems must unlock
+    # the same LUKS volume through the same signed PCR 11 policy.
+    PCR_PRIVATE_KEY="/etc/uki/keys/pcr-private.pem"
+    PCR_PUBLIC_KEY="/etc/uki/keys/pcr-public.pem"
+
+    SNAPSHOT_MODULE_DIR="/usr/lib/dracut/modules.d/92snapshot-menu"
+    LOCK_FILE="/run/lock/\${DISTRO_ID}-uki.lock"
+EOF
+chmod 0644 /etc/uki/uki.conf
 
 cat >/etc/systemd/ukify.conf<<-'EOF'
     [UKI]
@@ -137,18 +150,23 @@ chmod 0755 \
     /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu-hook.sh \
     /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.sh
 
-install \
-    -m 0644 \
-    "$repository_root/config/snapshot-menu.conf" \
+cat > /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf <<-EOF
+    ROOT_SUBVOL="${root_subvolume}"
+    SNAPSHOT_DIR=".snapshots"
+
+    TTY="/dev/tty1"
+
+    MOUNTPOINT="/run/snapshot-menu-root"
+    RESULT="/run/snapshot-menu-selected"
+
+    CMDLINE_DIR="/etc/cmdline.d"
+    SNAPSHOT_CMDLINE="/etc/cmdline.d/99-snapshot.conf"
+EOF
+
+chmod 0644 \
     /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf
 
-
-
-sed -i \
-    "s|^NORMAL_ROOT_SUBVOL=.*|NORMAL_ROOT_SUBVOL=\"${root_subvolume}\"|" \
-    /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf
-
-cat >/etc/dracut.conf.d/52-snapshot-menu.conf <<-'EOF'
+cat > /etc/dracut.conf.d/52-snapshot-menu.conf <<-'EOF'
     force_add_dracutmodules+=" snapshot-menu "
 EOF
 
@@ -173,14 +191,13 @@ chmod 0600 /etc/uki/keys/pcr-private.pem
 chmod 0644 /etc/uki/keys/pcr-public.pem
 
 #if [[ ! -e /etc/kernel/cmdline ]]; then
-    sed \
-        -e "s/__BTRFS_UUID__/${btrfs_uuid}/g" \
-        -e "s/__LUKS_UUID__/${luks_uuid}/g" \
-        -e "s/__ROOT_SUBVOL__/${root_subvolume}/g" \
-        "$repository_root/config/cmdline.example" \
-        >/etc/kernel/cmdline
-
-    chmod 0644 /etc/kernel/cmdline
+sed \
+    -e "s/__BTRFS_UUID__/${btrfs_uuid}/g" \
+    -e "s/__LUKS_UUID__/${luks_uuid}/g" \
+    -e "s/__ROOT_SUBVOL__/${root_subvolume}/g" \
+    "$repository_root/config/cmdline.example" \
+    >/etc/kernel/cmdline
+chmod 0644 /etc/kernel/cmdline
 #else
 #    echo "Keeping the existing /etc/kernel/cmdline file."
 #fi

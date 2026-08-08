@@ -101,18 +101,16 @@ prepare_chroot() {
 	mount -t sysfs sys $mp/sys
 	mount --bind /dev $mp/dev
 	mount -t devpts pts $mp/dev/pts
-	mount --bind /run $mp/run 
+	mount --bind /run $mp/run
 	mount /dev/$efi_dev $mp/boot/efi
 	mkdir -p /mnt/root/sys/firmware/efi/efivars && mount --bind /sys/firmware/efi/efivars /mnt/root/sys/firmware/efi/efivars
-
-
 }
 
 chroot_and_mkinitramfs() {
-	cp "$script" "$mp/usr/bin/$scriptname"
-	chmod a+x "$mp/usr/bin/$scriptname"
+	cp "$script" "$mp/tmp/$scriptname"
+	chmod a+x "$mp/tmp/$scriptname"
 	echo -e "\e[32mINFO:\e[0mChrooting and call the script in the other root"
-	unshare --mount --fork chroot $mp "$scriptname" //inner
+	unshare --mount --fork chroot $mp /tmp/"$scriptname" //inner
 }
 
 unmount_everything() {
@@ -209,7 +207,7 @@ if [[ "$1" = "//inner" ]]; then
 	apt install -y  git
 	git clone https://github.com/michelemadonna/ubuntu-btrfs-on-root.git ~/ubuntu-btrfs-on-root
 	cd ~/ubuntu-btrfs-on-root
-	git checkout 
+	git checkout one-subvol-per-distro
 	# shellcheck source=./setup.conf
 	. ./setup.conf	
 	
@@ -223,11 +221,13 @@ if [[ "$1" = "//inner" ]]; then
 	. ./secure-boot/scripts/sbctl-install
 	# shellcheck source=./refind/scripts/refind-install
 	. ./refind/scripts/refind-install
+	. ./snapper/scripts/snapper-install
+	. ./uki/scripts/install-uki
 
-	umount proc 2>/dev/null || true
-	umount home 2>/dev/null || true
+	#umount proc 2>/dev/null || true
+	#umount home 2>/dev/null || true
 
-	exit
+	#exit
 
 fi
 
