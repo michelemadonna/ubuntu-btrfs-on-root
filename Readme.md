@@ -52,6 +52,16 @@ ubuntu-uki/
         ├── tpm-status
         └── uninstall-tpm
 ```
+## Installation
+
+```bash
+sudo apt install -y  git
+git clone https://github.com/michelemadonna/ubuntu-btrfs-on-root.git ~/ubuntu-btrfs-on-root
+cd ~/ubuntu-btrfs-on-root
+git checkout one-subvol-per-distro
+chmod a+x ubuntu-btrfs-root
+sudo ./ubuntu-btrfs-root
+```
 
 ## UKI installation
 
