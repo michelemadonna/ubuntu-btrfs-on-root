@@ -7,18 +7,24 @@ set -Eeuo pipefail
 }
 
 repository_root="$(
-    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." &&
+    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
         pwd
 )"
 
-apt-get update
-
 apt-get install -y \
     systemd-cryptsetup \
-    cryptsetup-bin
+    cryptsetup-bin \
+    tpm2-tools \
+    tpm2-tss \
+    libtss2-esys-3.0.2-0t64 \
+    libtss2-mu-4.0.1-0t64 \
+    libtss2-rc0t64 \
+    libtss2-tcti-tabrmd0
 
-read -r -p "Physical LUKS2 device [/dev/nvme0n1p3]: " luks_device
-luks_device="${luks_device:-/dev/nvme0n1p3}"
+luks_device=/dev/$root_device
+repository_root=$repository_root/tpm
+#read -r -p "Physical LUKS2 device [/dev/nvme0n1p3]: " luks_device
+#luks_device="${luks_device:-/dev/nvme0n1p3}"
 
 [[ -b "$luks_device" ]] || {
     echo "Invalid block device: $luks_device" >&2
@@ -30,22 +36,22 @@ cryptsetup isLuks "$luks_device" || {
     exit 1
 }
 
-[[ -r /etc/ubuntu-uki/keys/pcr-public.pem ]] || {
+[[ -r /etc/uki/keys/pcr-public.pem ]] || {
     echo "Install the UKI component first. The PCR public key is missing." >&2
     exit 1
 }
 
-install -d -m 0755 /etc/ubuntu-uki
+install -d -m 0755 /etc/uki
 install -d -m 0755 /usr/local/sbin
 
 install \
     -m 0644 \
     "$repository_root/config/tpm.conf" \
-    /etc/ubuntu-uki/tpm.conf
+    /etc/uki/tpm.conf
 
 sed -i \
     "s|^LUKS_DEVICE=.*|LUKS_DEVICE=\"${luks_device}\"|" \
-    /etc/ubuntu-uki/tpm.conf
+    /etc/uki/tpm.conf
 
 install \
     -m 0755 \
@@ -67,6 +73,11 @@ install \
     "$repository_root/scripts/uninstall-tpm" \
     /usr/local/sbin/uninstall-tpm
 
+
+#echo "root $root_uuid none tpm2-device=auto,tpm2-measure-pcr=yes,discard,no-read-workqueue,no-write-workqueue,nofail" > /etc/crypttab
+#TODO verify if needed
+#echo 'add_dracutmodules+=" tpm2-tss crypt "' > /etc/dracut.conf.d/crypt.conf
+
 echo
 echo "TPM support installed."
 echo
@@ -80,84 +91,4 @@ echo "Dual-boot note:"
 echo "  tpm-enroll preserves existing TPM2 tokens by default."
 echo "  Keep TPM_LITERAL_PCRS=\"7\" unless PCR 14 was verified equal on both systems."
 
-===== tpm/scripts/tpm-enroll =====
 
-#!/usr/bin/env bash
-set -Eeuo pipefail
-umask 077
-
-source /etc/ubuntu-uki/tpm.conf
-
-log() {
-    printf '[tpm] %s\n' "$*"
-}
-
-die() {
-    printf '[tpm] ERROR: %s\n' "$*" >&2
-    exit 1
-}
-
-for command in systemd-cryptenroll cryptsetup date grep install; do
-    command -v "$command" >/dev/null 2>&1 ||
-        die "Required command not found: $command"
-done
-
-[[ -b "$LUKS_DEVICE" ]] ||
-    die "LUKS_DEVICE is not a block device: $LUKS_DEVICE"
-
-[[ -r "$PCR_PUBLIC_KEY" ]] ||
-    die "PCR public key is not readable: $PCR_PUBLIC_KEY"
-
-cryptsetup isLuks "$LUKS_DEVICE" ||
-    die "The configured device does not contain a valid LUKS volume"
-
-install -d -m 0700 "$LUKS_HEADER_BACKUP_DIR"
-
-backup_file="$(
-    printf '%s/%s-%s.img' \
-        "$LUKS_HEADER_BACKUP_DIR" \
-        "$(basename "$LUKS_DEVICE")" \
-        "$(date +%Y%m%d-%H%M%S)"
-)"
-
-log "Backing up the LUKS header to ${backup_file}"
-
-cryptsetup luksHeaderBackup \
-    "$LUKS_DEVICE" \
-    --header-backup-file "$backup_file"
-
-chmod 0600 "$backup_file"
-
-enroll_arguments=(
-    "$LUKS_DEVICE"
-    "--tpm2-device=${TPM_DEVICE}"
-    "--tpm2-pcrs=${TPM_LITERAL_PCRS}"
-    "--tpm2-public-key=${PCR_PUBLIC_KEY}"
-    "--tpm2-public-key-pcrs=${TPM_SIGNED_PCRS}"
-)
-
-case "$TPM_WIPE_EXISTING" in
-    yes)
-        log "WARNING: removing all existing TPM2 enrollments first"
-        enroll_arguments+=("--wipe-slot=tpm2")
-        ;;
-
-    no)
-        log "Preserving existing TPM2 enrollments"
-        ;;
-
-    *)
-        die "TPM_WIPE_EXISTING must be either 'yes' or 'no'"
-        ;;
-esac
-
-log "Enrolling literal PCRs ${TPM_LITERAL_PCRS} and signed PCRs ${TPM_SIGNED_PCRS}"
-
-systemd-cryptenroll "${enroll_arguments[@]}"
-
-cryptsetup luksDump "$LUKS_DEVICE" |
-    grep -qi 'systemd-tpm2' ||
-    die "No systemd-tpm2 token was found after enrollment"
-
-log "TPM enrollment completed"
-log "Password, recovery-key, and pre-existing TPM2 slots were preserved unless TPM_WIPE_EXISTING=yes"
