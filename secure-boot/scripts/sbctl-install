@@ -82,3 +82,4 @@ cat >> /etc/fwupd/fwupd.conf <<-EOL
     DisableShimForSecureBoot=true
 EOL
 sbctl sign -s /usr/libexec/fwupd/efi/fwupdx64.efi
+sbctl setup --migrate

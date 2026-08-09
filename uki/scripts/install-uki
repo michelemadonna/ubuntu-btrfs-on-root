@@ -59,17 +59,17 @@ apt-get install -y \
 #read -r -p "Normal root subvolume [@ubuntu]: " root_subvolume
 #root_subvolume="${root_subvolume:-@ubuntu}"
 
-distro_id=$suite
-esp_directory=/boot/efi
-btrfs_uuid="$(blkid --output export /dev/mapper/root | grep ^UUID= | cut -c 6-)"
-luks_uuid=$(cryptsetup luksUUID /dev/$root_dev)
-root_subvolume=$root_sub_vol/@
-repository_root=$repository_root/uki
+export distro_id=$suite
+export esp_directory=/boot/efi
+export btrfs_uuid="$(blkid --output export /dev/mapper/root | grep ^UUID= | cut -c 6-)"
+export luks_uuid=$(cryptsetup luksUUID /dev/$root_dev)
+export root_subvolume=$root_sub_vol/@
+export repository_root=$repository_root/uki
 
 install -d -m 0700 /etc/uki/keys
-install -d -m 0755 /etc/kernel
-install -d -m 0755 /etc/dracut.conf.d
-install -d -m 0755 /usr/local/sbin
+#install -d -m 0755 /etc/kernel
+#install -d -m 0755 /etc/dracut.conf.d
+#install -d -m 0755 /usr/local/sbin
 install -d -m 0755 /usr/lib/dracut/modules.d/92snapshot-menu
 
 cat >/etc/kernel/install.conf <<-'EOF'
@@ -90,12 +90,11 @@ cat > /etc/kernel/uki.conf <<'EOF'
     SecureBootPrivateKey=/var/lib/sbctl/keys/db/db.key
     SecureBootCertificate=/var/lib/sbctl/keys/db/db.pem
 
-    SignKernel=no
-
+    SignKernel=true
 
     [PCRSignature:initrd]
-    PCRPrivateKey=/etc/kernel/pcr-keys/private.pem
-    PCRPublicKey=/etc/kernel/pcr-keys/public.pem
+    PCRPrivateKey=/etc/uki/keys/pcr-private.pem
+    PCRPublicKey=/etc/uki/keys/pcr-public.pem
     Phases=enter-initrd
 EOF
 chmod 600 /etc/kernel/uki.conf
@@ -204,15 +203,71 @@ case "$answer" in
         for kernel in /boot/vmlinuz-*; do
             [[ -f "$kernel" ]] || continue
 
-            kver="${kernel#/boot/vmlinuz-}"
+            version=${kernel#/boot/vmlinuz-}
 
-            [[ -d "/usr/lib/modules/$kver" ]] || {
-                echo "Skipping $kver: modules not found"
-                continue
+            [[ -d "/usr/lib/modules/$version" ]] || continue
+
+            echo "Generating UKI for $version"
+
+            kernel-install add \
+                "$version" \
+                "$kernel"
+            
+            echo "Validating generated UKI for $version"
+            temporary_uki="/boot/efi/EFI/Linux/${distro_id}-${version}.efi"
+            
+            echo "Validate the UKI signature using sbctl"
+            sbctl verify "$temporary_uki"
+
+            sections="$(objdump -h "$temporary_uki")" || {
+                echo "Unable to inspect generated UKI"
             }
 
-            echo "Generating UKI for $kver"
-            /usr/local/sbin/generate-and-sign-uki "$kver"
+            for section in \
+                .linux \
+                .initrd \
+                .cmdline \
+                .uname \
+                .pcrpkey \
+                .pcrsig
+            do
+                grep -Fq "$section" <<<"$sections" ||
+                    echo "Required UKI section is missing: ${section}"
+            done
+
+            embedded_uname="$(
+                objcopy \
+                    --dump-section .uname=/dev/stdout \
+                    "$temporary_uki" \
+                    2>/dev/null |
+                    tr -d '\0\n'
+            )"
+
+            [[ "$embedded_uname" == "$version" ]] ||
+                echo "Embedded kernel version '${embedded_uname}' does not match '${version}'"
+
+            work_directory="$(mktemp -d)"
+
+            objcopy \
+                --dump-section ".initrd=${work_directory}/initrd" \
+                "$temporary_uki"
+
+            [[ -s "${work_directory}/initrd" ]] ||
+                echo "Unable to extract the embedded initrd"
+
+            initrd_listing="$(lsinitrd "${work_directory}/initrd")"
+
+            echo "Validating snapshot menu inside initrd"
+
+            grep -qE 'usr/libexec/snapshot-menu$' <<<"$initrd_listing" ||
+                echo "Snapshot menu executable is missing from the initrd"
+
+            grep -qE 'etc/snapshot-menu.conf$' <<<"$initrd_listing" ||
+                echo "Snapshot menu configuration is missing from the initrd"
+
+            grep -qE 'hooks/pre-mount/.+snapshot-menu-hook\.sh$' <<<"$initrd_listing" ||
+                echo "Snapshot menu pre-mount hook is missing from the initrd"
+            echo "UKI for $version generated and validated successfully."
         done
         ;;
 esac
