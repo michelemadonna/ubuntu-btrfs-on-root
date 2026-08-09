@@ -16,27 +16,18 @@ source $repository_root/setup.conf
     exit 1
 }
 
-
-
 echo -e "\e[32mINFO:\e[0mInstall Snapper..."
-	
-apt install -y snapper inotify-tools 
-dbus-daemon --system --fork
-snapper -c root create-config /
 
+apt install -y snapper inotify-tools 
+
+snapper -c root create-config /
 snapper -c root set-config 'TIMELINE_CREATE=yes'
 snapper -c root set-config 'ALLOW_GROUPS=sudo'
 snapper -c root set-config 'SYNC_ACL=yes'
 
-mount -o subvol=$root_sub_vol/@home /dev/mapper/root /home
 snapper -c home create-config /home
-
 snapper -c home set-config 'TIMELINE_CREATE=yes'
 snapper -c home set-config 'ALLOW_GROUPS=sudo'
 snapper -c home set-config 'SYNC_ACL=yes'   
 
-#TODO check if overlayfs can be added later with dracut -f
-#echo 'add_dracutmodules+=" overlayfs "' | tee /etc/dracut.conf.d/99_overlayfs.conf
-#dracut -H --hostonly-mode=sloppy --add overlayfs --force
-    
 apt --no-install-recommends -y install btrfs-assistant btrfsmaintenance

@@ -220,6 +220,8 @@ if [[ "$1" = "//inner" ]]; then
 	fi
 
 	setup_fstab_crpttab
+	mount -o subvol=$root_sub_vol/@home /dev/mapper/root /home
+	dbus-daemon --system --fork
 
 	# shellcheck source=./secure-boot/scripts/sbctl-install
 	. ./secure-boot/scripts/sbctl-install
