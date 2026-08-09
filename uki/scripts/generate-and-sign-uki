@@ -94,7 +94,6 @@ dracut \
     --force \
     --uefi \
     --ukify \
-    --force-add snapshot-menu \
     --kver "$kernel_version" \
     "$temporary_uki"
 

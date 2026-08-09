@@ -73,10 +73,13 @@ install \
     "$repository_root/scripts/uninstall-tpm" \
     /usr/local/sbin/uninstall-tpm
 
-
-#echo "root $root_uuid none tpm2-device=auto,tpm2-measure-pcr=yes,discard,no-read-workqueue,no-write-workqueue,nofail" > /etc/crypttab
-#TODO verify if needed
-#echo 'add_dracutmodules+=" tpm2-tss crypt "' > /etc/dracut.conf.d/crypt.conf
+echo 'add_dracutmodules+=" tpm2-tss crypt "' > /etc/dracut.conf.d/99_tpm2.conf
+if grep -qE 'rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes' /etc/kernel/cmdline; then
+    echo "The kernel command line already contains the TPM2 options."
+else
+    echo "Appending TPM2 options to the kernel command line."
+    echo "rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes" >> /etc/kernel/cmdline
+fi
 
 echo
 echo "TPM support installed."

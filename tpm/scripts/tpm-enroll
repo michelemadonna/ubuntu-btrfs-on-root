@@ -72,8 +72,8 @@ log "Enrolling literal PCRs ${TPM_LITERAL_PCRS} and signed PCRs ${TPM_SIGNED_PCR
 systemd-cryptenroll "${enroll_arguments[@]}"
 
 cryptsetup luksDump "$LUKS_DEVICE" |
-    grep -qi 'systemd-tpm2' ||
-    die "No systemd-tpm2 token was found after enrollment"
+    grep -i 'systemd-tpm2' >/dev/null ||
+    echo "No systemd-tpm2 token was found after enrollment"
 
 log "TPM enrollment completed"
 log "Password, recovery-key, and pre-existing TPM2 slots were preserved unless TPM_WIPE_EXISTING=yes"

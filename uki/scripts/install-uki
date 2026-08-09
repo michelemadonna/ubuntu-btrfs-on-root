@@ -198,7 +198,7 @@ chmod 0644 /etc/uki/keys/pcr-public.pem
 #    "$repository_root/config/cmdline.example" \
 #    >/etc/kernel/cmdline
 
-echo "root=UUID=${btrfs_uuid} rootfstype=btrfs rootflags=${btrfs_options},subvol=${root_subvolume} rd.luks.uuid=luks-${luks_uuid} rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes quiet splash" > /etc/kernel/cmdline
+echo "root=UUID=${btrfs_uuid} rootfstype=btrfs rootflags=${btrfs_options},subvol=${root_subvolume} rd.luks.uuid=luks-${luks_uuid} quiet splash" > /etc/kernel/cmdline
 
 chmod 0644 /etc/kernel/cmdline
 #else
@@ -206,6 +206,18 @@ chmod 0644 /etc/kernel/cmdline
 #fi
 
 echo 'add_dracutmodules+=" overlayfs "' | tee /etc/dracut.conf.d/99_overlayfs.conf
+
+if [[ $enable_tpm == "yes" ]]; then
+    echo 'add_dracutmodules+=" tpm2-tss crypt "' > /etc/dracut.conf.d/99_tpm2.conf
+    . $repository_root/../tpm/scripts/install-tpm
+    if grep -qE 'rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes' /etc/kernel/cmdline; then
+        echo "The kernel command line already contains the TPM2 options."
+    else
+        echo "Appending TPM2 options to the kernel command line."
+        echo "rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes" >> /etc/kernel/cmdline
+    fi
+fi
+
 
 echo
 echo "UKI support installed."
@@ -218,13 +230,25 @@ echo "  /etc/uki/uki.conf"
 echo "  /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf"
 echo
 
-read -r -p "Generate the UKI for the current kernel now? [Y/n]: " answer
+read -r -p "Generate the UKI for all installed kernel now? [Y/n]: " answer
 
 case "$answer" in
     n|N)
         ;;
 
     *)
-        /usr/local/sbin/generate-and-sign-uki "$(uname -r)"
+        for kernel in /boot/vmlinuz-*; do
+            [[ -f "$kernel" ]] || continue
+
+            kver="${kernel#/boot/vmlinuz-}"
+
+            [[ -d "/usr/lib/modules/$kver" ]] || {
+                echo "Skipping $kver: modules not found"
+                continue
+            }
+
+            echo "Generating UKI for $kver"
+            /usr/local/sbin/generate-and-sign-uki "$kver"
+        done
         ;;
 esac
