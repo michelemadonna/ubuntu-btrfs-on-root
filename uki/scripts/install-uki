@@ -66,78 +66,42 @@ luks_uuid=$(cryptsetup luksUUID /dev/$root_dev)
 root_subvolume=$root_sub_vol/@
 repository_root=$repository_root/uki
 
-
-
-install -d -m 0755 /etc/uki
 install -d -m 0700 /etc/uki/keys
 install -d -m 0755 /etc/kernel
-install -d -m 0755 /etc/kernel/postinst.d
-install -d -m 0755 /etc/kernel/postrm.d
 install -d -m 0755 /etc/dracut.conf.d
 install -d -m 0755 /usr/local/sbin
 install -d -m 0755 /usr/lib/dracut/modules.d/92snapshot-menu
 
-cat > /etc/uki/uki.conf <<-EOF
-    DISTRO_ID="${distro_id}"
-
-    ESP_DIR="/boot/efi"
-    UKI_RELATIVE_DIR="EFI/Linux/\${DISTRO_ID}"
-    UKI_PREFIX="\${DISTRO_ID}"
-    KEEP_UKIS="2"
-
-    CMDLINE_FILE="/etc/kernel/cmdline"
-    UKIFY_CONFIG="/etc/kernel/uki.conf"
-
-    # Keep these keys shared between Ubuntu and Kali when both systems must unlock
-    # the same LUKS volume through the same signed PCR 11 policy.
-    PCR_PRIVATE_KEY="/etc/uki/keys/pcr-private.pem"
-    PCR_PUBLIC_KEY="/etc/uki/keys/pcr-public.pem"
-
-    SNAPSHOT_MODULE_DIR="/usr/lib/dracut/modules.d/92snapshot-menu"
-    LOCK_FILE="/run/lock/\${DISTRO_ID}-uki.lock"
+cat >/etc/kernel/install.conf <<-'EOF'
+    layout=uki
+    initrd_generator=dracut
+    uki_generator=ukify
 EOF
-chmod 0644 /etc/uki/uki.conf
+chmod 0644 /etc/kernel/install.conf
 
-cat >/etc/systemd/ukify.conf<<-'EOF'
+echo $suite > /etc/kernel/entry-token
+chmod 0644 /etc/kernel/entry-token
+
+cat > /etc/kernel/uki.conf <<'EOF'
     [UKI]
     PCRBanks=sha256
-    Cmdline=@/etc/kernel/cmdline
-    
-    [PCRSignature:root]
-    PCRPrivateKey=/etc/uki/keys/pcr-private.pem
-    PCRPublicKey=/etc/uki/keys/pcr-public.pem
+
+    SecureBootSigningTool=systemd-sbsign
+    SecureBootPrivateKey=/var/lib/sbctl/keys/db/db.key
+    SecureBootCertificate=/var/lib/sbctl/keys/db/db.pem
+
+    SignKernel=no
+
+
+    [PCRSignature:initrd]
+    PCRPrivateKey=/etc/kernel/pcr-keys/private.pem
+    PCRPublicKey=/etc/kernel/pcr-keys/public.pem
     Phases=enter-initrd
 EOF
-
-chmod 600 /etc/systemd/ukify.conf
+chmod 600 /etc/kernel/uki.conf
 ln -sf \
-    /etc/systemd/ukify.conf \
-    /etc/kernel/uki.conf
-
-install \
-    -m 0755 \
-    "$repository_root/scripts/generate-and-sign-uki" \
-    /usr/local/sbin/generate-and-sign-uki
-
-install \
-    -m 0755 \
-    "$repository_root/scripts/remove-uki" \
-    /usr/local/sbin/remove-uki
-
-install \
-    -m 0755 \
-    "$repository_root/scripts/uninstall-uki" \
-    /usr/local/sbin/uninstall-uki
-
-install \
-    -m 0755 \
-    "$repository_root/hooks/postinst.d/zz-generate-and-sign-uki" \
-    /etc/kernel/postinst.d/zz-generate-and-sign-uki
-
-install \
-    -m 0755 \
-    "$repository_root/hooks/postrm.d/zz-remove-uki" \
-    /etc/kernel/postrm.d/zz-remove-uki
+    /etc/kernel/uki.conf \
+    /etc/systemd/ukify.conf
 
 rsync \
     -a \
