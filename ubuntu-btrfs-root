@@ -196,7 +196,7 @@ pre_download_all(){
     openssl \
 	systemd-cryptsetup \
     cryptsetup-bin
-	apt install -y asciidoc-base pkgconf pkgconf-bin curl jq libpcsclite-dev libpcsclite1 golang-go sbsigntool git build-essential pcscd
+	apt install -y asciidoc-base pkgconf pkgconf-bin curl jq libpcsclite-dev libpcsclite1 golang-go sbsigntool git build-essential pcscd fwupd-unsigned
 
 	go install github.com/foxboron/sbctl/cmd/sbctl@latest
 	apt install -y openssh-server open-vm-tools-desktop
