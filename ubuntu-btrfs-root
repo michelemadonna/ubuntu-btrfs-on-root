@@ -192,7 +192,9 @@ pre_download_all(){
     systemd-ukify \
     binutils \
     rsync \
-    openssl
+    openssl \
+	systemd-cryptsetup \
+    cryptsetup-bin
 	apt install -y asciidoc-base pkgconf pkgconf-bin curl jq libpcsclite-dev libpcsclite1 golang-go sbsigntool git build-essential pcscd
 
 	go install github.com/foxboron/sbctl/cmd/sbctl@latest

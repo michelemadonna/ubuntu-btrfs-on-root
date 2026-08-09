@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-source /etc/ubuntu-uki/tpm.conf
+source /etc/uki/tpm.conf
 
 [[ -b "$LUKS_DEVICE" ]] || {
     echo "LUKS_DEVICE is invalid: $LUKS_DEVICE" >&2

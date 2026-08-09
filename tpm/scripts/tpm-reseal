@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-source /etc/ubuntu-uki/tpm.conf
+source /etc/uki/tpm.conf
 
 if [[ "${1:-}" != "--wipe-all-tpm2" ]]; then
     cat >&2 <<'EOF'
@@ -21,14 +21,14 @@ fi
 temporary_config="$(mktemp)"
 trap 'rm -f "$temporary_config"' EXIT
 
-cp /etc/ubuntu-uki/tpm.conf "$temporary_config"
+cp /etc/uki/tpm.conf "$temporary_config"
 
 sed -i \
     's/^TPM_WIPE_EXISTING=.*/TPM_WIPE_EXISTING="yes"/' \
-    /etc/ubuntu-uki/tpm.conf
+    /etc/uki/tpm.conf
 
 restore_config() {
-    cp "$temporary_config" /etc/ubuntu-uki/tpm.conf
+    cp "$temporary_config" /etc/uki/tpm.conf
 }
 
 trap 'restore_config; rm -f "$temporary_config"' EXIT

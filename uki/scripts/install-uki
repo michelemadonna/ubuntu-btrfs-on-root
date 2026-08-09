@@ -198,7 +198,7 @@ chmod 0644 /etc/uki/keys/pcr-public.pem
 #    "$repository_root/config/cmdline.example" \
 #    >/etc/kernel/cmdline
 
-echo "root=UUID=${btrfs_uuid} rootfstype=btrfs rootflags=${btrfs_options},subvol=${root_subvolume} rd.luks.uuid=luks-${luks_uuid} rd.luks.options=tpm2-device=auto quiet splash" > /etc/kernel/cmdline
+echo "root=UUID=${btrfs_uuid} rootfstype=btrfs rootflags=${btrfs_options},subvol=${root_subvolume} rd.luks.uuid=luks-${luks_uuid} rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes quiet splash" > /etc/kernel/cmdline
 
 chmod 0644 /etc/kernel/cmdline
 #else
