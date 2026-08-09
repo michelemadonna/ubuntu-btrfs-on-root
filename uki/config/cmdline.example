@@ -1,0 +1,1 @@
+root=UUID=__BTRFS_UUID__ rootfstype=btrfs rootflags=ssd,discard=async,noatime,space_cache=v2,compress=zstd:1,subvol=__ROOT_SUBVOL__ rd.luks.uuid=luks-__LUKS_UUID__ rd.luks.options=tpm2-device=auto quiet splash

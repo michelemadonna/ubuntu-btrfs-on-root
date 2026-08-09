@@ -1,0 +1,254 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+[[ $EUID -eq 0 ]] || {
+    echo "Run install-uki as root." >&2
+    exit 1
+}
+
+repository_root="$(
+    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
+        pwd
+)"
+
+source $repository_root/setup.conf
+
+
+
+apt-get install -y \
+    dracut \
+    dialog \
+    systemd-ukify \
+    binutils \
+    rsync \
+    openssl
+
+
+
+#read -r -p "Distribution identifier [ubuntu]: " distro_id
+#distro_id="${distro_id:-ubuntu}"
+#
+#[[ "$distro_id" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || {
+#    echo "Invalid distribution identifier: $distro_id" >&2
+#    exit 1
+#}
+#
+#read -r -p "ESP mount point [/boot/efi]: " esp_directory
+#esp_directory="${esp_directory:-/boot/efi}"
+#
+#mountpoint -q "$esp_directory" || {
+#    echo "ESP is not mounted: $esp_directory" >&2
+#    exit 1
+#}
+#
+#read -r -p "Btrfs root filesystem UUID: " btrfs_uuid
+#
+#[[ -n "$btrfs_uuid" ]] || {
+#    echo "The Btrfs UUID is required." >&2
+#    exit 1
+#}
+#
+#read -r -p "Root LUKS UUID: " luks_uuid
+#
+#[[ -n "$luks_uuid" ]] || {
+#    echo "The LUKS UUID is required." >&2
+#    exit 1
+#}
+#
+#read -r -p "Normal root subvolume [@ubuntu]: " root_subvolume
+#root_subvolume="${root_subvolume:-@ubuntu}"
+
+distro_id=$suite
+esp_directory=/boot/efi
+btrfs_uuid="$(blkid --output export /dev/mapper/root | grep ^UUID= | cut -c 6-)"
+luks_uuid=$(cryptsetup luksUUID /dev/$root_dev)
+root_subvolume=$root_sub_vol/@
+repository_root=$repository_root/uki
+
+
+
+install -d -m 0755 /etc/uki
+install -d -m 0700 /etc/uki/keys
+install -d -m 0755 /etc/kernel
+install -d -m 0755 /etc/kernel/postinst.d
+install -d -m 0755 /etc/kernel/postrm.d
+install -d -m 0755 /etc/dracut.conf.d
+install -d -m 0755 /usr/local/sbin
+install -d -m 0755 /usr/lib/dracut/modules.d/92snapshot-menu
+
+cat > /etc/uki/uki.conf <<-EOF
+    DISTRO_ID="${distro_id}"
+
+    ESP_DIR="/boot/efi"
+    UKI_RELATIVE_DIR="EFI/Linux/\${DISTRO_ID}"
+    UKI_PREFIX="\${DISTRO_ID}"
+    KEEP_UKIS="2"
+
+    CMDLINE_FILE="/etc/kernel/cmdline"
+    UKIFY_CONFIG="/etc/kernel/uki.conf"
+
+    # Keep these keys shared between Ubuntu and Kali when both systems must unlock
+    # the same LUKS volume through the same signed PCR 11 policy.
+    PCR_PRIVATE_KEY="/etc/uki/keys/pcr-private.pem"
+    PCR_PUBLIC_KEY="/etc/uki/keys/pcr-public.pem"
+
+    SNAPSHOT_MODULE_DIR="/usr/lib/dracut/modules.d/92snapshot-menu"
+    LOCK_FILE="/run/lock/\${DISTRO_ID}-uki.lock"
+EOF
+chmod 0644 /etc/uki/uki.conf
+
+cat >/etc/systemd/ukify.conf<<-'EOF'
+    [UKI]
+    PCRBanks=sha256
+    Cmdline=@/etc/kernel/cmdline
+    
+    [PCRSignature:root]
+    PCRPrivateKey=/etc/uki/keys/pcr-private.pem
+    PCRPublicKey=/etc/uki/keys/pcr-public.pem
+    Phases=enter-initrd
+EOF
+
+chmod 600 /etc/systemd/ukify.conf
+ln -sf \
+    /etc/systemd/ukify.conf \
+    /etc/kernel/uki.conf
+
+install \
+    -m 0755 \
+    "$repository_root/scripts/generate-and-sign-uki" \
+    /usr/local/sbin/generate-and-sign-uki
+
+install \
+    -m 0755 \
+    "$repository_root/scripts/remove-uki" \
+    /usr/local/sbin/remove-uki
+
+install \
+    -m 0755 \
+    "$repository_root/scripts/uninstall-uki" \
+    /usr/local/sbin/uninstall-uki
+
+install \
+    -m 0755 \
+    "$repository_root/hooks/postinst.d/zz-generate-and-sign-uki" \
+    /etc/kernel/postinst.d/zz-generate-and-sign-uki
+
+install \
+    -m 0755 \
+    "$repository_root/hooks/postrm.d/zz-remove-uki" \
+    /etc/kernel/postrm.d/zz-remove-uki
+
+rsync \
+    -a \
+    --delete \
+    "$repository_root/dracut/92snapshot-menu/" \
+    /usr/lib/dracut/modules.d/92snapshot-menu/
+
+chmod 0755 \
+    /usr/lib/dracut/modules.d/92snapshot-menu/module-setup.sh \
+    /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu-hook.sh \
+    /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.sh
+
+cat > /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf <<-EOF
+    ROOT_SUBVOL="${root_subvolume}"
+    SNAPSHOT_DIR=".snapshots"
+
+    TTY="/dev/tty1"
+
+    MOUNTPOINT="/run/snapshot-menu-root"
+    RESULT="/run/snapshot-menu-selected"
+
+    CMDLINE_DIR="/etc/cmdline.d"
+    SNAPSHOT_CMDLINE="/etc/cmdline.d/99-snapshot.conf"
+EOF
+
+chmod 0644 \
+    /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf
+
+cat > /etc/dracut.conf.d/52-snapshot-menu.conf <<-'EOF'
+    force_add_dracutmodules+=" snapshot-menu "
+EOF
+
+cat > /etc/dracut.conf.d/53-uki-cmdline.conf <<-'EOF'
+    hostonly_cmdline="no"
+EOF
+
+
+if [[ ! -s /etc/uki/keys/pcr-private.pem ]]; then
+    openssl genpkey \
+        -algorithm RSA \
+        -pkeyopt rsa_keygen_bits:2048 \
+        -out /etc/uki/keys/pcr-private.pem
+
+    openssl pkey \
+        -pubout \
+        -in /etc/uki/keys/pcr-private.pem \
+        -out /etc/uki/keys/pcr-public.pem
+fi
+
+chmod 0600 /etc/uki/keys/pcr-private.pem
+chmod 0644 /etc/uki/keys/pcr-public.pem
+
+#if [[ ! -e /etc/kernel/cmdline ]]; then
+#sed \
+#    -e "s/__BTRFS_UUID__/${btrfs_uuid}/g" \
+#    -e "s/__LUKS_UUID__/${luks_uuid}/g" \
+#    -e "s/__ROOT_SUBVOL__/${root_subvolume}/g" \
+#    "$repository_root/config/cmdline.example" \
+#    >/etc/kernel/cmdline
+
+echo "root=UUID=${btrfs_uuid} rootfstype=btrfs rootflags=${btrfs_options},subvol=${root_subvolume} rd.luks.uuid=luks-${luks_uuid} quiet splash" > /etc/kernel/cmdline
+
+chmod 0644 /etc/kernel/cmdline
+#else
+#    echo "Keeping the existing /etc/kernel/cmdline file."
+#fi
+
+echo 'add_dracutmodules+=" overlayfs "' | tee /etc/dracut.conf.d/99_overlayfs.conf
+
+if [[ $enable_tpm == "yes" ]]; then
+    echo 'add_dracutmodules+=" tpm2-tss crypt "' > /etc/dracut.conf.d/99_tpm2.conf
+    . $repository_root/../tpm/scripts/install-tpm
+    if grep -qE 'rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes' /etc/kernel/cmdline; then
+        echo "The kernel command line already contains the TPM2 options."
+    else
+        echo "Appending TPM2 options to the kernel command line."
+        echo "rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes" >> /etc/kernel/cmdline
+    fi
+fi
+
+
+echo
+echo "UKI support installed."
+echo "UKI destination: ${esp_directory}/EFI/Linux/${distro_id}"
+echo
+echo "Review these files before the first build:"
+echo "  /etc/kernel/cmdline"
+echo "  /etc/kernel/uki.conf"
+echo "  /etc/uki/uki.conf"
+echo "  /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf"
+echo
+
+read -r -p "Generate the UKI for all installed kernel now? [Y/n]: " answer
+
+case "$answer" in
+    n|N)
+        ;;
+
+    *)
+        for kernel in /boot/vmlinuz-*; do
+            [[ -f "$kernel" ]] || continue
+
+            kver="${kernel#/boot/vmlinuz-}"
+
+            [[ -d "/usr/lib/modules/$kver" ]] || {
+                echo "Skipping $kver: modules not found"
+                continue
+            }
+
+            echo "Generating UKI for $kver"
+            /usr/local/sbin/generate-and-sign-uki "$kver"
+        done
+        ;;
+esac

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+source /etc/uki/tpm.conf
+
+[[ -b "$LUKS_DEVICE" ]] || {
+    echo "LUKS_DEVICE is invalid: $LUKS_DEVICE" >&2
+    exit 1
+}
+
+echo "LUKS device:         $LUKS_DEVICE"
+echo "TPM device:          $TPM_DEVICE"
+echo "Literal PCRs:        $TPM_LITERAL_PCRS"
+echo "Signed PCRs:         $TPM_SIGNED_PCRS"
+echo "PCR public key:      $PCR_PUBLIC_KEY"
+echo
+
+systemd-cryptenroll "$LUKS_DEVICE"
+
+echo
+
+cryptsetup luksDump "$LUKS_DEVICE"

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+source /etc/uki/tpm.conf
+
+if [[ "${1:-}" != "--wipe-all-tpm2" ]]; then
+    cat >&2 <<'EOF'
+Refusing to remove existing TPM2 enrollments.
+
+In a dual-boot configuration, use tpm-enroll to add a new token without
+removing the Ubuntu or Kali token.
+
+To intentionally remove every existing TPM2 enrollment and create one new
+enrollment, run:
+
+    tpm-reseal --wipe-all-tpm2
+EOF
+    exit 2
+fi
+
+temporary_config="$(mktemp)"
+trap 'rm -f "$temporary_config"' EXIT
+
+cp /etc/uki/tpm.conf "$temporary_config"
+
+sed -i \
+    's/^TPM_WIPE_EXISTING=.*/TPM_WIPE_EXISTING="yes"/' \
+    /etc/uki/tpm.conf
+
+restore_config() {
+    cp "$temporary_config" /etc/uki/tpm.conf
+}
+
+trap 'restore_config; rm -f "$temporary_config"' EXIT
+
+/usr/local/sbin/tpm-enroll
+
+restore_config
+trap - EXIT
+rm -f "$temporary_config"

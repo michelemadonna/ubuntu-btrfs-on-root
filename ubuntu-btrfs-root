@@ -12,105 +12,25 @@ set -e
 #https://wiki.archlinux.org/title/GRUB/Tips_and_tricks
 #https://wiki.archlinux.org/title/Dm-crypt/Encrypting_an_entire_system#Encrypted_boot_partition_(GRUB)
 
-script="$(readlink -f "$0")"
-scriptname="$(basename "$script")"
+
 #scriptpath="$(dirname "$script")"
 
 [[ "$(id -u)" -eq 0 ]] || { echo "ERROR: Must be run as root."; exit 1; }
 
-root_dev="sda3"
-efi_dev="sda2"
-mp="/mnt/root"
-boot_dev=""
-rescue_dev="sda1"
-keyslot_size="32m"
-enlarge=no
-swap_zize="4G"
-grub_efi_dev="(hd0,gpt2)"
-hide_grub_menu="yes" #hold shift during boot
-btrfs_options="defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1"
-installation_type="wipe"
-suite_type="minimal"
-PASSPHRASE="password"
-pre_download="yes"
-
-#Do you want a separated boot partition?
-	#yes
-#        boot_dev="sda1"
-#        #Do you want enable luks root partition encryption 
-#            #yes
-#            only_subvols=no
-#                #secureboot mode (autodetected)
-#                   #secure boot in setup mode
-#                       #Chose your bootloader
-#                           bootloader=grub #grub #refind
-#                       #Do you want enable tpm root partition autounlock
-#                           tpm_unlock=yes #yes #no
-#                    #secure boot enabled
-#                        #Chose your bootloader
-#                            bootloader=grub #grub (rfind is not available because we can't install a MOK)
-#                        #Do you want enable tpm root partition autounlock
-#                            tpm_unlock=yes #yes #no
-#                   #secureboot is disabled
-#                       #Chose your bootloader
-#                           bootloader=grub #grub #refind
-#           #no
-#           only_subvols=yes
-#               #secureboot mode (autodetected)
-#                   #secure boot in setup mode
-#                       #Chose your bootloader
-#                           bootloader=grub #grub #refind
-#                   #secure boot enabled
-#                       #Chose your bootloader
-#                           bootloader=grub #grub (rfind is not available because we can't install a MOK)
-#                   #secureboot is disabled
-#                       #Chose your bootloader
-#                           bootloader=grub #grub #refind
-  #no
-	   boot_dev=""
-	   #Do you want enable luks root (in this case also the boot that resides on root) partition encryption 
-		   #yes
-		   only_subvols=no
-#               #secureboot mode (autodetected)
-#                   #secure boot in setup mode
-#                       #Chose your bootloader
-#                           bootloader=grub #grub #refind
-#                       #Do you want enable tpm root partition autounlock
-#                           tpm_unlock=yes #yes #no
-				   #secure boot enabled
-					   #Chose your bootloader
-						   bootloader="grub+refind" #grub (rfind is not available because we can't install a MOK)
-					   #Do you want enable tpm root partition autounlock
-						   tpm_unlock=yes #yes #no
-#                   #secureboot is disabled
-#                       #Chose your bootloader
-#                           bootloader=grub #grub #refind
-#           #no
-#           only_subvols=yes
-#               #secureboot mode (autodetected)
-#                   #secure boot in setup mode
-#                       #Chose your bootloader
-#                           bootloader=grub #grub #refind
-#                   #secure boot enabled
-#                       #Chose your bootloader
-#                           bootloader=grub #grub (rfind is not available because we can't install a MOK)
-#                   #secureboot is disabled
-#                       #Chose your bootloader
-#                           bootloader=grub #grub #refind
-		
+script="$(readlink -f "$0")"
+scriptname="$(basename "$script")"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+script_dir_name="$(basename "$script_dir")"
 
 
 
-#Scenario 2 Partizione boot no
-	#cifratura disabilitata
+# shellcheck source=./setup.conf
+. "$script_dir/setup.conf"
 
 preparation() {
 	echo -e "\e[32mINFO:\e[0mPrepare"
 	
 	umount /target/boot/efi
-	if [[ -n $boot_dev ]]; then
-		umount /target/boot
-	fi
 	umount /target/cdrom
 	umount /target
 
@@ -120,37 +40,48 @@ preparation() {
 create_subvols() {
 	
 	echo -e "\e[32mINFO:\e[0mCreate subvolumes"
+
 	mount /dev/$root_dev $mp
+
 	cd $mp
-	btrfs subvolume snapshot . @
+	btrfs subvolume create $root_sub_vol
+	btrfs subvolume snapshot . $root_sub_vol/@
+	rm -Rf $root_sub_vol/@/@ubuntu
 	
-	btrfs subvolume create @home
-	mv @/home/* @home/
-	btrfs subvolume create @cache
-	mv @/var/cache/* @cache/
+	btrfs subvolume create $root_sub_vol/@home
+	mv $root_sub_vol/@/home/* $root_sub_vol/@home
+	btrfs subvolume create $root_sub_vol/@cache
+	mv $root_sub_vol/@/var/cache/* $root_sub_vol/@cache
 	
-	btrfs subvolume create @log
-	mv @/var/log/* @log/
-	btrfs subvolume create @tmp
-	btrfs subvolume create @libvirt
-	
-	btrfs subvolume create @swap
-	btrfs filesystem mkswapfile --size $swap_zize @swap/swapfile
+	btrfs subvolume create $root_sub_vol/@log
+	mv $root_sub_vol/@/var/log/* $root_sub_vol/@log
+	btrfs subvolume create $root_sub_vol/@tmp
+	btrfs subvolume create $root_sub_vol/@libvirt
+	btrfs subvolume create $root_sub_vol/@docker
+
+	btrfs subvolume create $root_sub_vol/@swap
+	btrfs filesystem mkswapfile --size $swap_size $root_sub_vol/@swap/swapfile
 	find . -maxdepth 1 ! -name "@*" ! -name . -exec rm -Rf {} \;
+	
 	cd /
 	umount $mp
+
 	echo -e "\e[32mINFO:\e[0mMount @ instead of /"
-	mount /dev/$root_dev -o subvol=@ $mp
+	mount /dev/$root_dev -o subvol=$root_sub_vol/@ $mp
+	
 }
 
 encrypt_and_enlarge() {
-
 	echo -e "\e[32mINFO:\e[0mEncrypt $root_dev..."
+	
 	btrfs filesystem resize -"${keyslot_size}" $mp
+	
 	cd /
 	umount $mp
+	
 	disk="$(lsblk --noheadings --output pkname /dev/$root_dev)"
 	partition_number="$(lsblk --noheadings --output partn /dev/$root_dev | tr -d "[:space:]")"
+	
 	echo 'You may ignore “Warning: keyslot operation could fail …”.'
 	echo 'See <https://gitlab.com/cryptsetup/cryptsetup/-/issues/896>.'
 	#cryptsetup reencrypt --encrypt --type luks2 --pbkdf pbkdf2 --pbkdf-force-iterations 500000 --reduce-device-size "$keyslot_size" /dev/$root_dev
@@ -160,8 +91,9 @@ encrypt_and_enlarge() {
 		echo "Enlarge $root_dev"
 		parted --script /dev/"$disk" resizepart "$partition_number" "100%"
 	fi
+	
 	echo "${PASSPHRASE}" | cryptsetup open /dev/$root_dev root
-	mount /dev/mapper/root -o subvol=@ $mp
+	mount /dev/mapper/root -o subvol=$root_sub_vol/@ $mp
 	btrfs filesystem resize max $mp
 }
 
@@ -172,535 +104,59 @@ prepare_chroot() {
 	mount --bind /dev $mp/dev
 	mount -t devpts pts $mp/dev/pts
 	mount --bind /run $mp/run
-#
-	if [[ -n $boot_dev ]]; then
-	   mount "/dev/$boot_dev" $mp/boot
-	fi   
-	
 	mount /dev/$efi_dev $mp/boot/efi
-	mkdir -p /mnt/root/sys/firmware/efi/efivars && mount --bind /sys/firmware/efi/efivars /mnt/root/sys/firmware/efi/efivars
+	mkdir -p $mp/sys/firmware/efi/efivars && mount --bind /sys/firmware/efi/efivars $mp/sys/firmware/efi/efivars
 }
 
 chroot_and_mkinitramfs() {
-	cp "$script" "$mp/usr/bin/$scriptname"
-	chmod a+x "$mp/usr/bin/$scriptname"
+	cp -Rf "$script_dir" "$mp/root/"
+	chmod a+x "$mp/root/$script_dir_name/$scriptname"
 	echo -e "\e[32mINFO:\e[0mChrooting and call the script in the other root"
-	unshare --mount --fork chroot $mp "$scriptname" //inner
+	unshare --mount --fork chroot $mp /root/"$script_dir_name/$scriptname" //inner
 }
 
-unmount_everything() {
-	echo -e "\e[32mINFO:\e[0mUnmounting..."    
-	cd /
-	findmnt -R $mp  
-	for dir in sys/firmware/efi/efivars dev/pts proc sys dev run boot/efi; do
-		umount $mp/$dir
-	done
-	if [[ -n $boot_dev ]]; then
-		umount $mp/boot
-	fi
-	umount "$mp"    
-	if [[ $only_subvols = "no" ]]; then
-		sleep 2
-		cryptsetup close root
-	fi
-}
+#unmount_everything() {
+#	echo -e "\e[32mINFO:\e[0mUnmounting..."    
+#	cd /
+#	findmnt -R $mp  
+#	for dir in sys/firmware/efi/efivars dev/pts proc sys dev run boot/efi; do
+#		umount $mp/$dir
+#	done
+#	umount "$mp"    
+#
+#	sleep 2
+#	cryptsetup close root
+#}
 
-setup_snapper(){
-	echo -e "\e[32mINFO:\e[0mInstall Snapper..."
-	
-	cd /
-	apt install -y snapper inotify-tools 
-	dbus-daemon --system --fork
-	snapper -c root create-config /
-	
-	snapper -c root set-config 'TIMELINE_CREATE=yes'
-	snapper -c root set-config 'ALLOW_GROUPS=sudo'
-	snapper -c root set-config 'SYNC_ACL=yes'
-	
-	mount -o subvol=@home /dev/mapper/root /home
-	snapper -c home create-config /home
-	
-	snapper -c home set-config 'TIMELINE_CREATE=yes'
-	snapper -c home set-config 'ALLOW_GROUPS=sudo'
-	snapper -c home set-config 'SYNC_ACL=yes'   
-	
-	echo 'add_dracutmodules+=" overlayfs "' | tee /etc/dracut.conf.d/overlayfs.conf
-	dracut -H --hostonly-mode=sloppy --add overlayfs --force
-		
-	apt-get -qq --no-install-recommends --yes install btrfs-assistant btrfsmaintenance
-	
-	
-	cd ~
-}
-
-setup_fstab(){
-	echo -e "\e[32mINFO:\e[0mPatch /etc/fstab"
-	
-	root_uuid="$(blkid --output export /dev/$root_dev | grep ^UUID=)"   
-	
-	sed --in-place \
-		"s|^.* / btrfs defaults 0 1\$!$root_uuid / btrfs ${btrfs_options},subvol=@ 0 1|" \
-		/etc/fstab  
-	
-	cat >> /etc/fstab <<- EOF
-		$root_uuid /home              btrfs $btrfs_options,subvol=@home 0 2
-		$root_uuid /var/log           btrfs $btrfs_options,subvol=@log 0 0 
-		$root_uuid /var/cache         btrfs $btrfs_options,subvol=@cache 0 0
-		$root_uuid /tmp               btrfs $btrfs_options,subvol=@tmp 0 0
-		$root_uuid /var/lib/libvirt/  btrfs defaults,ssd,discard=async,noatime,space_cache=v2,subvol=@libvirt 0 0
-		$root_uuid /swap              btrfs defaults,subvol=@swap 0 0
-		/swap/swapfile   none         swap  defaults,ssd,discard=async,noatime 0 0  
-	EOF
-
-	update-initramfs -u    
-}
 
 setup_fstab_crpttab(){
 	echo -e "\e[32mINFO:\e[0mPatch /etc/fstab"
 	
-	root_uuid="$(blkid --output export /dev/$root_dev | grep ^UUID=)"
 	
 	sed -i \
-		"s|^.* / btrfs defaults 0 1\$|/dev/mapper/root / btrfs ${btrfs_options},subvol=@ 0 1|" \
-		/etc/fstab  
+	"s|^.* / btrfs defaults 0 1\$|/dev/mapper/root / btrfs ${btrfs_options},subvol=${root_sub_vol}/@ 0 1|" \
+	/etc/fstab  
+	
 	
 	cat >> /etc/fstab <<- EOF
-		/dev/mapper/root /home              btrfs $btrfs_options,subvol=@home 0 2
-		/dev/mapper/root /var/log           btrfs $btrfs_options,subvol=@log 0 0 
-		/dev/mapper/root /var/cache         btrfs $btrfs_options,subvol=@cache 0 0
-		/dev/mapper/root /tmp               btrfs $btrfs_options,subvol=@tmp 0 0
-		/dev/mapper/root /var/lib/libvirt/  btrfs defaults,ssd,discard=async,noatime,space_cache=v2,subvol=@libvirt 0 0
-		/dev/mapper/root /swap              btrfs defaults,subvol=@swap 0 0
-		/swap/swapfile   none               swap  defaults,ssd,discard=async,noatime 0 0    
+		/dev/mapper/root /home              btrfs $btrfs_options,subvol=$root_sub_vol/@home 0 2
+		/dev/mapper/root /var/log           btrfs $btrfs_options,subvol=$root_sub_vol/@log 0 0 
+		/dev/mapper/root /var/cache         btrfs $btrfs_options,subvol=$root_sub_vol/@cache 0 0
+		/dev/mapper/root /tmp               btrfs $btrfs_options,subvol=$root_sub_vol/@tmp 0 0
+		/dev/mapper/root /var/lib/libvirt/  btrfs defaults,ssd,discard=async,noatime,space_cache=v2,subvol=$root_sub_vol/@libvirt 0 0
+		/dev/mapper/root /var/lib/docker	btrfs	defaults,ssd,discard=async,noatime,compress=zstd:1,subvol=$root_sub_vol/@docker  0 0
+		/dev/mapper/root /swap              btrfs defaults,noatime,subvol=$root_sub_vol/@swap 0 0
+		/swap/swapfile   none               swap  defaults,pri=10 0 0
 	EOF
 	
-	echo "root $root_uuid none luks,discard,nofail" > /etc/crypttab 
+	echo -e "\e[32mINFO:\e[0mPatch /etc/crypttab"
+	echo "root $root_uuid none luks,discard" > /etc/crypttab 
+
 	
+
 	apt-get install -y cryptsetup-initramfs
 
 }
-
-secureboot_state() {
-	local state
-
-	command -v mokutil >/dev/null 2>&1 || {
-		echo "unknown"
-		return 1
-	}
-
-	state="$(mokutil --sb-state 2>/dev/null)"
-
-	if grep -qi "Platform is in Setup Mode" <<<"$state"; then
-		echo "setup"
-	elif grep -qi "SecureBoot enabled" <<<"$state"; then
-		echo "enabled"
-	elif grep -qi "SecureBoot disabled" <<<"$state"; then
-		echo "disabled"
-	else
-		echo "unknown"
-		return 1
-	fi
-}
-
-setup_refind(){
-	echo -e "\e[32mINFO:\e[0mInstall $bootloader"
-	
-	root_uuid="$(blkid --output export /dev/"$root_dev" | grep ^UUID=)"
-
-	echo "refind refind/install_to_esp boolean true" | debconf-set-selections
-	DEBIAN_FRONTEND=noninteractive apt install -y refind
-
-	cp /usr/share/refind/refind/drivers_x64/{btrfs,iso9660,ext2,ext4}_x64.efi /boot/efi/EFI/refind/drivers_x64/
-
-	if [[ $pre_download = "no" ]]; then
-		wget https://github.com/michelemadonna/ubuntu-btrfs-on-root/raw/refs/heads/main/refind_themes.zip -O /tmp/refind_themes.zip
-	fi
-	unzip /tmp/refind_themes.zip -d /boot/efi/EFI/refind/
-
-	cat >> /boot/efi/EFI/refind/refind.conf <<-EOF
-		enable_touch
-		enable_mouse
-		use_graphics_for osx,linux
-		include themes/refind-theme-regular/theme.conf
-	EOF
-
-
-
-	#cat >/  <<- EOF
-	#	menuentry "Ubuntu Linux" {
-	#		icon /EFI/refind/icons/os_ubuntu.png
-	#		volume "BOOT_UBUNTU"
-	#		loader vmlinuz
-	#		initrd initrd.img
-	#		options "root=UUID=$root_uuid ro rootflags=$btrfs_options,subvol=@  quiet splash crashkernel=2G-4G:320M,4G-32G:512M,32G-64G:1024M,64G-128G:2048M,128G-:4
-	#		submenuentry "Text Mode Boot" {'
-	#			options "root=UUID=$root_uuid ro rootflags=$btrfs_options,subvol=@ crashkernel=2G-4G:320M,4G-32G:512M,32G-64G:1024M,64G-128G:2048M,128G-:4
-	#	  }
-	#	}
-	#EOF
-
-	cat >> /boot/efi/EFI/refind/refind.conf  <<- EOF
-		menuentry "Ubuntu Linux" {
-			loader /EFI/direct/grubx64.efi
-    	icon /EFI/refind/themes/refind-theme-regular/icons/256-96/os_ubuntu.png
-    	ostype Linux
-		}
-	EOF
-
-	if [[ $secure_boot_status = "setup" ]]; then
-		for f in btrfs_x64.efi iso9660_x64.efi ext2_x64.efi ext4_x64.efi ; do
-    	sbctl sign -s "/boot/efi/EFI/refind/drivers_x64/$f"
-		done
-
-		sbctl sign -s "/boot/efi/EFI/refind/refind_x64.efi"
-		
-	elif [[ $secure_boot_status = "enabled" ]]; then
-
-			for f in btrfs_x64.efi iso9660_x64.efi ext2_x64.efi ext4_x64.efi ; do
-    		sbsign --key /etc/efikeys/MOK.key \
-				--cert /etc/efikeys/MOK.pem \
-				"/boot/efi/EFI/refind/drivers_x64/$f" \
-				--output "/boot/efi/EFI/refind/drivers_x64/$f.signed"
-
-				mv "/boot/efi/EFI/refind/drivers_x64/$f.signed" "/boot/efi/EFI/refind/drivers_x64/$f"
-
-			done
-
-			sbsign --key /etc/efikeys/MOK.key \
-				--cert /etc/efikeys/MOK.pem \
-				/boot/efi/EFI/refind/refind_x64.efi \
-				--output /boot/efi/EFI/refind/refind_x64.efi.signed
-
-			mv /boot/efi/EFI/refind/refind_x64.efi.signed /boot/efi/EFI/refind/refind_x64.efi
-
-
-	fi
-	apt-mark hold refind
-
-	cd /
-}
-
-setup_grub(){
-	echo -e "\e[32mINFO:\e[0mInstall $bootloader"
-	if [[ $hide_grub_menu = "yes" ]]; then
-		sed -i 's/^GRUB_TIMEOUT_STYLE=menu$/GRUB_TIMEOUT_STYLE=hidden/' /etc/default/grub
-		sed -i 's/^GRUB_TIMEOUT=10$/GRUB_TIMEOUT=1/' /etc/default/grub
-	else
-		sed -i 's/^GRUB_TIMEOUT_STYLE=hidden$/GRUB_TIMEOUT_STYLE=menu/' /etc/default/grub
-		sed -i 's/^GRUB_TIMEOUT=0$/GRUB_TIMEOUT=10/' /etc/default/grub
-	fi
-
-	#sed -i "s/^GRUB_CMDLINE_LINUX_DEFAULT=\"quiet splash\"$/GRUB_CMDLINE_LINUX_DEFAULT=\"$grub_options\"/" /etc/default/grub
-	
-	if [[ ( $only_subvols = "yes" || -n $boot_dev ) && ( -z $tpm_unlock || $tpm_unlock = "no" )   ]]; then
-		update-grub
-	else
-		crypt_uuid=$(cryptsetup luksUUID /dev/$root_dev)
-		root_btrfs_uuid="$(blkid --output export /dev/mapper/root | grep ^UUID= | cut -c 6-)"
-
-
-		echo "GRUB_ENABLE_CRYPTODISK=y" >> /etc/default/grub
-		#
-		#sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources    
-		#apt update
-		#apt install -y build-essential autoconf automake bison flex \
-		#        gettext texinfo libdevmapper-dev libtss2-dev libfuse-dev pkg-config git \
-		#        tpm2-tools tpm2-tss libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64 libtss2-tcti-tabrmd0
-		#
-		#apt build-dep -y grub2
-		#apt source grub2
-		#cd grub*/
-		#./autogen.sh
-		#./configure --with-platform=efi \
-		#   --target=x86_64 \
-		#   --enable-grub-protect \
-		#   --enable-tpm \
-		#   --prefix=/usr \
-		#   --sysconfdir=/etc
-		#make && make install
-		#cd / && rm -rf grub*    
-		#
-		
-		apt install -y grub-efi-amd64-unsigned
-		rm -R /boot/efi/EFI/ubuntu
-
-		grub-install \
-		   --target=x86_64-efi \
-		   --efi-directory=/boot/efi \
-		   --bootloader-id=ubuntu \
-		   --no-uefi-secure-boot
-		   
-		objcopy --dump-section .sbat=/boot/grub/SBAT.csv /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed
-
-		apt -y install libtasn1-6 libdevmapper1.02.1 libc6 libselinux1 libudev1 libpcre2-8-0
-		if [[ $pre_download = "no" ]]; then
-			wget https://github.com/michelemadonna/ubuntu-btrfs-on-root/raw/refs/heads/main/grub-protect -O /usr/bin/grub-protect
-		fi
-		chmod 751 /usr/bin/grub-protect
-
-
-		setup_grub_btrfs_snapshot_menu
-		
-		echo -e "\e[32mINFO:\e[0m>>>>>>>> $root_btrfs_uuid"
-
-		cat > /boot/efi/EFI/ubuntu/grub.cfg <<- EOF
-			set feature_default_font_path=
-			loadfont unicode
-
-			if [ -e "$grub_efi_dev/EFI/ubuntu/sealed.tpm" ]; then
-				tpm2_key_protector_init --tpm2key=$grub_efi_dev/EFI/ubuntu/sealed.tpm
-				cryptomount -u $crypt_uuid -P tpm2
-			else
-				cryptomount -u $crypt_uuid
-			fi
-			set root='cryptouuid/$crypt_uuid'
-			set prefix=(\$root)/@/boot/grub
-			configfile \$prefix/grub.cfg
-		EOF
-
-		
-		
-
-		#cat > "$(which update-grub)" <<- EOF
-		#	#!/bin/sh
-		#	set -e
-		#	grub-mkconfig -o /boot/grub/grub.cfg "\$@"
-		#	grub-mkstandalone -v --disable-shim-lock -O x86_64-efi -o /boot/efi/EFI/ubuntu/grubx64.efi --sbat /boot/grub/SBAT.csv "/boot/grub/fonts/unicode.pf2=/boot/grub/fonts/unicode.pf2" \
-		#		--modules="linux normal terminal efi_gop all_video part_gpt cryptodisk luks2 argon2 gcry_rijndael gcry_sha256 btrfs gfxterm gettext gzio boot loadenv video test luks pbkdf2 gcry_sha512 tpm tpm2_key_protector configfile echo search cpuid efifwsetup raid5rec diskfilter mdraid1x mdraid09 lvm crypto afsplitter gcry_twofish gcry_tiger gcry_hwfeatures gcry_serpent gcry_seed gcry_rsa gcry_rmd160 gcry_rfc2268 gcry_md5 gcry_md4 pubkey mpi gcry_idea gcry_dsa mpi pubkey gcry_keccak gcry_des gcry_camellia gcry_blowfish gcry_arcfour play extcmd zfsinfo zfs zfscrypt gcry_sha1 gcry_rijndael xfs true squash4 xzio lzopio fshelp smbios sleep serial terminfo search_label search_fs_uuid search_fs_file regexp reboot probe png peimage setjmp password_pbkdf2 part_msdos part_apple minicmd memdisk lssal lsefisystab lsefimmap lsefi ls datetime relocator mmap loopback disk keystatus jpeg bufio bitmap iso9660 hfsplus help halt acpi gfxterm_background video_colors bitmap_scale gfxmenu trig font fat ext2 video_fb net procfs key_protector archelp chain efinet priority_queue cat gcry_crc"
-		#	
-		#EOF
-
-		grub-mkstandalone -v --disable-shim-lock -O x86_64-efi -o /boot/efi/EFI/ubuntu/grubx64.efi --sbat /boot/grub/SBAT.csv "/boot/grub/fonts/unicode.pf2=/boot/grub/fonts/unicode.pf2" \
-				--modules="linux normal terminal efi_gop all_video part_gpt cryptodisk luks2 argon2 gcry_rijndael gcry_sha256 btrfs gfxterm gettext gzio boot loadenv video test luks pbkdf2 gcry_sha512 tpm tpm2_key_protector configfile echo search cpuid efifwsetup raid5rec diskfilter mdraid1x mdraid09 lvm crypto afsplitter gcry_twofish gcry_tiger gcry_hwfeatures gcry_serpent gcry_seed gcry_rsa gcry_rmd160 gcry_rfc2268 gcry_md5 gcry_md4 pubkey mpi gcry_idea gcry_dsa mpi pubkey gcry_keccak gcry_des gcry_camellia gcry_blowfish gcry_arcfour play extcmd zfsinfo zfs zfscrypt gcry_sha1 gcry_rijndael xfs true squash4 xzio lzopio fshelp smbios sleep serial terminfo search_label search_fs_uuid search_fs_file regexp reboot probe png peimage setjmp password_pbkdf2 part_msdos part_apple minicmd memdisk lssal lsefisystab lsefimmap lsefi ls datetime relocator mmap loopback disk keystatus jpeg bufio bitmap iso9660 hfsplus help halt acpi gfxterm_background video_colors bitmap_scale gfxmenu trig font fat ext2 video_fb net procfs key_protector archelp chain efinet priority_queue cat gcry_crc"
-			
-		
-		if [[ $secure_boot_status = "setup" ]]; then
-
-			sbctl sign /boot/efi/EFI/ubuntu/grubx64.efi
-			
-		elif [[ $secure_boot_status = "enabled" ]]; then
-
-			sbsign --key /etc/efikeys/MOK.key \
-				--cert /etc/efikeys/MOK.pem \
-				/boot/efi/EFI/ubuntu/grubx64.efi \
-				--output /boot/efi/EFI/ubuntu/grubx64.efi.signed
-			mv /boot/efi/EFI/ubuntu/grubx64.efi.signed /boot/efi/EFI/ubuntu/grubx64.efi
-
-		fi
-
-		update-grub
-
-		if [[ $bootloader = "grub+refind" ]]; then
-			echo -e "\e[32mINFO:\e[0mNow copy existing grubx64.efi for refind to directo boot into the os without the grub menu.."
-			mkdir /boot/efi/EFI/direct
-			cp -R /boot/efi/EFI/ubuntu/* /boot/efi/EFI/direct/
-			
-			feature_platform_search_hint="y"
-			
-			cat > /boot/efi/EFI/direct/grub.cfg <<- EOF
-				set feature_default_font_path=
-				loadfont unicode
-	
-				if [ -e "$grub_efi_dev/EFI/ubuntu/sealed.tpm" ]; then
-					tpm2_key_protector_init --tpm2key=$grub_efi_dev/EFI/ubuntu/sealed.tpm
-					cryptomount -u $crypt_uuid -P tpm2
-				else
-					cryptomount -u $crypt_uuid
-				fi
-				
-				set root='cryptouuid/${crypt_uuid//-/}'
-				if [ x$feature_platform_search_hint = xy ]; then
-				  search --no-floppy --fs-uuid --set=root --hint='cryptouuid/${crypt_uuid//-/}'  $root_btrfs_uuid
-				else
-				  search --no-floppy --fs-uuid --set=root $root_btrfs_uuid
-				fi
-				linux   /@/boot/vmlinuz root=UUID=$root_btrfs_uuid ro rootflags=defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1,subvol=@  quiet splash crashkernel=2G-4G:320M,4G-32G:512M,32G-64G:1024M,64G-128G:2048M,128G-:4096M
-				initrd  /@/boot/initrd.img
-
-				boot
-			EOF
-		fi
-
-		apt-mark hold grub-common \
-                   grub2-common \
-                   grub-pc \
-                   grub-pc-bin \
-                   grub-efi-amd64 \
-                   grub-efi-amd64-bin \
-                   grub-efi-amd64-signed
-	fi
-
-	cd /     
-		
-}
-
-setup_grub_btrfs_snapshot_menu(){
-	echo -e "\e[32mINFO:\e[0mSetup grub-btrfs"
-
-	apt install -y gawk git make
-	
-
-
-
-	cd /opt
-	if [[ $pre_download = "no" ]]; then
-		git clone https://github.com/Antynea/grub-btrfs.git
-	fi
-	cd /opt/grub-btrfs
-	make install
-
-	systemctl enable grub-btrfsd.service
-
-	cat >> /etc/default/grub-btrfs/config <<- EOF
-		GRUB_BTRFS_MKCONFIG_LIB=/usr/share/grub/grub-mkconfig_lib
-		GRUB_BTRFS_GRUB_DIRNAME=/boot/grub
-		GRUB_BTRFS_GBTRFS_DIRNAME=/boot/grub
-		GRUB_BTRFS_MKCONFIG=grub-mkconfig
-		GRUB_BTRFS_SCRIPT_CHECK=grub-script-check
-		GRUB_BTRFS_ENABLE_CRYPTODISK="true"
-		GRUB_BTRFS_SNAPSHOT_KERNEL_PARAMETERS="rd.live.overlay.overlayfs=1"
-		GRUB_BTRFS_SYSTEMD_VOLATILE="true"
-	EOF
-
-	cd /
-
-}
-
-setup_refind_btrfs_sanpshot_menu(){
-	echo -e "\e[32mINFO:\e[0mSetup REFInd menu for snapshot entry."
-
-	apt install asciidoc-base pkgconf pkgconf-bin curl jq libpcsclite-dev libpcsclite1 golang-go git
-	
-	cd ~
-	if [[ $pre_download = "no" ]]; then
-		git clone https://github.com/jmylchreest/refind-btrfs-snapshots.git
-	fi	
-	cd refind-btrfs-snapshots
-	go build -o refind-btrfs-snapshots ./cmd/refind-btrfs-snapshots
-	cp refind-btrfs-snapshots /usr/bin/
-	cp configs/refind-btrfs-snapshots.yaml /etc/refind-btrfs-snapshots.yaml
-	cp systemd/*.{service,path} /etc/systemd/system/
-	
-	refind-btrfs-snapshots generate -g -y
-	
-	systemctl enable --now refind-btrfs-snapshots.path
-	
-	echo "include refind-btrfs-snapshots.conf" >> /boot/efi/EFI/refind.conf
-	cd /
-
-	   
-}
-
-setup_custom_secure_boot_key(){
-	
-	if [[ $secure_boot_status = "enabled" ]]; then
-	
-		echo -e "\e[32mINFO:\e[0mEnroll a new Machine Owner Platform key using mokutil"
-		mkdir -p /etc/efikeys/
-		
-		openssl req -new -x509 -newkey rsa:2048 -outform DER -keyout /etc/efikeys/MOK.key -out /etc/efikeys/MOK.der \
-		  -nodes -days 3650 -subj "/CN=My MOK/"
-		chmod 400 MOK.key
-	
-		mokutil --import /etc/efikeys/MOK.der
-	
-		openssl x509 -in /etc/efikeys/MOK.der -inform DER -outform PEM -out /etc/efikeys/MOK.pem
-
-
-		echo -e "\e[32mINFO:\e[0mSign all .efi in /boot/efi/EFI"
-		find /boot/efi/EFI -type f -name '*.efi' -exec bash -c '
-		    sbsign --key /etc/efikeys/MOK.key \
-		           --cert /etc/efikeys/MOK.pem \
-		           "$1" --output "$1.signed" &&
-		    mv -f "$1.signed" "$1"
-		' bash {} \;
-
-		echo -e "\e[32mINFO:\e[0mSign all kernel"
-		find /boot/vmlinuz -type f -name 'vmlinuz*' -exec bash -c '
-		    sbsign --key /etc/efikeys/MOK.key \
-		           --cert /etc/efikeys/MOK.pem \
-		           "$1" --output "$1.signed" &&
-		    mv -f "$1.signed" "$1"
-		' bash {} \;
-
-		
-		
-	elif [[ $secure_boot_status = "setup" ]]; then
-		echo -e "\e[32mINFO:\e[0mInstalling sbctl and enroll a new Machine Owner Platform key"
-		
-		apt install -y asciidoc-base pkgconf pkgconf-bin curl jq libpcsclite-dev libpcsclite1 golang-go sbsigntool
-		if [[ $pre_download = "no" ]]; then
-			go install github.com/foxboron/sbctl/cmd/sbctl@latest
-		fi
-		mv -f ~/go/bin/sbctl /usr/sbin/
-		
-		sbctl create-keys
-		sbctl enroll-keys --microsoft
-		sbctl status
-		#sbctl setup --migrate
-	
-		echo -e "\e[32mINFO:\e[0mSign all .efi in /boot/efi/EFI"
-		find /boot/efi/EFI -type f -name '*.efi' -exec sudo sbctl sign '{}' \;
-		echo -e "\e[32mINFO:\e[0mSign all kernel"
-		find /boot -type f -name 'vm*' -exec sudo sbctl sign -s '{}' \;
-	fi
-
-	cd /
-
-
-	
-}
-
-setup_tpm_luks_auto_ulock(){
-	echo -e "\e[32mINFO:\e[0mSetup TPM unlock..."
-	root_uuid="$(blkid --output export /dev/"$root_dev" | grep ^UUID=)"
-
-	apt install -y tpm2-tools tpm2-tss libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64 libtss2-tcti-tabrmd0
-	
-	echo "root $root_uuid none tpm2-device=auto,tpm2-measure-pcr=yes,discard,no-read-workqueue,no-write-workqueue,nofail" > /etc/crypttab
-	echo 'add_dracutmodules+=" tpm2-tss crypt "' > /etc/dracut.conf.d/crypt.conf
-	dracut --regenerate-all --force -v
-
-	cd /    
-}
-
-seal_luks_disk_tpm_unlock_to_secure_boot(){
-	echo -e "\e[32mINFO:\e[0mSeal $root_dev to tpm device"
-	systemd-cryptenroll --wipe-slot=tpm2 /dev/$root_dev || /bin/true
-	systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs="7:sha256+11:sha256+14:sha256" /dev/$root_dev 
-	
-	
-	cd ~
-	if [[ -f /boot/efi/EFI/ubuntu/sealed.tpm ]]; then
-		
-		rm /boot/efi/EFI/ubuntu/sealed.tpm
-		grub-protect --action=add --protector=tpm2  --tpm2key --tpm2-keyfile=/etc/luks-key/luks-key-grub --tpm2-outfile=/boot/efi/EFI/ubuntu/sealed.tpm --tpm2-pcrs=7
-	else
-		mkdir /etc/luks-key
-		dd if=/dev/urandom of=/etc/luks-key/luks-key-grub bs=1 count=32
-		chmod 0400 /etc/luks-key/luks-key-grub
-		cryptsetup luksAddKey /dev/$root_dev /etc/luks-key/luks-key-grub --pbkdf=pbkdf2 --hash=sha512
-		grub-protect --action=add --protector=tpm2  --tpm2key --tpm2-keyfile=/etc/luks-key/luks-key-grub --tpm2-outfile=/boot/efi/EFI/ubuntu/sealed.tpm --tpm2-pcrs=7
-	fi
-
-	cd /
-
-	#echo "test" | cryptsetup luksDump /dev/sda2 --debug 2>&1 | grep -i token
-}
-
-#setup_tpm_luks_auto_ulock_with_pin(){
-#   
-#   root_uuid="$(blkid --output export /dev/"$root_dev" | grep ^UUID=)"
-#   
-#   apt install -y tpm2-tools tpm2-tss libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64 libtss2-tcti-tabrmd0
-#   
-#
-#   systemd-cryptenroll --wipe-slot=tpm2 /dev/$root_dev || /bin/true
-#   systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs="7:sha256+11:sha256+14:sha256" --tpm2-with-pin=true /dev/$root_dev
-#   echo "root $root_uuid none tpm2-device=auto,tpm2-pin=yes,tpm2-measure-pcr=yes,discard,no-read-workqueue,no-write-workqueue,nofail" > /etc/crypttab
-#   echo 'add_dracutmodules+=" tpm2-tss crypt "' > /etc/dracut.conf.d/crypt.conf
-#   dracut --regenerate-all --force -v
-#}
 
 suite_selction(){
 	
@@ -726,31 +182,29 @@ suite_selction(){
 }
 
 pre_download_all(){
-
-	apt install -y --download-only snapper refind inotify-tools cryptsetup-initramfs libtasn1-6 libdevmapper1.02.1 \
+	
+	apt install -y --download-only refind build-essential snapper inotify-tools cryptsetup-initramfs libtasn1-6 libdevmapper1.02.1 \
 		libc6 libselinux1 libudev1 libpcre2-8-0 gawk git make asciidoc-base pkgconf pkgconf-bin curl jq \
 		libpcsclite-dev libpcsclite1 golang-go sbsigntool tpm2-tools tpm2-tss libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64 libtss2-tcti-tabrmd0
-	apt-get -qq --no-install-recommends --yes --download-only install btrfs-assistant btrfsmaintenance
+	apt install --no-install-recommends -y --download-only btrfs-assistant btrfsmaintenance
 	
-	apt install -y --download-only openssh-server grub-efi-amd64-unsigned
-	apt install -y asciidoc-base pkgconf pkgconf-bin curl jq libpcsclite-dev libpcsclite1 golang-go sbsigntool git
+	apt install -y --download-only dracut \
+    dialog \
+    systemd-ukify \
+    binutils \
+    rsync \
+    openssl \
+	systemd-cryptsetup \
+    cryptsetup-bin
+	apt install -y asciidoc-base pkgconf pkgconf-bin curl jq libpcsclite-dev libpcsclite1 golang-go sbsigntool git build-essential pcscd fwupd-unsigned
+
 	go install github.com/foxboron/sbctl/cmd/sbctl@latest
-
-	wget https://github.com/michelemadonna/ubuntu-btrfs-on-root/raw/refs/heads/main/refind_themes.zip -O /tmp/refind_themes.zip
-	wget https://github.com/michelemadonna/ubuntu-btrfs-on-root/raw/refs/heads/main/grub-protect -O /usr/bin/grub-protect 
-
-	
-	cd /opt
-	git clone https://github.com/Antynea/grub-btrfs.git 
-	cd ~
-	git clone https://github.com/jmylchreest/refind-btrfs-snapshots.git 
-
+	apt install -y openssh-server open-vm-tools-desktop
 	#apt install -y --download-only mythes-en-au mythes-en-us  \
 	#			thunderbird-locale-en thunderbird-locale-en-gb thunderbird-locale-en-us \
 	#			ubuntu-desktop ubuntu-restricted-addons wbritish \
 	#			libreoffice-help-common libreoffice-help-en-gb libreoffice-help-en-us libreoffice-l10n-en-gb libreoffice-l10n-en-za \
 	#			open-vm-tools-desktop openssh-server
-
 
 }
 
@@ -759,163 +213,28 @@ pre_download_all(){
 # ------------------------------
 
 if [[ "$1" = "//inner" ]]; then
+	#
+	# shellcheck source=./setup.conf
+	cd ~/ubuntu-btrfs-on-root
+	. ./setup.conf	
+	apt-get update
 	if [[ $pre_download = "yes" ]]; then
 		pre_download_all
 	fi
-	    
-	
-	setup_snapper
-	secure_boot_status=$(secureboot_state)
 
-	echo -e "\e[32mINFO:\e[0mSecure Boot is " "$secure_boot_status"
-	
-	if [[ -n $boot_dev ]]; then
-		echo -e "\e[32mINFO:\e[0mConfig Boot partition separated"
-		e2label /dev/"$boot_dev" "BOOT_UBUNTU"
-		
-		if [[ $only_subvols  = "yes" ]]; then
-			 echo -e "\e[32mINFO:\e[0mConfig NON Encrypt"
-			setup_fstab
-			if [[ $secure_boot_status = "enabled" ]]; then
-				echo -e "\e[32mINFO:\e[0mSecure Boot enabled"
-				#if secure boot is enabled and not in setup mode (we can't enroll new MOK) only Ubuntu signed grub/kernel can be used
-				echo -e "\e[32mINFO:\e[0mInstall $bootloader"
-				setup_grub             
-			elif [[ $secure_boot_status = "setup" ]]; then
-				echo -e "\e[32mINFO:\e[0mSecure Boot in Setup Mode"
-				echo -e "\e[32mINFO:\e[0mInstall $bootloader"
-				if [[ $bootloader = "grub" ]]; then
-					setup_grub
-				elif [[ $bootloader = "refind" ]]; then
-					setup_refind
-					setup_refind_btrfs_sanpshot_menu
-				fi
-				setup_custom_secure_boot_key
-			else
-				echo -e "\e[32mINFO:\e[0mSecure Boot Disabled"
-				echo -e "\e[32mINFO:\e[0mInstall $bootloader"
-				if [[ $bootloader = "grub" ]]; then
-					setup_grub                  
-				elif [[ $bootloader = ""refind ]]; then
-					setup_refind
-					setup_refind_btrfs_sanpshot_menu
-				fi
-			fi
-		else
-			echo -e "\e[32mINFO:\e[0mConfig Encrypt"
-			setup_fstab_crpttab
-			if [[ "$secure_boot_status" = enabled ]]; then
-				echo -e "\e[32mINFO:\e[0mSecure Boot enabled"
-				#if secure boot is enabled and not in setup mode (we can't enroll new MOK) only Ubuntu signed grub/kernel can be used
-				echo -e "\e[32mINFO:\e[0mInstall $bootloader"
-				setup_grub
-				
-				if [[ $tpm_unlock = yes ]]; then
-					setup_tpm_luks_auto_ulock
-				fi
-			elif [[ "$secure_boot_status" = custom ]]; then
-				echo -e "\e[32mINFO:\e[0mSecure Boot in Setup Mode"
-				echo -e "\e[32mINFO:\e[0mInstall $bootloader"
-				if [[ $bootloader = "grub" ]]; then
-					setup_grub
-				elif [[ $bootloader = "refind" ]]; then
-					setup_refind
-					setup_refind_btrfs_sanpshot_menu
-				fi
+	setup_fstab_crpttab
+	mount -o subvol=$root_sub_vol/@home /dev/mapper/root /home
+	dbus-daemon --system --fork
 
-				if [[ $tpm_unlock = yes ]]; then
-					setup_tpm_luks_auto_ulock
-				fi
+	# shellcheck source=./secure-boot/scripts/sbctl-install
+	. ./secure-boot/scripts/sbctl-install
+	# shellcheck source=./refind/scripts/refind-install
+	. ./refind/scripts/refind-install
+	. ./snapper/scripts/snapper-install
+	. ./uki/scripts/install-uki
 
-				setup_custom_secure_boot_key
-			else
-				echo -e "\e[32mINFO:\e[0mSecure Boot Disabled"
-				echo -e "\e[32mINFO:\e[0mInstall $bootloader"
-				if [[ $bootloader = "grub" ]]; then
-					setup_grub
-				elif [[ $bootloader = "refind" ]]; then
-					setup_refind
-					setup_refind_btrfs_sanpshot_menu
-				fi
-			fi
-		fi
-	else
-		echo -e "\e[32mINFO:\e[0mConfig Boot partition separated"
-		fatlabel /dev/$efi_dev "BOOT_EFI"
-
-		if [[ "$only_subvols" = "yes" ]]; then
-			echo -e "\e[32mINFO:\e[0mConfig NON Encrypt"
-			setup_fstab
-			if [[ "$secure_boot_status" = "enabled" ]]; then
-				
-				echo -e "\e[32mINFO:\e[0mSecure Boot enabled"
-				#if secure boot is enabled and not in setup mode (we can't enroll new MOK) only Ubuntu signed grub/kernel can be used
-				setup_custom_secure_boot_key
-				echo -e "\e[32mINFO:\e[0mInstall $bootloader"
-				setup_grub
-				
-			elif [[ "$secure_boot_status" = "setup" ]]; then
-				echo -e "\e[32mINFO:\e[0mSecure Boot in Setup Mode"
-				setup_custom_secure_boot_key
-				echo -e "\e[32mINFO:\e[0mInstall $bootloader"
-				if [[ $bootloader = "grub" ]]; then
-					setup_grub
-				elif [[ $bootloader = "refind" ]]; then
-					setup_refind
-					setup_refind_btrfs_sanpshot_menu
-				fi
-				
-			else
-				echo -e "\e[32mINFO:\e[0mSecure Boot Disabled"
-				echo -e "\e[32mINFO:\e[0mInstall $bootloader"
-				if [[ $bootloader = "grub" ]]; then
-					setup_grub
-					
-				elif [[ $bootloader = "refind" ]]; then
-					setup_refind
-					setup_refind_btrfs_sanpshot_menu
-				fi
-			fi
-		else
-			echo -e "\e[32mINFO:\e[0mConfig Encrypt"
-			setup_fstab_crpttab
-
-			if [[ "$secure_boot_status" = "enabled" ]]; then
-				echo -e "\e[32mINFO:\e[0mSecure Boot enabled and not in Setup-Mode.....Aborting"
-				exit
-			elif [[ "$secure_boot_status" = "setup" ]]; then
-				echo -e "\e[32mINFO:\e[0mSecure Boot in Setup Mode"
-				setup_custom_secure_boot_key
-				echo -e "\e[32mINFO:\e[0mInstall $bootloader"
-				
-				if [[ $bootloader = "grub" || $bootloader = "grub+refind" ]]; then
-					setup_grub
-					if [[ $tpm_unlock = yes ]]; then
-						setup_tpm_luks_auto_ulock
-					fi
-				fi
-				if [[ $bootloader = "refind" || $bootloader = "grub+refind" ]]; then
-					setup_refind
-
-				fi
-			else
-				echo -e "\e[32mINFO:\e[0mSecure Boot Disabled"
-				echo -e "\e[32mINFO:\e[0mInstall $bootloader"
-
-				if [[ $bootloader = "grub" ]]; then
-					setup_grub
-				elif [[ $bootloader = "refind" ]]; then
-					setup_refind
-				fi
-			fi
-		fi
-	fi
-
-	suite_selction
-
-	umount proc 2>/dev/null || true
-	umount home 2>/dev/null || true
-
+	#umount proc 2>/dev/null || true
+	#umount home 2>/dev/null || true
 
 	exit
 
@@ -982,6 +301,56 @@ while :; do
 	shift
 done
 
+unmount_everything() {
+    local root="${mp}"
+    local lazy_fallback="${2:-false}"
+    local target
+    local i
+    local failed=0
+
+    [[ -e "$root" ]] || return 0
+
+    mapfile -t mounts < <(
+        findmnt -Rrn -o TARGET "$root" 2>/dev/null
+    )
+
+    ((${#mounts[@]})) || return 0
+
+    for ((i = ${#mounts[@]} - 1; i >= 0; i--)); do
+        target="${mounts[i]}"
+
+        mountpoint -q "$target" || continue
+
+        echo "Unmounting: $target"
+
+        if umount "$target"; then
+            continue
+        fi
+
+        echo "Retrying: $target" >&2
+        sync
+
+        sleep 0.2
+
+        if umount "$target"; then
+            continue
+        fi
+
+        if [[ "$lazy_fallback" == true ]]; then
+            echo "Lazy unmount: $target" >&2
+
+            if umount -l "$target"; then
+                continue
+            fi
+        fi
+
+        echo "ERROR: unable to unmount $target" >&2
+        failed=1
+    done
+	sleep 2
+	cryptsetup close root
+    return "$failed"
+}
 
 if [[ -z $PASSPHRASE ]]; then
 	echo "You must pass the PASSPHRASE of the root volume to encrypt"
@@ -997,17 +366,10 @@ fi
 
 preparation
 create_subvols
-
-if [[ $only_subvols = no ]]; then
-    encrypt_and_enlarge $root_dev
-fi
+encrypt_and_enlarge
 prepare_chroot
 chroot_and_mkinitramfs
 unmount_everything
 
 echo "Finished"
-#mkdir ~/rescue-iso
-#apt --no-install-recommends -y install btrfs-assistant btrfsmaintenance snapper shim-signed
-#find ~/rescue-iso/custom-* -name grub*.efi -exec sudo sbctl sign -s {} \;
-#sudo dd if=ubuntu-26.04.0-2026.07.31-desktop-amd64.iso of=/dev/$rescue_dev bs=100k status=progress
 

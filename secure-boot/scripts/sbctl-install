@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+script="${BASH_SOURCE[0]}"
+scriptname="$(basename "$script")"
+
+repository_root="$(
+    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
+        pwd
+)"
+
+source $repository_root/setup.conf
+
+[[ $EUID -eq 0 ]] || {
+    echo "Run $scriptname as root." >&2
+    exit 1
+}
+
+
+secureboot_status() {
+	local state
+
+	command -v mokutil >/dev/null 2>&1 || {
+		echo "unknown"
+		return 1
+	}
+
+	state="$(mokutil --sb-state 2>/dev/null)"
+
+	if grep -qi "Platform is in Setup Mode" <<<"$state"; then
+		echo "setup"
+	elif grep -qi "SecureBoot enabled" <<<"$state"; then
+		echo "enabled"
+	elif grep -qi "SecureBoot disabled" <<<"$state"; then
+		echo "disabled"
+	else
+		echo "unknown"
+		return 1
+	fi
+}
+
+sb_status=$(secureboot_status)
+
+if [[ $sb_status != "setup" ]]; then  
+    echo "Secure Boot not in Setup Mode!." >&2
+    exit 1
+fi
+
+echo -e "\e[32mINFO:\e[0mInstalling sbctl and enroll a new Machine Owner Platform key"
+	
+apt install -y \
+    asciidoc-base \
+    pkgconf \
+    pkgconf-bin \
+    curl \
+    jq \
+    libpcsclite-dev \
+    libpcsclite1 \
+    golang-go \
+    sbsigntool \
+    git \
+    build-essential \
+    pcscd \
+    fwupd-unsigned
+
+apt remove -y fwupd-signed
+
+if [[ $pre_download = "no" ]]; then
+    go install github.com/foxboron/sbctl/cmd/sbctl@latest
+fi
+mv -f ~/go/bin/sbctl /usr/sbin/
+    
+
+sbctl create-keys
+sbctl enroll-keys --microsoft
+sbctl status
+
+cat >> /etc/fwupd/fwupd.conf <<-EOL
+    
+    [uefi_capsule]
+    EnableGrubChainLoad=false
+    DisableShimForSecureBoot=true
+EOL
+sbctl sign -s /usr/libexec/fwupd/efi/fwupdx64.efi

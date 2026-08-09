@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+source /etc/uki/uki.conf
+
+kernel_version="${1:?Usage: remove-uki <kernel-version>}"
+uki="${ESP_DIR}/${UKI_RELATIVE_DIR}/${UKI_PREFIX}-${kernel_version}.efi"
+
+rm -f -- "$uki"
+
+printf '[uki] Removed UKI: %s\n' "$uki"

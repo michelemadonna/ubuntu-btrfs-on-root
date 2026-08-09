@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+script="${BASH_SOURCE[0]}"
+scriptname="$(basename "$script")"
+
+repository_root="$(
+    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
+        pwd
+)"
+
+source $repository_root/setup.conf
+
+[[ $EUID -eq 0 ]] || {
+    echo "Run $scriptname as root." >&2
+    exit 1
+}
+
+echo -e "\e[32mINFO:\e[0mInstall Snapper..."
+
+apt install -y snapper inotify-tools 
+
+snapper -c root create-config /
+snapper -c root set-config 'TIMELINE_CREATE=yes'
+snapper -c root set-config 'ALLOW_GROUPS=sudo'
+snapper -c root set-config 'SYNC_ACL=yes'
+
+snapper -c home create-config /home
+snapper -c home set-config 'TIMELINE_CREATE=yes'
+snapper -c home set-config 'ALLOW_GROUPS=sudo'
+snapper -c home set-config 'SYNC_ACL=yes'   
+
+apt --no-install-recommends -y install btrfs-assistant btrfsmaintenance
