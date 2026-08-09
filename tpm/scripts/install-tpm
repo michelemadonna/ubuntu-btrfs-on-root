@@ -21,7 +21,7 @@ apt-get install -y \
     libtss2-rc0t64 \
     libtss2-tcti-tabrmd0
 
-luks_device=/dev/$root_device
+luks_device=/dev/$root_dev
 repository_root=$repository_root/tpm
 #read -r -p "Physical LUKS2 device [/dev/nvme0n1p3]: " luks_device
 #luks_device="${luks_device:-/dev/nvme0n1p3}"
