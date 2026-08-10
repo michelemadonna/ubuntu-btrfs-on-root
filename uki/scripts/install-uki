@@ -22,7 +22,9 @@ apt-get install -y \
     systemd-ukify \
     binutils \
     rsync \
-    openssl
+    openssl \
+    systemd-repart \
+    systemd-boot-efi
 
 
 
@@ -64,7 +66,7 @@ export esp_directory=/boot/efi
 export btrfs_uuid="$(blkid --output export /dev/mapper/root | grep ^UUID= | cut -c 6-)"
 export luks_uuid=$(cryptsetup luksUUID /dev/$root_dev)
 export root_subvolume=$root_sub_vol/@
-export repository_root=$repository_root/uki
+
 
 install -d -m 0700 /etc/uki/keys
 #install -d -m 0755 /etc/kernel
@@ -82,15 +84,15 @@ chmod 0644 /etc/kernel/install.conf
 echo $suite > /etc/kernel/entry-token
 chmod 0644 /etc/kernel/entry-token
 
-cat > /etc/kernel/uki.conf <<'EOF'
+cat > /etc/kernel/uki.conf << 'EOF'
     [UKI]
     PCRBanks=sha256
 
-    SecureBootSigningTool=systemd-sbsign
+    SecureBootSigningTool=sbsign
     SecureBootPrivateKey=/var/lib/sbctl/keys/db/db.key
     SecureBootCertificate=/var/lib/sbctl/keys/db/db.pem
 
-    SignKernel=true
+    SignKernel=false
 
     [PCRSignature:initrd]
     PCRPrivateKey=/etc/uki/keys/pcr-private.pem
@@ -105,7 +107,7 @@ ln -sf \
 rsync \
     -a \
     --delete \
-    "$repository_root/dracut/92snapshot-menu/" \
+    $repository_root/uki"/dracut/92snapshot-menu/" \
     /usr/lib/dracut/modules.d/92snapshot-menu/
 
 chmod 0755 \
@@ -113,15 +115,12 @@ chmod 0755 \
     /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu-hook.sh \
     /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.sh
 
-cat > /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf <<-EOF
+cat > /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf <<- EOF
     ROOT_SUBVOL="${root_subvolume}"
     SNAPSHOT_DIR=".snapshots"
-
     TTY="/dev/tty1"
-
     MOUNTPOINT="/run/snapshot-menu-root"
     RESULT="/run/snapshot-menu-selected"
-
     CMDLINE_DIR="/etc/cmdline.d"
     SNAPSHOT_CMDLINE="/etc/cmdline.d/99-snapshot.conf"
 EOF
@@ -153,22 +152,15 @@ fi
 chmod 0600 /etc/uki/keys/pcr-private.pem
 chmod 0644 /etc/uki/keys/pcr-public.pem
 
-#if [[ ! -e /etc/kernel/cmdline ]]; then
-#sed \
-#    -e "s/__BTRFS_UUID__/${btrfs_uuid}/g" \
-#    -e "s/__LUKS_UUID__/${luks_uuid}/g" \
-#    -e "s/__ROOT_SUBVOL__/${root_subvolume}/g" \
-#    "$repository_root/config/cmdline.example" \
-#    >/etc/kernel/cmdline
-
 echo "root=UUID=${btrfs_uuid} rootfstype=btrfs rootflags=${btrfs_options},subvol=${root_subvolume} rd.luks.uuid=luks-${luks_uuid} quiet splash" > /etc/kernel/cmdline
-
 chmod 0644 /etc/kernel/cmdline
-#else
-#    echo "Keeping the existing /etc/kernel/cmdline file."
-#fi
 
 echo 'add_dracutmodules+=" overlayfs "' | tee /etc/dracut.conf.d/99_overlayfs.conf
+
+sudo install -m 755 \
+    "$repository_root/uki/hooks/99-refind-icon.install" \
+    /usr/lib/kernel/install.d/99-refind-icon.install
+
 
 if [[ $enable_tpm == "yes" ]]; then
     echo 'add_dracutmodules+=" tpm2-tss crypt "' > /etc/dracut.conf.d/99_tpm2.conf
@@ -209,20 +201,34 @@ case "$answer" in
 
             echo "Generating UKI for $version"
 
+            #if sbverify --list "$kernel" 2>/dev/null |
+            #    grep -q '^signature '; then
+#
+            #    echo "Removing embedded kernel Authenticode signature for UKI assembly"
+#
+            #    sbattach \
+            #        --remove \
+            #        "$kernel"
+            #fi
+
+
             kernel-install add \
                 "$version" \
                 "$kernel"
             
             echo "Validating generated UKI for $version"
-            temporary_uki="/boot/efi/EFI/Linux/${distro_id}-${version}.efi"
+            cp -- "/boot/efi/EFI/Linux/${suite}-${version}.efi" "/tmp/${suite}-${version}-copy.efi"
+            temporary_uki="/tmp/${suite}-${version}-copy.efi"
             
             echo "Validate the UKI signature using sbctl"
             sbctl verify "$temporary_uki"
+            sbverify --list "$temporary_uki"
+            
 
-            sections="$(objdump -h "$temporary_uki")" || {
+            sections="$(objdump -h "$temporary_uki" || {
                 echo "Unable to inspect generated UKI"
             }
-
+#
             for section in \
                 .linux \
                 .initrd \
@@ -234,7 +240,7 @@ case "$answer" in
                 grep -Fq "$section" <<<"$sections" ||
                     echo "Required UKI section is missing: ${section}"
             done
-
+#
             embedded_uname="$(
                 objcopy \
                     --dump-section .uname=/dev/stdout \
@@ -242,7 +248,7 @@ case "$answer" in
                     2>/dev/null |
                     tr -d '\0\n'
             )"
-
+#
             [[ "$embedded_uname" == "$version" ]] ||
                 echo "Embedded kernel version '${embedded_uname}' does not match '${version}'"
 
@@ -250,8 +256,8 @@ case "$answer" in
 
             objcopy \
                 --dump-section ".initrd=${work_directory}/initrd" \
-                "$temporary_uki"
-
+                "$temporary_uki" 2>/dev/null
+#
             [[ -s "${work_directory}/initrd" ]] ||
                 echo "Unable to extract the embedded initrd"
 
@@ -267,6 +273,7 @@ case "$answer" in
 
             grep -qE 'hooks/pre-mount/.+snapshot-menu-hook\.sh$' <<<"$initrd_listing" ||
                 echo "Snapshot menu pre-mount hook is missing from the initrd"
+            
             echo "UKI for $version generated and validated successfully."
         done
         ;;

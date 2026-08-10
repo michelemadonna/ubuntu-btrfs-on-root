@@ -1,7 +1,0 @@
-#!/bin/sh
-set -eu
-
-kernel_version="${1:-}"
-[ -n "$kernel_version" ] || exit 0
-
-exec /usr/local/sbin/generate-and-sign-uki "$kernel_version"

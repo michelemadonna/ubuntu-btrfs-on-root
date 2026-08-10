@@ -27,7 +27,8 @@ unzip $repository_root/refind/refind_themes.zip -d /boot/efi/EFI/refind/
 			
 cat >> /boot/efi/EFI/refind/refind.conf <<-EOF
 	#scanfor external,optical,manual
-	also_scan_dirs EFI/Linux/$suite
+	fold_linux_kernels true
+	linux_prefixes ubuntu,kali
 	dont_scan_dirs EFI/systemd
 	dont_scan_files shimx64.efi,grubx64.efi,mmx64.efi,fbx64.efi
 	enable_touch

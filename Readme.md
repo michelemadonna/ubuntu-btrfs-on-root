@@ -55,6 +55,11 @@ ubuntu-uki/
 ## Installation
 
 ```bash
+sudo chronyc online
+sudo chronyc burst 4/4
+sleep 5
+chronyc sources -v
+sudo chronyc makestep
 sudo apt install -y  git
 git clone https://github.com/michelemadonna/ubuntu-btrfs-on-root.git ~/ubuntu-btrfs-on-root
 cd ~/ubuntu-btrfs-on-root
