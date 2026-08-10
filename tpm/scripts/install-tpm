@@ -22,7 +22,7 @@ apt-get install -y \
     libtss2-tcti-tabrmd0
 
 luks_device=/dev/$root_dev
-repository_root=$repository_root/tpm
+
 #read -r -p "Physical LUKS2 device [/dev/nvme0n1p3]: " luks_device
 #luks_device="${luks_device:-/dev/nvme0n1p3}"
 
@@ -46,7 +46,7 @@ install -d -m 0755 /usr/local/sbin
 
 install \
     -m 0644 \
-    "$repository_root/config/tpm.conf" \
+    "$repository_root/tpm/config/tpm.conf" \
     /etc/uki/tpm.conf
 
 sed -i \
@@ -55,22 +55,22 @@ sed -i \
 
 install \
     -m 0755 \
-    "$repository_root/scripts/tpm-enroll" \
+    "$repository_root/tpm/scripts/tpm-enroll" \
     /usr/local/sbin/tpm-enroll
 
 install \
     -m 0755 \
-    "$repository_root/scripts/tpm-reseal" \
+    "$repository_root/tpm/scripts/tpm-reseal" \
     /usr/local/sbin/tpm-reseal
 
 install \
     -m 0755 \
-    "$repository_root/scripts/tpm-status" \
+    "$repository_root/tpm/scripts/tpm-status" \
     /usr/local/sbin/tpm-status
 
 install \
     -m 0755 \
-    "$repository_root/scripts/uninstall-tpm" \
+    "$repository_root/tpm/scripts/uninstall-tpm" \
     /usr/local/sbin/uninstall-tpm
 
 echo 'add_dracutmodules+=" tpm2-tss crypt "' > /etc/dracut.conf.d/99_tpm2.conf

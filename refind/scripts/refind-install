@@ -27,9 +27,8 @@ unzip $repository_root/refind/refind_themes.zip -d /boot/efi/EFI/refind/
 			
 cat >> /boot/efi/EFI/refind/refind.conf <<-EOF
 	#scanfor external,optical,manual
-	fold_linux_kernels true
-	linux_prefixes ubuntu,kali
-	dont_scan_dirs EFI/systemd
+
+	dont_scan_dirs EFI/systemd,EFI/Linux
 	dont_scan_files shimx64.efi,grubx64.efi,mmx64.efi,fbx64.efi
 	enable_touch
 	enable_mouse
@@ -45,6 +44,7 @@ cat >> /boot/efi/EFI/refind/refind.conf <<-EOF
 	}
 EOF
 
+echo "include refind-linux-$suite.conf" >> /boot/efi/EFI/refind/refind.conf
 
 for f in btrfs_x64.efi iso9660_x64.efi ext2_x64.efi ext4_x64.efi ; do
 	sbctl sign -s "/boot/efi/EFI/refind/drivers_x64/$f"

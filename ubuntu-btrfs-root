@@ -99,14 +99,35 @@ encrypt_and_enlarge() {
 
 prepare_chroot() {
 	echo -e "\e[32mINFO:\e[0mPrepare $mp for chroot"  
-	mount -t proc proc $mp/proc
-	mount -t sysfs sys $mp/sys
-	mount --bind /dev $mp/dev
+	mount --rbind /dev "$mp/dev"
+    mount --make-rslave "$mp/dev"
+
+    mount -t proc proc "$mp/proc"
 	mount -t devpts pts $mp/dev/pts
-	mount --bind /run $mp/run
+
+    mount --rbind /sys "$mp/sys"
+    mount --make-rslave "$mp/sys"
+
+    mount -t tmpfs tmpfs "$mp/run"
+
 	mount /dev/$efi_dev $mp/boot/efi
 	mkdir -p $mp/sys/firmware/efi/efivars && mount --bind /sys/firmware/efi/efivars $mp/sys/firmware/efi/efivars
+
+    # Preserve target's resolv.conf
+    if [[ -e "$mp/etc/resolv.conf" || -L "$mp/etc/resolv.conf" ]]; then
+        mv "$mp/etc/resolv.conf" "$mp/etc/resolv.conf.chroot-save"
+    fi
+
+    cp /run/systemd/resolve/resolv.conf "$mp/etc/resolv.conf"
+
+    # Prevent packages from starting/stopping services
+    cat > "$mp/usr/sbin/policy-rc.d" <<- 'EOF'
+		#!/bin/sh
+		exit 101
+	EOF
+    chmod 755 "$mp/usr/sbin/policy-rc.d"
 }
+
 
 chroot_and_mkinitramfs() {
 	cp -Rf "$script_dir" "$mp/root/"
@@ -308,7 +329,17 @@ unmount_everything() {
     local i
     local failed=0
 
+	
+
     [[ -e "$root" ]] || return 0
+
+	rm -f "$root/usr/sbin/policy-rc.d"
+
+    rm -f "$root/etc/resolv.conf"
+    if [[ -e "$root/etc/resolv.conf.chroot-save" ||
+          -L "$root/etc/resolv.conf.chroot-save" ]]; then
+        mv "$root/etc/resolv.conf.chroot-save" "$root/etc/resolv.conf"
+    fi
 
     mapfile -t mounts < <(
         findmnt -Rrn -o TARGET "$root" 2>/dev/null
@@ -349,7 +380,6 @@ unmount_everything() {
     done
 	sleep 2
 	cryptsetup close root
-    return "$failed"
 }
 
 if [[ -z $PASSPHRASE ]]; then
