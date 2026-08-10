@@ -399,7 +399,7 @@ create_subvols
 encrypt_and_enlarge
 prepare_chroot
 chroot_and_mkinitramfs
-#unmount_everything
+unmount_everything
 
 echo "Finished"
 
