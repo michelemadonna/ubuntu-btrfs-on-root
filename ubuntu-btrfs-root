@@ -109,16 +109,27 @@ prepare_chroot() {
     mount --make-rslave "$mp/sys"
 
     mount -t tmpfs tmpfs "$mp/run"
-
+	
+	mount -o subvol=$root_sub_vol/@home /dev/mapper/root $mp/home
+	
 	mount /dev/$efi_dev $mp/boot/efi
 	mkdir -p $mp/sys/firmware/efi/efivars && mount --bind /sys/firmware/efi/efivars $mp/sys/firmware/efi/efivars
 
+	#mount --rbind /run "$mp/run"
+	#mount --make-rslave "$mp/run"
+	mount -t tmpfs tmpfs "$mp/run"
+	mkdir -p "$mp/run/dbus"
+	#chroot "$mp" dbus-daemon --system --fork
     # Preserve target's resolv.conf
     if [[ -e "$mp/etc/resolv.conf" || -L "$mp/etc/resolv.conf" ]]; then
         mv "$mp/etc/resolv.conf" "$mp/etc/resolv.conf.chroot-save"
     fi
 
     cp /run/systemd/resolve/resolv.conf "$mp/etc/resolv.conf"
+	cat > /etc/resolv.conf <<- 'EOF'
+		nameserver 1.1.1.1
+		nameserver 8.8.8.8
+	EOF
 
     # Prevent packages from starting/stopping services
     cat > "$mp/usr/sbin/policy-rc.d" <<- 'EOF'
@@ -234,8 +245,8 @@ pre_download_all(){
 # ------------------------------
 
 if [[ "$1" = "//inner" ]]; then
-	#
-	# shellcheck source=./setup.conf
+	
+	dbus-daemon --system --fork
 	cd ~/ubuntu-btrfs-on-root
 	. ./setup.conf	
 	apt-get update
@@ -244,18 +255,14 @@ if [[ "$1" = "//inner" ]]; then
 	fi
 
 	setup_fstab_crpttab
-	mount -o subvol=$root_sub_vol/@home /dev/mapper/root /home
-	dbus-daemon --system --fork
+	
+	
 
-	# shellcheck source=./secure-boot/scripts/sbctl-install
+
 	. ./secure-boot/scripts/sbctl-install
-	# shellcheck source=./refind/scripts/refind-install
 	. ./refind/scripts/refind-install
 	. ./snapper/scripts/snapper-install
 	. ./uki/scripts/install-uki
-
-	#umount proc 2>/dev/null || true
-	#umount home 2>/dev/null || true
 
 	exit
 

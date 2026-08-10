@@ -59,11 +59,11 @@ apt-get install -y \
 #read -r -p "Normal root subvolume [@ubuntu]: " root_subvolume
 #root_subvolume="${root_subvolume:-@ubuntu}"
 
-distro_id=$suite
-esp_directory=/boot/efi
-btrfs_uuid="$(blkid --output export /dev/mapper/root | grep ^UUID= | cut -c 6-)"
-luks_uuid=$(cryptsetup luksUUID /dev/$root_dev)
-root_subvolume=$root_sub_vol/@
+export distro_id=$suite
+export esp_directory=/boot/efi
+export btrfs_uuid="$(blkid --output export /dev/mapper/root | grep ^UUID= | cut -c 6-)"
+export luks_uuid=$(cryptsetup luksUUID /dev/$root_dev)
+export root_subvolume=$root_sub_vol/@
 
 
 install -d -m 0700 /etc/uki/keys
@@ -155,7 +155,7 @@ chmod 0644 /etc/kernel/cmdline
 
 echo 'add_dracutmodules+=" overlayfs "' | tee /etc/dracut.conf.d/99_overlayfs.conf
 
-sudo install -m 755 \
+install -m 755 \
     "$repository_root/uki/hooks/99-refind-menu.install" \
     /usr/lib/kernel/install.d/99-refind-menu.install
 

@@ -21,7 +21,7 @@ apt-get install -y \
     libtss2-rc0t64 \
     libtss2-tcti-tabrmd0
 
-luks_device=/dev/$root_dev
+export luks_device=/dev/$root_dev
 
 #read -r -p "Physical LUKS2 device [/dev/nvme0n1p3]: " luks_device
 #luks_device="${luks_device:-/dev/nvme0n1p3}"
@@ -67,11 +67,6 @@ install \
     -m 0755 \
     "$repository_root/tpm/scripts/tpm-status" \
     /usr/local/sbin/tpm-status
-
-install \
-    -m 0755 \
-    "$repository_root/tpm/scripts/uninstall-tpm" \
-    /usr/local/sbin/uninstall-tpm
 
 echo 'add_dracutmodules+=" tpm2-tss crypt "' > /etc/dracut.conf.d/99_tpm2.conf
 if grep -qE 'rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes' /etc/kernel/cmdline; then
