@@ -233,7 +233,8 @@ generate_refind_menu() {
         printf '    loader /EFI/Linux/%s\n' \
             "${latest_uki}"
 
-
+		printf '    graphics on\n'
+		printf '    ostype Linux\n'
         # -------------------------------------------------------------------
         # Submenu entries: older kernels
         # -------------------------------------------------------------------

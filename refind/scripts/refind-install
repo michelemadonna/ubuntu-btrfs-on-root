@@ -27,12 +27,12 @@ unzip $repository_root/refind/refind_themes.zip -d /boot/efi/EFI/refind/
 			
 cat >> /boot/efi/EFI/refind/refind.conf <<-EOF
 	#scanfor external,optical,manual
-
 	dont_scan_dirs EFI/systemd,EFI/Linux
 	dont_scan_files shimx64.efi,grubx64.efi,mmx64.efi,fbx64.efi
+	linux_prefixes ubuntu,kali
 	enable_touch
 	enable_mouse
-	use_graphics_for osx,linux
+	use_graphics_for osx,linux,windows
 	include themes/refind-theme-regular/theme.conf
 
     menuentry "Ubuntu Linux (Grub-btrfs)" {
