@@ -97,7 +97,7 @@ BIG_ICON_SIZE="${BIG_ICON_SIZE:-128}"
 # ---------------------------------------------------------------------------
 
 ICON_DIR="$(
-    find "${REFIND_DIR}" \
+    find "${REFIND_ICON_DIR}" \
         -type d \
         -name "${BIG_ICON_SIZE}-*" \
         -print \
@@ -171,7 +171,7 @@ generate_refind_menu() {
     # Find all UKIs belonging to this OS and sort newest first.
     #
     mapfile -t ukis < <(
-        find "${REFIND_ICON_DIR}" \
+        find "${UKI_DIR}" \
             -maxdepth 1 \
             -type f \
             -name "${PREFIX}-*.efi" \
