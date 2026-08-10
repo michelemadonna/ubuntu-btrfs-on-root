@@ -22,9 +22,7 @@ apt-get install -y \
     systemd-ukify \
     binutils \
     rsync \
-    openssl \
-    systemd-repart \
-    systemd-boot-efi
+    openssl
 
 
 

@@ -252,7 +252,7 @@ if [[ "$1" = "//inner" ]]; then
 	# shellcheck source=./refind/scripts/refind-install
 	. ./refind/scripts/refind-install
 	. ./snapper/scripts/snapper-install
-	#. ./uki/scripts/install-uki
+	. ./uki/scripts/install-uki
 
 	#umount proc 2>/dev/null || true
 	#umount home 2>/dev/null || true
