@@ -7,6 +7,20 @@ umask 077
 	exit 1
 }
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+trim() {
+    local value="${1:-}"
+
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+
+    printf '%s' "$value"
+}
+
+
 PREFIX_FILE="/etc/kernel/entry-token"
 read -r -p "Generate the UKI for all installed kernel now? [Y/n]: " answer
 
@@ -92,11 +106,11 @@ case "$answer" in
             echo
             echo "🔐 Validating Secure Boot signature..."
 
-            if sbctl verify "$temporary_uki"; then
-                echo "✅ sbctl verification passed"
+            if sbverify --cert /var/lib/sbctl/keys/db/db.pem "$temporary_uki"; then
+                echo "✅ sbverify verification passed"
             else
-                echo "❌ sbctl verification failed"
-                kernel_errors+=("sbctl signature verification failed")
+                echo "❌ sbverify verification failed"
+                kernel_errors+=("sbverify signature verification failed")
             fi
 
             if sbverify --list "$temporary_uki"; then

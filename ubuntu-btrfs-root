@@ -215,22 +215,26 @@ suite_selction(){
 
 pre_download_all(){
 	
-	apt install -y --download-only refind build-essential snapper inotify-tools cryptsetup-initramfs libtasn1-6 libdevmapper1.02.1 \
-		libc6 libselinux1 libudev1 libpcre2-8-0 gawk git make asciidoc-base pkgconf pkgconf-bin curl jq \
-		libpcsclite-dev libpcsclite1 golang-go sbsigntool tpm2-tools tpm2-tss libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64 libtss2-tcti-tabrmd0
+	#apt install -y --download-only refind build-essential snapper inotify-tools cryptsetup-initramfs libtasn1-6 libdevmapper1.02.1 \
+	#	libc6 libselinux1 libudev1 libpcre2-8-0 gawk git make asciidoc-base pkgconf pkgconf-bin curl jq \
+	#	libpcsclite-dev libpcsclite1 golang-go sbsigntool tpm2-tools tpm2-tss libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64 libtss2-tcti-tabrmd0
 	apt install --no-install-recommends -y --download-only btrfs-assistant btrfsmaintenance
 	
-	apt install -y --download-only dracut \
+	apt install -y --download-only refind snapper inotify-tools cryptsetup-initramfs
+	dracut \
     dialog \
     systemd-ukify \
     binutils \
     rsync \
     openssl \
 	systemd-cryptsetup \
-    cryptsetup-bin
-	apt install -y asciidoc-base pkgconf pkgconf-bin curl jq libpcsclite-dev libpcsclite1 golang-go sbsigntool git build-essential pcscd fwupd-unsigned
-
+    cryptsetup-bin \
+	tpm2-tools tpm2-tss libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64 libtss2-tcti-tabrmd0 fwupd-unsigned
+	
+	apt install -y asciidoc-base pkgconf pkgconf-bin curl libpcsclite-dev libpcsclite1 golang-go sbsigntool pcscd  
 	go install github.com/foxboron/sbctl/cmd/sbctl@latest
+	
+	
 	apt install -y openssh-server open-vm-tools-desktop
 	#apt install -y --download-only mythes-en-au mythes-en-us  \
 	#			thunderbird-locale-en thunderbird-locale-en-gb thunderbird-locale-en-us \
