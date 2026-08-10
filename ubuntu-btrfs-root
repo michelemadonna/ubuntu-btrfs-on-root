@@ -119,14 +119,14 @@ prepare_chroot() {
 	#mount --make-rslave "$mp/run"
 	mount -t tmpfs tmpfs "$mp/run"
 	mkdir -p "$mp/run/dbus"
-	#chroot "$mp" dbus-daemon --system --fork
+
     # Preserve target's resolv.conf
     if [[ -e "$mp/etc/resolv.conf" || -L "$mp/etc/resolv.conf" ]]; then
         mv "$mp/etc/resolv.conf" "$mp/etc/resolv.conf.chroot-save"
     fi
 
     cp /run/systemd/resolve/resolv.conf "$mp/etc/resolv.conf"
-	cat > /etc/resolv.conf <<- 'EOF'
+	cat > $mp/etc/resolv.conf <<- 'EOF'
 		nameserver 1.1.1.1
 		nameserver 8.8.8.8
 	EOF

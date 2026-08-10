@@ -1,0 +1,297 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+[[ $EUID -eq 0 ]] || {
+	echo "Run generate-uki as root." >&2
+	exit 1
+}
+
+PREFIX_FILE="/etc/kernel/entry-token"
+read -r -p "Generate the UKI for all installed kernel now? [Y/n]: " answer
+
+[[ -r "${PREFIX_FILE}" ]] || exit 0
+
+PREFIX="$(trim "$(<"${PREFIX_FILE}")")"
+
+[[ -n "${PREFIX}" ]] || exit 0
+
+case "$answer" in
+    n|N)
+        ;;
+
+    *)
+        declare -a uki_success=()
+        declare -a uki_failed=()
+
+        for kernel in /boot/vmlinuz-*; do
+            [[ -f "$kernel" ]] || continue
+
+            version="${kernel#/boot/vmlinuz-}"
+            module_dir="/usr/lib/modules/${version}"
+            uki="/boot/efi/EFI/Linux/${PREFIX}-${version}.efi"
+
+            declare -a kernel_errors=()
+
+            echo
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🚀 Processing kernel: ${version}"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+            if [[ ! -d "$module_dir" ]]; then
+                echo "⚠️  Kernel modules not found: ${module_dir}"
+                uki_failed+=("${version}: kernel modules missing")
+                continue
+            fi
+
+            echo "🔧 Generating UKI..."
+
+            if kernel-install add "$version" "$kernel"; then
+                echo "✅ kernel-install completed"
+            else
+                echo "❌ kernel-install failed"
+                kernel_errors+=("kernel-install failed")
+            fi
+
+            # ------------------------------------------------------------
+            # Check generated UKI
+            # ------------------------------------------------------------
+
+            if [[ ! -f "$uki" ]]; then
+                echo "❌ Generated UKI not found: ${uki}"
+                kernel_errors+=("generated UKI not found")
+
+                uki_failed+=(
+                    "${version}: ${kernel_errors[*]}"
+                )
+
+                continue
+            fi
+
+            echo "📦 Generated UKI: ${uki}"
+
+            temporary_uki="$(mktemp --tmpdir "${PREFIX}-${version}.XXXXXX.efi")"
+
+            if cp -- "$uki" "$temporary_uki"; then
+                echo "📋 Created validation copy: ${temporary_uki}"
+            else
+                echo "❌ Unable to create temporary UKI copy"
+                kernel_errors+=("unable to create temporary UKI copy")
+
+                uki_failed+=(
+                    "${version}: ${kernel_errors[*]}"
+                )
+
+                continue
+            fi
+
+            # ------------------------------------------------------------
+            # Secure Boot signature validation
+            # ------------------------------------------------------------
+
+            echo
+            echo "🔐 Validating Secure Boot signature..."
+
+            if sbctl verify "$temporary_uki"; then
+                echo "✅ sbctl verification passed"
+            else
+                echo "❌ sbctl verification failed"
+                kernel_errors+=("sbctl signature verification failed")
+            fi
+
+            if sbverify --list "$temporary_uki"; then
+                echo "✅ PE/COFF signature found"
+            else
+                echo "❌ Unable to validate PE/COFF signature"
+                kernel_errors+=("sbverify signature verification failed")
+            fi
+
+            # ------------------------------------------------------------
+            # PE section validation
+            # ------------------------------------------------------------
+
+            echo
+            echo "🔍 Inspecting UKI sections..."
+
+            if sections="$(objdump -h "$temporary_uki" 2>/dev/null)"; then
+
+                for section in \
+                    .linux \
+                    .initrd \
+                    .cmdline \
+                    .uname \
+                    .pcrpkey \
+                    .pcrsig
+                do
+                    if grep -Fq "$section" <<<"$sections"; then
+                        printf '   ✅ %-10s present\n' "$section"
+                    else
+                        printf '   ❌ %-10s missing\n' "$section"
+                        kernel_errors+=("missing UKI section ${section}")
+                    fi
+                done
+
+            else
+                echo "❌ Unable to inspect generated UKI"
+                kernel_errors+=("unable to inspect UKI sections")
+            fi
+
+            # ------------------------------------------------------------
+            # Validate embedded kernel version
+            # ------------------------------------------------------------
+
+            echo
+            echo "🏷️  Validating embedded kernel version..."
+
+            if embedded_uname="$(
+                objcopy \
+                    --dump-section .uname=/dev/stdout \
+                    "$temporary_uki" \
+                    2>/dev/null |
+                    tr -d '\0\n'
+            )"; then
+
+                if [[ "$embedded_uname" == "$version" ]]; then
+                    echo "✅ Embedded kernel version: ${embedded_uname}"
+                else
+                    echo "❌ Embedded kernel version '${embedded_uname}' does not match '${version}'"
+                    kernel_errors+=(
+                        "embedded kernel version mismatch (${embedded_uname})"
+                    )
+                fi
+
+            else
+                echo "❌ Unable to extract embedded kernel version"
+                kernel_errors+=("unable to extract .uname section")
+            fi
+
+            # ------------------------------------------------------------
+            # Extract and validate initrd
+            # ------------------------------------------------------------
+
+            echo
+            echo "📂 Extracting embedded initrd..."
+
+            work_directory="$(mktemp -d)"
+
+            if objcopy \
+                --dump-section ".initrd=${work_directory}/initrd" \
+                "$temporary_uki" \
+                2>/dev/null
+            then
+                echo "✅ Embedded initrd extracted"
+            else
+                echo "❌ Unable to extract embedded initrd"
+                kernel_errors+=("unable to extract embedded initrd")
+            fi
+
+            initrd="${work_directory}/initrd"
+
+            if [[ -s "$initrd" ]]; then
+
+                if initrd_listing="$(lsinitrd "$initrd" 2>/dev/null)"; then
+
+                    echo
+                    echo "📸 Validating snapshot menu inside initrd..."
+
+                    if grep -qE 'usr/libexec/snapshot-menu$' <<<"$initrd_listing"; then
+                        echo "   ✅ Snapshot menu executable"
+                    else
+                        echo "   ❌ Snapshot menu executable missing"
+                        kernel_errors+=("snapshot menu executable missing")
+                    fi
+
+                    if grep -qE 'etc/snapshot-menu\.conf$' <<<"$initrd_listing"; then
+                        echo "   ✅ Snapshot menu configuration"
+                    else
+                        echo "   ❌ Snapshot menu configuration missing"
+                        kernel_errors+=("snapshot menu configuration missing")
+                    fi
+
+                    if grep -qE \
+                        'hooks/pre-mount/.+snapshot-menu-hook\.sh$' \
+                        <<<"$initrd_listing"
+                    then
+                        echo "   ✅ Snapshot menu pre-mount hook"
+                    else
+                        echo "   ❌ Snapshot menu pre-mount hook missing"
+                        kernel_errors+=("snapshot menu pre-mount hook missing")
+                    fi
+
+                else
+                    echo "❌ Unable to inspect embedded initrd"
+                    kernel_errors+=("lsinitrd failed")
+                fi
+
+            else
+                echo "❌ Extracted initrd is empty or missing"
+                kernel_errors+=("embedded initrd is empty")
+            fi
+
+            # ------------------------------------------------------------
+            # Cleanup
+            # ------------------------------------------------------------
+
+            rm -f -- "$temporary_uki"
+            rm -rf -- "$work_directory"
+
+            # ------------------------------------------------------------
+            # Kernel result
+            # ------------------------------------------------------------
+
+            echo
+
+            if (( ${#kernel_errors[@]} == 0 )); then
+                echo "🎉 UKI ${version} generated and validated successfully"
+                uki_success+=("$version")
+            else
+                echo "⚠️  UKI ${version} completed with ${#kernel_errors[@]} error(s):"
+
+                for error in "${kernel_errors[@]}"; do
+                    echo "   ❌ ${error}"
+                done
+
+                uki_failed+=(
+                    "${version}: $(IFS='; '; echo "${kernel_errors[*]}")"
+                )
+            fi
+
+        done
+
+
+        # ==================================================================
+        # Final report
+        # ==================================================================
+
+        echo
+        echo
+        echo "╔════════════════════════════════════════════════════════════╗"
+        echo "║                    📊 UKI BUILD REPORT                     ║"
+        echo "╚════════════════════════════════════════════════════════════╝"
+        echo
+
+        echo "✅ Successful: ${#uki_success[@]}"
+
+        for version in "${uki_success[@]}"; do
+            echo "   ✅ ${version}"
+        done
+
+        echo
+        echo "❌ Failed: ${#uki_failed[@]}"
+
+        for failure in "${uki_failed[@]}"; do
+            echo "   ❌ ${failure}"
+        done
+
+        echo
+        echo "────────────────────────────────────────────────────────────"
+
+        if (( ${#uki_failed[@]} == 0 )); then
+            echo "🎉 All UKIs were generated and validated successfully."
+        else
+            echo "⚠️  ${#uki_failed[@]} UKI(s) reported validation errors."
+        fi
+
+        echo "────────────────────────────────────────────────────────────"
+        ;;
+esac
