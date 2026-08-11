@@ -55,6 +55,7 @@ mkdir -p "$MOUNTPOINT"
 exec 3<>"$TTY"
 
 mounted=0
+CURRENT_KERNEL="$(uname -r)"
 
 #
 # ------------------------------------------------------------
@@ -113,9 +114,11 @@ SNAPDIR="${MOUNTPOINT}/${ROOT_SUBVOL}/${SNAPSHOT_DIR}"
 
 declare -a SUBVOLS
 declare -a LABELS
+declare -a KERNEL_STATUS
 
 SUBVOLS=()
 LABELS=()
+KERNEL_STATUS=()
 
 #
 # Entry 0 = normal root.
@@ -126,6 +129,19 @@ SUBVOLS+=(
 
 LABELS+=(
     "Ubuntu - current system"
+)
+
+kernel_status=""
+
+if [[ -d "${MOUNTPOINT}/${ROOT_SUBVOL}/usr/lib/modules/${CURRENT_KERNEL}" ]]; then
+    kernel_status="Present"
+else
+    kernel_status="Missing"
+fi
+
+
+KERNEL_STATUS+=(
+    "$kernel_status"
 )
 
 #
@@ -146,8 +162,15 @@ if [[ -d "$SNAPDIR" ]]; then
 
         [[ -d "$snapshot" ]] || continue
 
+        if [[ -d "${snapshot}/usr/lib/modules/${CURRENT_KERNEL}" ]]; then
+            kernel_status="Present"
+        else
+            kernel_status="Missing"
+        fi
+
         description=""
         date=""
+        type=""
 
         #
         # Read Snapper metadata.
@@ -168,6 +191,13 @@ if [[ -d "$SNAPDIR" ]]; then
                 head -n 1
             )"
 
+            type="$(
+                sed -n \
+                    's:.*<type>\(.*\)</type>.*:\1:p' \
+                    "$info" |
+                head -n 1
+            )"
+
         fi
 
         [[ -n "$description" ]] ||
@@ -183,16 +213,20 @@ if [[ -d "$SNAPDIR" ]]; then
         if [[ -n "$date" ]]; then
 
             LABELS+=(
-                "#${snap}   ${date}   ${description}"
+                "#${snap}   ${date}   ${description}   ${type}"
             )
 
         else
 
             LABELS+=(
-                "#${snap}   ${description}"
+                "#${snap}   ${description}   ${type}"
             )
 
         fi
+
+        KERNEL_STATUS+=(
+            "$kernel_status"
+        )
 
     done < <(
 
@@ -251,8 +285,19 @@ draw_menu() {
     printf 'Ubuntu Snapshot Boot\n' >&3
     printf '\033[0m' >&3
 
+    printf 'Kernel: %s\n' \
+        "$CURRENT_KERNEL" >&3
+
     printf '\n' >&3
     printf 'Select root filesystem:\n\n' >&3
+
+    printf '   %-62s %-10s\n' \
+        'Snapshot' \
+        'Kernel' >&3
+
+    printf '   %-62s %-10s\n' \
+        '--------' \
+        '------' >&3
 
     for ((i = 0; i < COUNT; i++)); do
 
@@ -260,15 +305,17 @@ draw_menu() {
 
             printf '\033[7m' >&3
 
-            printf ' > %-74s' \
-                "${LABELS[$i]}" >&3
+            printf ' > %-62s %-10s' \
+                "${LABELS[$i]}" \
+                "${KERNEL_STATUS[$i]}" >&3
 
             printf '\033[0m\n' >&3
 
         else
 
-            printf '   %-74s\n' \
-                "${LABELS[$i]}" >&3
+            printf '   %-62s %-10s\n' \
+                "${LABELS[$i]}" \
+                "${KERNEL_STATUS[$i]}" >&3
 
         fi
 
