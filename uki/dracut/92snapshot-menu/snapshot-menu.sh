@@ -29,6 +29,15 @@ source "$CONFIG"
 : "${SNAPSHOT_CMDLINE:?SNAPSHOT_CMDLINE is not configured}"
 
 #
+# Optional configuration.
+#
+PAGE_SIZE="${PAGE_SIZE:-20}"
+
+if [[ ! "$PAGE_SIZE" =~ ^[1-9][0-9]*$ ]]; then
+    PAGE_SIZE=20
+fi
+
+#
 # ------------------------------------------------------------
 # Root device
 # ------------------------------------------------------------
@@ -113,12 +122,20 @@ SNAPDIR="${MOUNTPOINT}/${ROOT_SUBVOL}/${SNAPSHOT_DIR}"
 #
 
 declare -a SUBVOLS
+declare -a SNAPSHOT_PATHS
+declare -a SNAPSHOT_INFOS
+declare -a SNAPSHOT_NUMBERS
 declare -a LABELS
 declare -a KERNEL_STATUS
+declare -a ENTRY_LOADED
 
 SUBVOLS=()
+SNAPSHOT_PATHS=()
+SNAPSHOT_INFOS=()
+SNAPSHOT_NUMBERS=()
 LABELS=()
 KERNEL_STATUS=()
+ENTRY_LOADED=()
 
 #
 # Entry 0 = normal root.
@@ -127,27 +144,29 @@ SUBVOLS+=(
     "$ROOT_SUBVOL"
 )
 
+SNAPSHOT_PATHS+=("")
+SNAPSHOT_INFOS+=("")
+SNAPSHOT_NUMBERS+=("")
+
 LABELS+=(
     "Ubuntu - current system"
 )
 
-kernel_status=""
-
-if [[ -d "${MOUNTPOINT}/${ROOT_SUBVOL}/usr/lib/modules/${CURRENT_KERNEL}" ]]; then
-    kernel_status="Present"
-else
-    kernel_status="Missing"
-fi
-
-
 KERNEL_STATUS+=(
-    "$kernel_status"
+    "Present"
+)
+
+ENTRY_LOADED+=(
+    "1"
 )
 
 #
 # ------------------------------------------------------------
 # Snapper snapshots
 # ------------------------------------------------------------
+#
+# Only snapshot numbers and paths are collected here.
+# Metadata and kernel status are loaded when a page is displayed.
 #
 
 if [[ -d "$SNAPDIR" ]]; then
@@ -162,71 +181,28 @@ if [[ -d "$SNAPDIR" ]]; then
 
         [[ -d "$snapshot" ]] || continue
 
-        if [[ -d "${snapshot}/usr/lib/modules/${CURRENT_KERNEL}" ]]; then
-            kernel_status="Present"
-        else
-            kernel_status="Missing"
-        fi
-
-        description=""
-        date=""
-        type=""
-
-        #
-        # Read Snapper metadata.
-        #
-        if [[ -r "$info" ]]; then
-
-            description="$(
-                sed -n \
-                    's:.*<description>\(.*\)</description>.*:\1:p' \
-                    "$info" |
-                head -n 1
-            )"
-
-            date="$(
-                sed -n \
-                    's:.*<date>\(.*\)</date>.*:\1:p' \
-                    "$info" |
-                head -n 1
-            )"
-
-            type="$(
-                sed -n \
-                    's:.*<type>\(.*\)</type>.*:\1:p' \
-                    "$info" |
-                head -n 1
-            )"
-
-        fi
-
-        [[ -n "$description" ]] ||
-            description="Snapshot"
-
-        #
-        # Path relative to Btrfs top-level.
-        #
         SUBVOLS+=(
             "${ROOT_SUBVOL}/${SNAPSHOT_DIR}/${snap}/snapshot"
         )
 
-        if [[ -n "$date" ]]; then
-
-            LABELS+=(
-                "#${snap}   ${date}   ${description}   ${type}"
-            )
-
-        else
-
-            LABELS+=(
-                "#${snap}   ${description}   ${type}"
-            )
-
-        fi
-
-        KERNEL_STATUS+=(
-            "$kernel_status"
+        SNAPSHOT_PATHS+=(
+            "$snapshot"
         )
+
+        SNAPSHOT_INFOS+=(
+            "$info"
+        )
+
+        SNAPSHOT_NUMBERS+=(
+            "$snap"
+        )
+
+        #
+        # Empty lazy-cache entries.
+        #
+        LABELS+=("")
+        KERNEL_STATUS+=("")
+        ENTRY_LOADED+=("0")
 
     done < <(
 
@@ -248,6 +224,84 @@ if [[ -d "$SNAPDIR" ]]; then
 fi
 
 COUNT=${#SUBVOLS[@]}
+PAGE_COUNT=$(((COUNT + PAGE_SIZE - 1) / PAGE_SIZE))
+
+#
+# ------------------------------------------------------------
+# Lazy entry loading
+# ------------------------------------------------------------
+#
+
+load_entry() {
+
+    local index="$1"
+    local snapshot
+    local info
+    local snap
+    local description=""
+    local date=""
+
+    #
+    # Already loaded.
+    #
+    if [[ "${ENTRY_LOADED[$index]}" == "1" ]]; then
+        return 0
+    fi
+
+    snapshot="${SNAPSHOT_PATHS[$index]}"
+    info="${SNAPSHOT_INFOS[$index]}"
+    snap="${SNAPSHOT_NUMBERS[$index]}"
+
+    #
+    # Read Snapper metadata.
+    #
+    if [[ -r "$info" ]]; then
+
+        description="$(
+            sed -n \
+                's:.*<description>\(.*\)</description>.*:\1:p' \
+                "$info" |
+            head -n 1
+        )"
+
+        date="$(
+            sed -n \
+                's:.*<date>\(.*\)</date>.*:\1:p' \
+                "$info" |
+            head -n 1
+        )"
+
+    fi
+
+    [[ -n "$description" ]] ||
+        description="Snapshot"
+
+    if [[ -n "$date" ]]; then
+
+        LABELS[$index]="#${snap}   ${date}   ${description}"
+
+    else
+
+        LABELS[$index]="#${snap}   ${description}"
+
+    fi
+
+    #
+    # A snapshot is boot-compatible with the current UKI only if
+    # it contains the modules for the running kernel.
+    #
+    if [[ -d "${snapshot}/usr/lib/modules/${CURRENT_KERNEL}" ]]; then
+
+        KERNEL_STATUS[$index]="Present"
+
+    else
+
+        KERNEL_STATUS[$index]="Missing"
+
+    fi
+
+    ENTRY_LOADED[$index]="1"
+}
 
 #
 # ------------------------------------------------------------
@@ -278,6 +332,17 @@ selected=0
 draw_menu() {
 
     local i
+    local page
+    local first
+    local last
+
+    page=$((selected / PAGE_SIZE))
+    first=$((page * PAGE_SIZE))
+    last=$((first + PAGE_SIZE))
+
+    if (( last > COUNT )); then
+        last=$COUNT
+    fi
 
     printf '\033[2J\033[H' >&3
 
@@ -289,7 +354,13 @@ draw_menu() {
         "$CURRENT_KERNEL" >&3
 
     printf '\n' >&3
-    printf 'Select root filesystem:\n\n' >&3
+
+    printf 'Select root filesystem:  Page %d/%d  Entries %d-%d of %d\n\n' \
+        "$((page + 1))" \
+        "$PAGE_COUNT" \
+        "$((first + 1))" \
+        "$last" \
+        "$COUNT" >&3
 
     printf '   %-62s %-10s\n' \
         'Snapshot' \
@@ -299,13 +370,18 @@ draw_menu() {
         '--------' \
         '------' >&3
 
-    for ((i = 0; i < COUNT; i++)); do
+    for ((i = first; i < last; i++)); do
+
+        #
+        # Load only entries on the visible page.
+        #
+        load_entry "$i"
 
         if (( i == selected )); then
 
             printf '\033[7m' >&3
 
-            printf ' > %-62s %-10s' \
+            printf ' > %-62.62s %-10s' \
                 "${LABELS[$i]}" \
                 "${KERNEL_STATUS[$i]}" >&3
 
@@ -313,7 +389,7 @@ draw_menu() {
 
         else
 
-            printf '   %-62s %-10s\n' \
+            printf '   %-62.62s %-10s\n' \
                 "${LABELS[$i]}" \
                 "${KERNEL_STATUS[$i]}" >&3
 
@@ -324,7 +400,7 @@ draw_menu() {
     printf '\n' >&3
 
     printf '\033[2m' >&3
-    printf 'Up/Down: select    Enter: boot    j/k: select\n' >&3
+    printf 'Up/Down: select    Left/Right: page    Enter: boot    j/k: select\n' >&3
     printf '\033[0m' >&3
 }
 
@@ -354,7 +430,7 @@ read_key() {
         $'\e')
 
             #
-            # ESC sequence continuation MUST NOT block.
+            # ESC sequence continuation must not block.
             #
             seq=""
 
@@ -406,6 +482,16 @@ read_key() {
             printf '%s' "UP"
             ;;
 
+        h|H)
+
+            printf '%s' "LEFT"
+            ;;
+
+        l|L)
+
+            printf '%s' "RIGHT"
+            ;;
+
         *)
 
             printf '%s' "OTHER"
@@ -450,6 +536,40 @@ while true; do
             draw_menu
             ;;
 
+        LEFT)
+
+            current_page=$((selected / PAGE_SIZE))
+
+            if (( current_page > 0 )); then
+
+                selected=$(((current_page - 1) * PAGE_SIZE))
+
+            else
+
+                selected=$(((PAGE_COUNT - 1) * PAGE_SIZE))
+
+            fi
+
+            draw_menu
+            ;;
+
+        RIGHT)
+
+            current_page=$((selected / PAGE_SIZE))
+
+            if (( current_page < PAGE_COUNT - 1 )); then
+
+                selected=$(((current_page + 1) * PAGE_SIZE))
+
+            else
+
+                selected=0
+
+            fi
+
+            draw_menu
+            ;;
+
         ENTER)
 
             break
@@ -464,6 +584,12 @@ done
 # Selected entry
 # ------------------------------------------------------------
 #
+
+#
+# Usually already loaded because it is visible, but this also
+# guarantees the cache is populated before using its label.
+#
+load_entry "$selected"
 
 SELECTED_SUBVOL="${SUBVOLS[$selected]}"
 SELECTED_LABEL="${LABELS[$selected]}"
@@ -525,6 +651,9 @@ if [[ "$SELECTED_SUBVOL" != "$ROOT_SUBVOL" ]]; then
 
     printf 'Root:    %s\n' \
         "$SELECTED_SUBVOL" >&3
+
+    printf 'Kernel:  %s\n' \
+        "${KERNEL_STATUS[$selected]}" >&3
 
     printf 'Overlay: tmpfs\n' >&3
 

@@ -1,0 +1,21 @@
+#!/bin/sh
+
+PIDFILE="/run/snapshot-key-listener.pid"
+
+if [ -r "$PIDFILE" ]; then
+    IFS= read -r listener_pid <"$PIDFILE" ||
+        listener_pid=""
+
+    case "$listener_pid" in
+        ''|*[!0-9]*)
+            ;;
+        *)
+            kill -TERM "$listener_pid" \
+                2>/dev/null || :
+            ;;
+    esac
+fi
+
+rm -f "$PIDFILE"
+
+exit 0

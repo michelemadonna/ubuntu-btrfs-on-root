@@ -108,10 +108,22 @@ rsync \
     $repository_root/uki"/dracut/92snapshot-menu/" \
     /usr/lib/dracut/modules.d/92snapshot-menu/
 
+gcc \
+    -O2 \
+    -Wall \
+    -Wextra \
+    -Wpedantic \
+    -std=c17 \
+    -s \
+    -o /usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener \
+    /usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-alt-listener.c
+
 chmod 0755 \
     /usr/lib/dracut/modules.d/92snapshot-menu/module-setup.sh \
     /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu-hook.sh \
-    /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.sh
+    /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.sh \
+    /usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener \
+    /usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener-stop
 
 cat > /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf <<- EOF
     ROOT_SUBVOL="${root_subvolume}"

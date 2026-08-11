@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+readonly SOURCE_DIR="${SOURCE_DIR:-/cdrom}"
+readonly TARGET_DEV="${TARGET_DEV:-/dev/sda1}"
+readonly TARGET_LABEL="${TARGET_LABEL:-UBUNTU_LIVE}"
+readonly RESERVE_MIB="${RESERVE_MIB:-256}"
+readonly MIN_PERSISTENCE_MIB="${MIN_PERSISTENCE_MIB:-512}"
+readonly FAT32_MAX_FILE_MIB=4095
+
+mount_dir=""
+
+log() {
+    printf '\n==> %s\n' "$*"
+}
+
+die() {
+    printf '\nERROR: %s\n' "$*" >&2
+    exit 1
+}
+
+cleanup() {
+    local status=$?
+
+    sync || true
+    if [[ -n "$mount_dir" ]] && mountpoint -q "$mount_dir"; then
+        umount "$mount_dir" || true
+    fi
+    [[ -z "$mount_dir" ]] || rmdir "$mount_dir" 2>/dev/null || true
+    exit "$status"
+}
+
+trap cleanup EXIT
+trap 'die "Failure at line $LINENO: $BASH_COMMAND"' ERR
+
+[[ $EUID -eq 0 ]] || die "Run this script as root."
+
+for command in blockdev findmnt lsblk mkfs.ext4 mkfs.vfat mountpoint rsync sed; do
+    command -v "$command" >/dev/null 2>&1 || die "Missing command: $command"
+done
+
+[[ -d "$SOURCE_DIR/casper" ]] || \
+    die "$SOURCE_DIR does not look like an Ubuntu live medium (casper/ is missing)."
+[[ -b "$TARGET_DEV" ]] || die "$TARGET_DEV is not a block device."
+[[ "$(lsblk -ndo TYPE "$TARGET_DEV")" == "part" ]] || \
+    die "$TARGET_DEV must be a partition, not a whole disk."
+
+source_dev="$(findmnt -no SOURCE --target "$SOURCE_DIR" 2>/dev/null || true)"
+[[ "$source_dev" != "$TARGET_DEV" ]] || die "Source and target are the same device."
+
+target_size_mib=$(( $(blockdev --getsize64 "$TARGET_DEV") / 1024 / 1024 ))
+(( target_size_mib >= 4096 )) || die "$TARGET_DEV is too small (${target_size_mib} MiB)."
+
+cat <<EOF
+
+WARNING: ALL DATA ON $TARGET_DEV WILL BE DESTROYED.
+
+Source: $SOURCE_DIR
+Target: $TARGET_DEV ($(lsblk -ndo SIZE,MODEL "$TARGET_DEV" | xargs))
+Mode:   UEFI live USB with file-backed persistence
+
+EOF
+
+read -r -p "Type the exact device name ($TARGET_DEV) to continue: " confirmation
+[[ "$confirmation" == "$TARGET_DEV" ]] || die "Confirmation failed; nothing was changed."
+
+if findmnt -rn -S "$TARGET_DEV" >/dev/null 2>&1; then
+    log "Unmounting $TARGET_DEV"
+    umount "$TARGET_DEV"
+fi
+
+log "Formatting $TARGET_DEV as FAT32"
+mkfs.vfat -F 32 -n "$TARGET_LABEL" "$TARGET_DEV"
+
+mount_dir="$(mktemp -d /tmp/ubuntu-live.XXXXXX)"
+mount "$TARGET_DEV" "$mount_dir"
+
+log "Copying the Ubuntu live medium"
+rsync -rltD --info=progress2 \
+    --no-links --no-owner --no-group --no-perms \
+    --exclude=/writable \
+    "$SOURCE_DIR/" "$mount_dir/"
+
+grub_files=()
+grub_paths=()
+for relative_path in boot/grub/grub.cfg boot/grub/loopback.cfg; do
+    grub_file="$mount_dir/$relative_path"
+    [[ -f "$grub_file" ]] || continue
+
+    # Ubuntu releases do not always include an explicit boot=casper option.
+    # A kernel loaded from /casper/ is an unambiguous live-system entry.
+    sed -Ei \
+        '/^[[:space:]]*linux(efi)?[[:space:]].*\/casper\/vmlinuz/ {
+            /(^|[[:space:]])persistent([[:space:]]|$)/! {
+                s/[[:space:]]+---/ persistent ---/
+                t persistent_added
+                s/$/ persistent/
+                :persistent_added
+            }
+        }' "$grub_file"
+
+    grub_files+=("$relative_path")
+    grub_paths+=("$grub_file")
+done
+
+(( ${#grub_files[@]} > 0 )) || die "No supported GRUB configuration was found."
+
+if ! grep -Eqs \
+    '^[[:space:]]*linux(efi)?[[:space:]].*/casper/vmlinuz.*[[:space:]]persistent([[:space:]]|$)' \
+    "${grub_paths[@]}"; then
+    die "Could not add the persistent kernel option to GRUB."
+fi
+
+sync
+available_mib=$(( $(df --output=avail -BM "$mount_dir" | tail -n1 | tr -dc '0-9') ))
+persistence_mib=$(( available_mib - RESERVE_MIB ))
+(( persistence_mib > FAT32_MAX_FILE_MIB )) && persistence_mib=$FAT32_MAX_FILE_MIB
+
+(( persistence_mib >= MIN_PERSISTENCE_MIB )) || \
+    die "Only ${available_mib} MiB remain: not enough for useful persistence."
+
+log "Creating a ${persistence_mib} MiB persistence file"
+dd if=/dev/zero of="$mount_dir/writable" bs=1M count="$persistence_mib" \
+    status=progress conv=fsync
+mkfs.ext4 -F -L writable "$mount_dir/writable"
+
+sync
+
+log "Completed"
+printf 'Target:      %s\n' "$TARGET_DEV"
+printf 'Persistence: %s MiB\n' "$persistence_mib"
+printf 'GRUB files:  %s\n' "${grub_files[*]}"
+printf '\nBoot the USB in UEFI mode and select Try or Install Ubuntu.\n'

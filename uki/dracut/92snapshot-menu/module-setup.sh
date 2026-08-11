@@ -32,12 +32,29 @@ install() {
         "/usr/libexec/snapshot-menu"
 
     inst_simple \
-            "$moddir/snapshot-menu.conf" \
-            "/etc/snapshot-menu.conf"
+        "$moddir/snapshot-menu.conf" \
+        "/etc/snapshot-menu.conf"
     
 
     inst_hook \
         pre-mount \
         00 \
         "$moddir/snapshot-menu-hook.sh"
+    
+    inst_hook \
+        cmdline \
+        01\
+        "$moddir/01-snapshot-key-listener.sh"
+
+    inst_binary \
+        "$moddir/listener/snapshot-key-listener" \
+        "/usr/libexec/snapshot-key-listener"
+
+    inst_simple \
+        "$moddir/listener/snapshot-key-listener-stop" \
+        "/usr/libexec/snapshot-key-listener-stop"
+
+    inst_simple \
+        "$moddir/systemd-cryptsetup@.service.d/50-snapshot-key-listener-stop.conf" \
+        "/etc/systemd/system/systemd-cryptsetup@.service.d/50-snapshot-key-listener-stop.conf"
 }
