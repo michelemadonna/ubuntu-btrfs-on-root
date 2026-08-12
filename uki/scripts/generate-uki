@@ -22,8 +22,8 @@ trim() {
 
 
 PREFIX_FILE="/etc/kernel/entry-token"
-read -r -p "Generate the UKI for all installed kernel now? [Y/n]: " answer
-
+#read -r -p "Generate the UKI for all installed kernel now? [Y/n]: " answer
+answer="y"
 [[ -r "${PREFIX_FILE}" ]] || exit 0
 
 PREFIX="$(trim "$(<"${PREFIX_FILE}")")"
@@ -66,7 +66,7 @@ case "$answer" in
                 echo "❌ kernel-install failed"
                 kernel_errors+=("kernel-install failed")
             fi
-            
+
             # ------------------------------------------------------------
             # Check generated UKI
             # ------------------------------------------------------------

@@ -158,12 +158,7 @@ if [[ $snapshot_menu == "yes" ]]; then
 		RESULT="/run/snapshot-menu-selected"
 		CMDLINE_DIR="/etc/cmdline.d"
 		SNAPSHOT_CMDLINE="/etc/cmdline.d/99-snapshot.conf"
-		PAGE_SIZE=2		
-		SNAPSHOT_PIN_ENABLED=yes
-		SNAPSHOT_PIN_ATTEMPTS=3
-		SNAPSHOT_PIN_MAX_LENGTH=12
-		SNAPSHOT_PIN_SALT="${salt}"
-		SNAPSHOT_PIN_HASH="${pinhash}"
+		PAGE_SIZE=2
 	EOF
 
 	chmod 0644 \

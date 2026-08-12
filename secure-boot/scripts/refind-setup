@@ -98,10 +98,18 @@ install_dependencies()
 
         log "Trying to install rEFInd from distribution repository..."
 
-        apt-get install -y refind || true
+		if apt-cache search refind | grep -q refind; then
+			apt-get install -y refind || true
+
+		else
+
+			log "rEFInd package unavailable in distribution repository."
+			log "Falling back to Debian Snapshot."
+
+			download_debian_refind
+		fi
     fi
 }
-
 
 # ============================================================
 # Local rEFInd
@@ -218,7 +226,7 @@ EOF
     )
 
     [[ -f "$root/usr/sbin/refind-install" ||
-       -f "$root/usr/bin/refind-install" ]] ||
+		-f "$root/usr/bin/refind-install" ]] ||
     find "$root" \
         -type f \
         -name refind-install \
@@ -241,46 +249,7 @@ EOF
 }
 
 
-# ============================================================
-# sbctl signing
-# ============================================================
 
-sign_efi()
-{
-    local file="$1"
-
-    [[ -f "$file" ]] ||
-        die "EFI file not found: $file"
-
-    log "Signing with sbctl:"
-    log "  $file"
-
-    sbctl sign \
-        --save \
-        "$file"
-}
-
-sign_refind()
-{
-    local refind="$REFIND_EFI/refind_x64.efi"
-
-    sign_efi "$refind"
-
-    if [[ -d "$REFIND_EFI/drivers_x64" ]]; then
-
-        while IFS= read -r -d '' driver
-        do
-            sign_efi "$driver"
-
-        done < <(
-            find "$REFIND_EFI/drivers_x64" \
-                -maxdepth 1 \
-                -type f \
-                -name '*.efi' \
-                -print0
-        )
-    fi
-}
 
 
 # ============================================================
@@ -291,9 +260,9 @@ install_direct()
 {
     log "Installing rEFInd directly..."
 
-    "$REFIND_INSTALL"
+    refind-install --yes 
 
-	cat >> "$REFIND_EFI/refind.conf" <<-EOF
+	cat >> "$REFIND_EFI/refind.conf" <<- EOF
 		#scanfor external,optical,manual
 		dont_scan_dirs EFI/systemd,EFI/Linux
 		dont_scan_files shimx64.efi,grubx64.efi,mmx64.efi,fbx64.efi
@@ -303,10 +272,6 @@ install_direct()
 		use_graphics_for osx,linux,windows
 		include themes/refind-theme-regular/theme.conf
 	EOF
-
-
-
-    sign_refind
 }
 
 
@@ -340,11 +305,11 @@ install_with_shim()
 
     log "Installing rEFInd through Shim..."
 
-    "$REFIND_INSTALL" \
+    refind-install \
         --shim "$work/shimx64.efi" \
-        --keepname
+        --keepname --yes | die "rEFInd installation failed."
 	
-	cat >> /boot/efi/EFI/refind/refind.conf <<-EOF
+	cat >> /boot/efi/EFI/refind/refind.conf <<- EOF
 		#scanfor external,optical,manual
 		dont_scan_dirs EFI/systemd,EFI/Linux
 		linux_prefixes ubuntu,kali
@@ -361,42 +326,11 @@ install_with_shim()
         "$mm" \
         "$REFIND_EFI/mmx64.efi"
 
-    #
-    # Do NOT touch shimx64.efi or mmx64.efi.
-    #
-    # Sign only rEFInd and its drivers.
-    #
-    sign_refind
-
     rm -rf "$work"
 }
 
 
-# ============================================================
-# Verification
-# ============================================================
 
-verify_refind()
-{
-    local refind="$REFIND_EFI/refind_x64.efi"
-
-    [[ -f "$refind" ]] ||
-        die "rEFInd EFI binary not found."
-
-    log "Checking rEFInd signature..."
-
-    sbctl verify "$refind" ||
-        warn "sbctl verify returned non-zero."
-
-    if [[ "$SETUP_MODE" == "0" ]]; then
-
-        [[ -f "$REFIND_EFI/shimx64.efi" ]] ||
-            die "Shim missing from rEFInd directory."
-
-        [[ -f "$REFIND_EFI/mmx64.efi" ]] ||
-            die "MokManager missing from rEFInd directory."
-    fi
-}
 
 
 # ============================================================
@@ -413,19 +347,16 @@ main()
     command -v sbctl >/dev/null 2>&1 ||
         die "sbctl is required. Run sbctl-setup.sh first."
 
-    if [[ -z "$SETUP_MODE" ]]; then
-        SETUP_MODE="$(
-            read_efi_uint8 SetupMode
-        )"
-    fi
-
-    if ! find_local_refind; then
-
-        log "rEFInd package unavailable in current distribution."
-        log "Falling back to Debian Snapshot."
-
-        download_debian_refind
-    fi
+    if [[ -f /etc/securebootmode.conf ]]; then
+		SETUP_MODE="$(cat /etc/securebootmode.conf)"
+		cat > /etc/securebootmode.conf <<- EOF
+			$SETUP_MODE
+		EOF
+	else
+		SETUP_MODE="$(
+			read_efi_uint8 SetupMode
+		)" || die "Cannot read UEFI SetupMode."
+	fi
 
     case "$SETUP_MODE" in
 
@@ -442,7 +373,19 @@ main()
             ;;
     esac
 
-    verify_refind
+	log "Installing rEFInd themes..."
+	unzip $repository_root/refind/refind_themes.zip -d /boot/efi/EFI/refind/
+	
+
+	
+	apt-mark hold \
+		refind \
+		grub-common \
+		grub2-common \
+		grub-pc \
+		grub-pc-bin \
+		grub-efi-amd64 \
+	grub-efi-amd64-bin
 
     log "rEFInd setup completed."
 }

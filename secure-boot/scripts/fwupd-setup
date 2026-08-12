@@ -91,13 +91,16 @@ read_efi_uint8()
 
 detect_boot_mode()
 {
-    if [[ -z "$SETUP_MODE" ]]; then
-
-        SETUP_MODE="$(
-            read_efi_uint8 SetupMode
-        )" || die "Unable to read UEFI SetupMode."
-
-    fi
+    if [[ -f /etc/securebootmode.conf ]]; then
+		SETUP_MODE="$(cat /etc/securebootmode.conf)"
+		cat > /etc/securebootmode.conf <<- EOF
+			$SETUP_MODE
+		EOF
+	else
+		SETUP_MODE="$(
+			read_efi_uint8 SetupMode
+		)" || die "Cannot read UEFI SetupMode."
+	fi
 
     if [[ -z "$SECURE_BOOT" ]]; then
 
@@ -147,13 +150,15 @@ install_dependencies()
         sbsigntool \
         findutils \
         coreutils \
-        ca-certificates
+        ca-certificates \
+		fwupd-unsigned
 
     #
     # Distribution-specific EFI companion packages.
     #
     apt-get install -y fwupd-efi || true
     apt-get install -y fwupd-signed || true
+	apt-get install -y fwupd-unsigned || true
 }
 
 
@@ -278,50 +283,6 @@ configure_fwupd()
     fi
 }
 
-
-# ============================================================
-# Sign fwupd EFI with sbctl
-# ============================================================
-
-sign_fwupd_efi()
-{
-    require_command sbctl
-    require_file "$DB_KEY"
-    require_file "$DB_CERT"
-    require_file "$FWUPD_EFI"
-
-    log "Signing fwupd EFI with sbctl:"
-    log "  $FWUPD_EFI"
-
-    sbctl sign \
-        --save \
-        "$FWUPD_EFI"
-}
-
-
-# ============================================================
-# Verify signature
-# ============================================================
-
-verify_fwupd_efi()
-{
-    log "Verifying fwupd EFI signature..."
-
-    sbctl verify "$FWUPD_EFI" ||
-        die "sbctl verification failed for $FWUPD_EFI"
-
-    if command -v sbverify >/dev/null 2>&1; then
-
-        sbverify \
-            --list \
-            "$FWUPD_EFI" \
-            >/dev/null ||
-            die "Unable to parse fwupd EFI signature."
-
-    fi
-}
-
-
 # ============================================================
 # Service
 # ============================================================
@@ -433,24 +394,13 @@ main()
 
     install_dependencies
 
-    require_command sbctl
     require_command fwupdmgr
-
-
-    #
-    # sbctl-setup.sh must have already created the key hierarchy.
-    #
-    require_file "$DB_KEY"
-    require_file "$DB_CERT"
 
     if ! find_fwupd_efi; then
         die "fwupd EFI companion executable was not found."
     fi
 
     configure_fwupd
-
-    sign_fwupd_efi
-    verify_fwupd_efi
 
     configure_service
     refresh_metadata

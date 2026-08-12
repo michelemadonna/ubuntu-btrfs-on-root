@@ -89,13 +89,22 @@ main()
             ;;
     esac
 
-    export SETUP_MODE="$(
-        read_efi_uint8 SetupMode
-    )" || die "Cannot read UEFI SetupMode."
+	if [[ -f /etc/securebootmode.conf ]]; then
+		export SETUP_MODE="$(cat /etc/securebootmode.conf)"
+		cat > /etc/securebootmode.conf <<- EOF
+			$SETUP_MODE
+		EOF
+	else
+		export SETUP_MODE="$(
+			read_efi_uint8 SetupMode
+		)" || die "Cannot read UEFI SetupMode."
+	fi
 
     export SECURE_BOOT="$(
         read_efi_uint8 SecureBoot 2>/dev/null || echo 0
     )"
+
+	
 
     log "Setup Mode  : $SETUP_MODE"
     log "Secure Boot : $SECURE_BOOT"
@@ -107,7 +116,7 @@ main()
     # - create PK/KEK/db
     # - firmware enrollment only when SetupMode=1
     #
-    "$repository_root/secure-boot/scripts/sbctl-setup"
+    . "$repository_root/secure-boot/scripts/sbctl-setup"
 
     #
     # Existing firmware trust:
@@ -117,14 +126,24 @@ main()
     # SecureBoot may currently be either enabled or disabled.
     #
     if [[ "$SETUP_MODE" == "0" ]]; then
-        "$repository_root/secure-boot/scripts/shim-setup"
+      .  "$repository_root/secure-boot/scripts/shim-setup"
     fi
 
     #
     # Direct rEFInd in Setup Mode.
     # rEFInd behind Shim otherwise.
     #
-    "$repository_root/secure-boot/scripts/refind-setup"
+    . "$repository_root/secure-boot/scripts/refind-setup"
+
+	#
+	# fwupd setup
+	#
+	. "$repository_root/secure-boot/scripts/fwupd-setup"
+
+	#
+	# Sign fwupd.efi and rEFInd for Secure Boot.
+	#
+    . "$repository_root/secure-boot/scripts/sign-efi"
 
     echo
     log "Secure Boot setup completed."

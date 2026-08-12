@@ -53,7 +53,7 @@ done
 sbctl sign -s "/boot/efi/EFI/refind/refind_x64.efi"
 sbctl sign -s "/boot/efi/EFI/BOOT/BOOTX64.EFI"
 
-
+unzip $repository_root/refind/refind_themes.zip -d /boot/efi/EFI/refind/
 rm -rf /boot/efi/EFI/$suite
 apt-mark hold \
     refind \

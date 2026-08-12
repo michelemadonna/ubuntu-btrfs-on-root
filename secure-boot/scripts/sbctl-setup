@@ -83,13 +83,16 @@ install_dependencies()
     apt-get update
 
     apt-get install -y \
-        ca-certificates \
-        curl \
-        tar \
-        file \
-        python3 \
-        findutils \
-        coreutils
+		ca-certificates \
+		curl \
+		git \
+		golang-go \
+		make \
+		binutils \
+		util-linux \
+		e2fsprogs \
+		findutils \
+		coreutils
 
     #
     # Prefer distro package.
@@ -97,8 +100,15 @@ install_dependencies()
     if ! command -v sbctl >/dev/null 2>&1; then
 
         log "Trying to install sbctl from distribution repository..."
-
-        apt-get install -y sbctl || true
+        if apt-cache search sbctl | grep -q sbctl; then
+            echo "sbctl package available in distribution repository."
+			apt-get install -y sbctl || true
+        else
+			log "sbctl package unavailable in distribution repository."
+			log "Trying to install sbctl from upstream GitHub releases..."
+			install_sbctl_upstream
+		fi	
+		
     fi
 }
 
@@ -110,100 +120,38 @@ install_dependencies()
 install_sbctl_upstream()
 {
     local tmp
-    local url
-    local archive
-    local binary
+    apt-get install -y \
+        ca-certificates \
+        git \
+        golang-go \
+        make
 
-    command -v sbctl >/dev/null 2>&1 &&
-        return
+    local tmp
 
-    tmp="$(mktemp -d /tmp/sbctl.XXXXXX)"
+    tmp="$(mktemp -d /tmp/sbctl-build.XXXXXX)"
 
-    trap 'rm -rf "${tmp:-}"' RETURN
+    git clone \
+        --depth 1 \
+        --branch "$SBCTL_VERSION" \
+        https://github.com/Foxboron/sbctl.git \
+        "$tmp/src"
 
-    log "sbctl package unavailable."
-    log "Downloading sbctl ${SBCTL_VERSION} from upstream..."
+    (
+        cd "$tmp/src"
 
-    curl \
-        --fail \
-        --location \
-        --silent \
-        --show-error \
-        "https://api.github.com/repos/Foxboron/sbctl/releases/tags/${SBCTL_VERSION}" \
-        -o "$tmp/release.json"
+        go build \
+            -trimpath \
+            -o "$tmp/sbctl" \
+            ./cmd/sbctl
+    )
 
-    url="$(
-        python3 - "$tmp/release.json" <<'PY'
-import json
-import re
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as f:
-    release = json.load(f)
-
-patterns = [
-    re.compile(r"linux.*(amd64|x86_64).*(tar\.gz|tar\.xz|tar\.zst|zip)$", re.I),
-    re.compile(r"(amd64|x86_64).*linux.*(tar\.gz|tar\.xz|tar\.zst|zip)$", re.I),
-]
-
-for pattern in patterns:
-    for asset in release.get("assets", []):
-        if pattern.search(asset.get("name", "")):
-            print(asset["browser_download_url"])
-            raise SystemExit(0)
-
-raise SystemExit(1)
-PY
-    )" || die "No suitable sbctl release asset found."
-
-    archive="$tmp/$(basename "$url")"
-
-    curl \
-        --fail \
-        --location \
-        --show-error \
-        "$url" \
-        -o "$archive"
-
-    case "$archive" in
-
-        *.tar.gz|*.tgz)
-            tar -xzf "$archive" -C "$tmp"
-            ;;
-
-        *.tar.xz)
-            tar -xJf "$archive" -C "$tmp"
-            ;;
-
-        *.tar.zst)
-            tar --zstd -xf "$archive" -C "$tmp"
-            ;;
-
-        *.zip)
-            apt-get install -y unzip
-            unzip -q "$archive" -d "$tmp"
-            ;;
-
-        *)
-            chmod +x "$archive"
-            ;;
-    esac
-
-    binary="$(
-        find "$tmp" \
-            -type f \
-            -name sbctl \
-            -perm /111 \
-            -print \
-            -quit
-    )"
-
-    [[ -n "$binary" ]] ||
-        die "Unable to locate sbctl binary."
+    file "$tmp/sbctl" |
+        grep -q 'ELF' ||
+        die "Built sbctl is not an ELF executable."
 
     install \
         -m 0755 \
-        "$binary" \
+        "$tmp/sbctl" \
         /usr/local/sbin/sbctl
 
     rm -rf "$tmp"
@@ -245,9 +193,16 @@ create_keys()
     log "Generating Secure Boot keys..."
 
     sbctl create-keys
-
+	sbctl setup --migrate || true
     keys_exist ||
         die "sbctl did not create the expected key hierarchy."
+
+	migrate_sbctl()
+	{
+		log "Migrating sbctl configuration if necessary..."
+	
+		sbctl setup --migrate || true
+	}
 }
 
 
@@ -289,10 +244,17 @@ enroll_db()
     fi
 
     if [[ "$PRESERVE_FIRMWARE_DEFAULTS" == "true" ]] &&
-       sbctl_supports "--firmware-builtin"
+		sbctl_supports "--firmware-builtin"
     then
         args+=(--firmware-builtin db)
     fi
+
+    #
+    # IMPORTANT:
+    # Previous enrollment operations may have recreated
+    # EFI variables with the immutable flag.
+    #
+    unprotect_efi_variables
 
     log "Enrolling db..."
 
@@ -311,10 +273,16 @@ enroll_kek()
     fi
 
     if [[ "$PRESERVE_FIRMWARE_DEFAULTS" == "true" ]] &&
-       sbctl_supports "--firmware-builtin"
+		sbctl_supports "--firmware-builtin"
     then
         args+=(--firmware-builtin KEK)
     fi
+	 #
+    # IMPORTANT:
+    # Previous enrollment operations may have recreated
+    # EFI variables with the immutable flag.
+    #
+    unprotect_efi_variables
 
     log "Enrolling KEK..."
 
@@ -322,7 +290,13 @@ enroll_kek()
 }
 
 enroll_pk()
-{
+{	
+	#
+    # KEK has just been rewritten and can have become
+    # immutable again.
+    #
+    unprotect_efi_variables
+
     log "Enrolling PK..."
 
     #
@@ -332,30 +306,127 @@ enroll_pk()
         --partial PK
 }
 
+unprotect_efi_variables()
+{
+    local var
+    local file
+
+    for var in PK KEK db; do
+
+        while IFS= read -r file; do
+            [[ -e "$file" ]] || continue
+
+            if lsattr "$file" 2>/dev/null |
+				awk '{print $1}' |
+				grep -q 'i'
+            then
+                log "Removing immutable flag from $(basename "$file")"
+                chattr -i "$file"
+            fi
+
+        done < <(
+            find /sys/firmware/efi/efivars \
+                -maxdepth 1 \
+                -type f \
+                -name "${var}-*" \
+                -print 2>/dev/null
+        )
+
+    done
+}
+
+efi_protect()
+{
+    local var
+    local file
+
+    for var in PK KEK db; do
+
+        while IFS= read -r file; do
+            [[ -e "$file" ]] || continue
+
+            log "Restoring immutable flag on $(basename "$file")"
+
+            chattr +i "$file" 2>/dev/null || true
+
+        done < <(
+            find /sys/firmware/efi/efivars \
+                -maxdepth 1 \
+                -type f \
+                -name "${var}-*" \
+                -print 2>/dev/null
+        )
+
+    done
+}
+
+migrate_sbctl()
+{
+    log "Checking sbctl configuration..."
+
+    if sbctl setup --migrate 2>&1 |
+		tee /tmp/sbctl-migrate.log |
+		grep -q 'old configuration detected'
+    then
+        :
+    fi
+}
+
 enroll_if_setup_mode()
 {
     if [[ -z "$SETUP_MODE" ]]; then
-        SETUP_MODE="$(read_efi_uint8 SetupMode)"
+        if [[ -f /etc/securebootmode.conf ]]; then
+			SETUP_MODE="$(cat /etc/securebootmode.conf)"
+			cat > /etc/securebootmode.conf <<- EOF
+				$SETUP_MODE
+			EOF
+		else
+			SETUP_MODE="$(
+				read_efi_uint8 SetupMode
+			)" || die "Cannot read UEFI SetupMode."
+		fi
     fi
 
     if [[ "$SETUP_MODE" != "1" ]]; then
 
         log "SetupMode=0."
-        log "Firmware PK/KEK/db will not be modified."
+        log "Skipping firmware enrollment."
 
         return
     fi
 
     log "SetupMode=1."
-    log "Performing conservative firmware enrollment..."
+    log "Preparing EFI variables..."
 
+    #
+    # Make sure we attempt to restore protection even if
+    # enrollment fails.
+    #
+    trap 'efi_protect' RETURN
+
+    log "Performing Secure Boot enrollment..."
+
+    #
+    # db first.
+    #
     enroll_db
+
+    #
+    # KEK second.
+    #
     enroll_kek
 
+    #
+    # PK LAST.
     #
     # Installing PK exits Setup Mode.
     #
     enroll_pk
+
+    efi_protect
+    trap - RETURN
+
+    log "Secure Boot enrollment completed."
 }
 
 
@@ -369,13 +440,10 @@ main()
         die "Run as root."
 
     install_dependencies
-    install_sbctl_upstream
-
     require_command sbctl
-
     create_keys
     enroll_if_setup_mode
-
+	sbctl setup --migrate || true
     sbctl status || true
 }
 

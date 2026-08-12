@@ -252,7 +252,9 @@ if [[ "$1" = "//inner" ]]; then
 	
 	dbus-daemon --system --fork
 	cd ~/ubuntu-btrfs-on-root
-	. ./setup.conf	
+	. ./setup.conf
+
+	rm -rf /boot/efi/EFI/$suite	
 	apt-get update
 	if [[ $pre_download = "yes" ]]; then
 		pre_download_all
@@ -260,11 +262,7 @@ if [[ "$1" = "//inner" ]]; then
 
 	setup_fstab_crpttab
 	
-	
-
-
-	. ./secure-boot/scripts/sbctl-install
-	. ./refind/scripts/refind-install
+	. ./secure-boot/scripts/secure-boot-setup
 	. ./snapper/scripts/snapper-install
 	. ./uki/scripts/install-uki
 
