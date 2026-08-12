@@ -6,8 +6,10 @@ LISTENER="/usr/libexec/snapshot-key-listener"
 PIDFILE="/run/snapshot-key-listener.pid"
 MARKER="/run/snapshot-menu-requested"
 
+DEFAULT_TRIGGER="ALT"
 DEFAULT_WINDOW_TICKS=20
 DEFAULT_RESULT_TICKS=10
+DEFAULT_PROBE_TICKS=5
 DEFAULT_TTY="/dev/tty1"
 
 #
@@ -21,9 +23,17 @@ if [ -r "$CONFIG" ]; then
     . "$CONFIG"
 fi
 
+trigger="${SNAPSHOT_TRIGGER:-$DEFAULT_TRIGGER}"
 window_ticks="${SNAPSHOT_TRIGGER_WINDOW_TICKS:-$DEFAULT_WINDOW_TICKS}"
 result_ticks="${SNAPSHOT_TRIGGER_RESULT_TICKS:-$DEFAULT_RESULT_TICKS}"
+probe_ticks="${SNAPSHOT_TRIGGER_PROBE_TICKS:-$DEFAULT_PROBE_TICKS}"
 menu_tty="${TTY:-$DEFAULT_TTY}"
+
+#
+# ------------------------------------------------------------
+# Validate configuration
+# ------------------------------------------------------------
+#
 
 case "$window_ticks" in
     ''|*[!0-9]*)
@@ -37,8 +47,30 @@ case "$result_ticks" in
         ;;
 esac
 
+case "$probe_ticks" in
+    ''|*[!0-9]*)
+        probe_ticks="$DEFAULT_PROBE_TICKS"
+        ;;
+esac
+
+if [ -z "$trigger" ]; then
+    trigger="$DEFAULT_TRIGGER"
+fi
+
 if [ ! -c "$menu_tty" ]; then
     menu_tty="/dev/console"
+fi
+
+#
+# A zero interactive window must still allow the C listener to
+# inspect the current keyboard state.
+#
+# Enforce at least one 100 ms probe tick.
+#
+if [ "$window_ticks" -eq 0 ] &&
+   [ "$probe_ticks" -eq 0 ]; then
+
+    probe_ticks=1
 fi
 
 #
@@ -46,28 +78,26 @@ fi
 # Silent mode
 # ------------------------------------------------------------
 #
-# When both values are zero:
+# If both visual timers are zero:
 #
-#   - do not query or alter Plymouth;
+#   - do not query or interact with Plymouth;
 #   - do not write anything to the console;
-#   - do not introduce any delay;
-#   - only stop the listener;
-#   - preserve an existing snapshot request marker.
+#   - still run the C listener for probe_ticks;
+#   - detect a trigger already being held.
 #
 
 silent_mode=0
 
 if [ "$window_ticks" -eq 0 ] &&
    [ "$result_ticks" -eq 0 ]; then
+
     silent_mode=1
 fi
 
 #
 # ------------------------------------------------------------
-# Plymouth detection
+# Plymouth
 # ------------------------------------------------------------
-#
-# Plymouth is never queried in silent mode.
 #
 
 plymouth_active=0
@@ -82,7 +112,7 @@ fi
 
 #
 # ------------------------------------------------------------
-# Message helpers
+# Display helpers
 # ------------------------------------------------------------
 #
 
@@ -135,78 +165,107 @@ show_message()
 
 #
 # ------------------------------------------------------------
-# Listener validation
+# Listener lifecycle
 # ------------------------------------------------------------
 #
 
-get_listener_pid()
+listener_pid=""
+
+stop_listener()
 {
-    found_pid=""
+    if [ -n "$listener_pid" ] &&
+       kill -0 "$listener_pid" 2>/dev/null; then
 
-    if [ ! -r "$PIDFILE" ]; then
-        return 0
+        kill -TERM "$listener_pid" 2>/dev/null || :
+
+        count=0
+
+        while kill -0 "$listener_pid" 2>/dev/null &&
+              [ "$count" -lt 20 ]; do
+
+            sleep 0.01
+            count=$((count + 1))
+        done
     fi
 
-    IFS= read -r candidate_pid <"$PIDFILE" ||
-        candidate_pid=""
-
-    case "$candidate_pid" in
-        ''|*[!0-9]*)
-            return 0
-            ;;
-    esac
-
-    actual_exe="$(
-        readlink -f \
-            "/proc/$candidate_pid/exe" \
-            2>/dev/null
-    )"
-
-    if [ "$actual_exe" = "$LISTENER" ]; then
-        found_pid="$candidate_pid"
+    if [ -n "$listener_pid" ]; then
+        wait "$listener_pid" 2>/dev/null || :
     fi
+
+    listener_pid=""
+    rm -f "$PIDFILE"
 }
 
 #
 # ------------------------------------------------------------
-# Ensure listener is running
+# External termination
 # ------------------------------------------------------------
 #
-# Restarting the listener is useful only when an interactive
-# trigger window is configured.
+
+cleanup_and_exit()
+{
+    stop_listener
+    hide_message
+    exit 0
+}
+
+trap cleanup_and_exit HUP INT TERM
+
 #
-# In silent mode, starting and immediately stopping it would be
-# useless and could introduce a race.
+# ------------------------------------------------------------
+# Start listener
+# ------------------------------------------------------------
+#
+# Do not delete MARKER: it may contain a valid request already
+# detected during this boot.
 #
 
-if [ "$silent_mode" -eq 0 ] &&
-   [ "$window_ticks" -gt 0 ] &&
-   [ ! -e "$MARKER" ]; then
+rm -f "$PIDFILE"
 
-    get_listener_pid
+if [ ! -e "$MARKER" ] &&
+   [ -x "$LISTENER" ]; then
 
-    if [ -z "$found_pid" ] &&
-       [ -x "$LISTENER" ]; then
+    "$LISTENER" "$trigger" \
+        </dev/null \
+        >/dev/null \
+        2>&1 &
 
-        rm -f "$PIDFILE"
+    listener_pid=$!
+fi
 
-        "$LISTENER" \
-            </dev/null \
-            >/dev/null \
-            2>&1 &
+#
+# ------------------------------------------------------------
+# Held-key probe
+# ------------------------------------------------------------
+#
+# When the interactive window is disabled, the C listener is
+# allowed to run briefly and inspect EVIOCGKEY.
+#
+# Nothing is displayed during this phase.
+#
+
+if [ "$window_ticks" -eq 0 ] &&
+   [ ! -e "$MARKER" ] &&
+   [ -n "$listener_pid" ]; then
+
+    tick=0
+
+    while [ "$tick" -lt "$probe_ticks" ]; do
+
+        if [ -e "$MARKER" ]; then
+            break
+        fi
 
         #
-        # Wait up to 500 ms for listener initialization.
+        # Listener terminated without detecting the trigger.
         #
-        count=0
+        if ! kill -0 "$listener_pid" 2>/dev/null; then
+            break
+        fi
 
-        while [ ! -s "$PIDFILE" ] &&
-              [ "$count" -lt 5 ]; do
-
-            sleep 0.1
-            count=$((count + 1))
-        done
-    fi
+        sleep 0.1
+        tick=$((tick + 1))
+    done
 fi
 
 #
@@ -215,60 +274,53 @@ fi
 # ------------------------------------------------------------
 #
 
-if [ "$silent_mode" -eq 0 ] &&
-   [ "$window_ticks" -gt 0 ] &&
+if [ "$window_ticks" -gt 0 ] &&
    [ ! -e "$MARKER" ]; then
 
     tick=0
 
     while [ "$tick" -lt "$window_ticks" ]; do
+
+        if [ -e "$MARKER" ]; then
+            break
+        fi
+
+        #
+        # An invalid trigger or listener failure must not hold up
+        # cryptsetup for the entire configured interval.
+        #
+        if [ -z "$listener_pid" ] ||
+           ! kill -0 "$listener_pid" 2>/dev/null; then
+            break
+        fi
+
         remaining_ticks=$((window_ticks - tick))
         remaining_seconds=$((remaining_ticks / 10))
         remaining_tenths=$((remaining_ticks % 10))
 
         show_message \
-            "Press ${EVLISTENER_KEYS} for snapshot menu: ${remaining_seconds}.${remaining_tenths}s"
+            "Press ${trigger} for snapshot menu: ${remaining_seconds}.${remaining_tenths}s"
 
         sleep 0.1
         tick=$((tick + 1))
-
-        if [ -e "$MARKER" ]; then
-            break
-        fi
     done
 fi
 
 #
 # ------------------------------------------------------------
-# Stop listener safely
+# Stop listener
 # ------------------------------------------------------------
 #
 
-get_listener_pid
-listener_pid="$found_pid"
-
-if [ -n "$listener_pid" ]; then
-    kill -TERM "$listener_pid" 2>/dev/null || :
-
-    #
-    # Wait up to 200 ms for clean termination.
-    #
-    count=0
-
-    while kill -0 "$listener_pid" 2>/dev/null &&
-          [ "$count" -lt 20 ]; do
-
-        sleep 0.01
-        count=$((count + 1))
-    done
-fi
-
-rm -f "$PIDFILE"
+stop_listener
 
 #
 # ------------------------------------------------------------
 # Silent completion
 # ------------------------------------------------------------
+#
+# The held-key probe has already happened. Do not touch Plymouth
+# or the console when both visual timers are zero.
 #
 
 if [ "$silent_mode" -eq 1 ]; then
@@ -277,7 +329,7 @@ fi
 
 #
 # ------------------------------------------------------------
-# Display final result
+# Final result
 # ------------------------------------------------------------
 #
 
@@ -288,6 +340,7 @@ else
 fi
 
 if [ "$result_ticks" -gt 0 ]; then
+
     tick=0
 
     while [ "$tick" -lt "$result_ticks" ]; do
