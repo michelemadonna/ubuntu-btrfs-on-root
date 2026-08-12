@@ -33,7 +33,7 @@ install() {
         "/usr/libexec/snapshot-menu"
 
     inst_simple \
-        "$moddir/snapshot-menu.conf" \
+        "/etc/snapshot-menu.conf" \
         "/etc/snapshot-menu.conf"
     
 

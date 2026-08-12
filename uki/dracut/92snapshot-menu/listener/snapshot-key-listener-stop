@@ -2,12 +2,13 @@
 
 CONFIG="/etc/snapshot-menu.conf"
 
-LISTENER="/usr/libexec/snapshot-alt-listener"
-PIDFILE="/run/snapshot-alt-listener.pid"
+LISTENER="/usr/libexec/snapshot-key-listener"
+PIDFILE="/run/snapshot-key-listener.pid"
 MARKER="/run/snapshot-menu-requested"
 
-DEFAULT_GRACE="0.5"
-DEFAULT_MESSAGE_TIME="1"
+DEFAULT_WINDOW_TICKS=20
+DEFAULT_RESULT_TICKS=10
+DEFAULT_TTY="/dev/tty1"
 
 #
 # ------------------------------------------------------------
@@ -20,29 +21,221 @@ if [ -r "$CONFIG" ]; then
     . "$CONFIG"
 fi
 
-grace="${SNAPSHOT_TRIGGER_GRACE:-$DEFAULT_GRACE}"
-message_time="${
-    SNAPSHOT_TRIGGER_MESSAGE_TIME:-$DEFAULT_MESSAGE_TIME
-}"
+window_ticks="${SNAPSHOT_TRIGGER_WINDOW_TICKS:-$DEFAULT_WINDOW_TICKS}"
+result_ticks="${SNAPSHOT_TRIGGER_RESULT_TICKS:-$DEFAULT_RESULT_TICKS}"
+menu_tty="${TTY:-$DEFAULT_TTY}"
 
-#
-# ------------------------------------------------------------
-# Grace period
-# ------------------------------------------------------------
-#
-# Leave the listener active for a short final interval immediately
-# before cryptsetup. This reduces the race between input-device
-# initialization, key detection and cryptsetup startup.
-#
-
-case "$grace" in
-    ''|*[!0-9.]*)
-        grace="$DEFAULT_GRACE"
+case "$window_ticks" in
+    ''|*[!0-9]*)
+        window_ticks="$DEFAULT_WINDOW_TICKS"
         ;;
 esac
 
-if [ "$grace" != "0" ]; then
-    sleep "$grace" 2>/dev/null || :
+case "$result_ticks" in
+    ''|*[!0-9]*)
+        result_ticks="$DEFAULT_RESULT_TICKS"
+        ;;
+esac
+
+if [ ! -c "$menu_tty" ]; then
+    menu_tty="/dev/console"
+fi
+
+#
+# ------------------------------------------------------------
+# Silent mode
+# ------------------------------------------------------------
+#
+# When both values are zero:
+#
+#   - do not query or alter Plymouth;
+#   - do not write anything to the console;
+#   - do not introduce any delay;
+#   - only stop the listener;
+#   - preserve an existing snapshot request marker.
+#
+
+silent_mode=0
+
+if [ "$window_ticks" -eq 0 ] &&
+   [ "$result_ticks" -eq 0 ]; then
+    silent_mode=1
+fi
+
+#
+# ------------------------------------------------------------
+# Plymouth detection
+# ------------------------------------------------------------
+#
+# Plymouth is never queried in silent mode.
+#
+
+plymouth_active=0
+current_message=""
+
+if [ "$silent_mode" -eq 0 ] &&
+   command -v plymouth >/dev/null 2>&1 &&
+   plymouth --ping >/dev/null 2>&1; then
+
+    plymouth_active=1
+fi
+
+#
+# ------------------------------------------------------------
+# Message helpers
+# ------------------------------------------------------------
+#
+
+hide_message()
+{
+    if [ "$silent_mode" -eq 1 ]; then
+        return 0
+    fi
+
+    if [ "$plymouth_active" -eq 1 ]; then
+
+        if [ -n "$current_message" ]; then
+            plymouth hide-message \
+                --text="$current_message" \
+                >/dev/null 2>&1 || :
+        fi
+
+    elif [ -c "$menu_tty" ]; then
+
+        printf '\r\033[2K' \
+            >"$menu_tty" 2>/dev/null || :
+    fi
+
+    current_message=""
+}
+
+show_message()
+{
+    message="$1"
+
+    if [ "$silent_mode" -eq 1 ]; then
+        return 0
+    fi
+
+    hide_message
+    current_message="$message"
+
+    if [ "$plymouth_active" -eq 1 ]; then
+
+        plymouth display-message \
+            --text="$message" \
+            >/dev/null 2>&1 || :
+
+    elif [ -c "$menu_tty" ]; then
+
+        printf '\r\033[2K%s' "$message" \
+            >"$menu_tty" 2>/dev/null || :
+    fi
+}
+
+#
+# ------------------------------------------------------------
+# Listener validation
+# ------------------------------------------------------------
+#
+
+get_listener_pid()
+{
+    found_pid=""
+
+    if [ ! -r "$PIDFILE" ]; then
+        return 0
+    fi
+
+    IFS= read -r candidate_pid <"$PIDFILE" ||
+        candidate_pid=""
+
+    case "$candidate_pid" in
+        ''|*[!0-9]*)
+            return 0
+            ;;
+    esac
+
+    actual_exe="$(
+        readlink -f \
+            "/proc/$candidate_pid/exe" \
+            2>/dev/null
+    )"
+
+    if [ "$actual_exe" = "$LISTENER" ]; then
+        found_pid="$candidate_pid"
+    fi
+}
+
+#
+# ------------------------------------------------------------
+# Ensure listener is running
+# ------------------------------------------------------------
+#
+# Restarting the listener is useful only when an interactive
+# trigger window is configured.
+#
+# In silent mode, starting and immediately stopping it would be
+# useless and could introduce a race.
+#
+
+if [ "$silent_mode" -eq 0 ] &&
+   [ "$window_ticks" -gt 0 ] &&
+   [ ! -e "$MARKER" ]; then
+
+    get_listener_pid
+
+    if [ -z "$found_pid" ] &&
+       [ -x "$LISTENER" ]; then
+
+        rm -f "$PIDFILE"
+
+        "$LISTENER" \
+            </dev/null \
+            >/dev/null \
+            2>&1 &
+
+        #
+        # Wait up to 500 ms for listener initialization.
+        #
+        count=0
+
+        while [ ! -s "$PIDFILE" ] &&
+              [ "$count" -lt 5 ]; do
+
+            sleep 0.1
+            count=$((count + 1))
+        done
+    fi
+fi
+
+#
+# ------------------------------------------------------------
+# Interactive trigger window
+# ------------------------------------------------------------
+#
+
+if [ "$silent_mode" -eq 0 ] &&
+   [ "$window_ticks" -gt 0 ] &&
+   [ ! -e "$MARKER" ]; then
+
+    tick=0
+
+    while [ "$tick" -lt "$window_ticks" ]; do
+        remaining_ticks=$((window_ticks - tick))
+        remaining_seconds=$((remaining_ticks / 10))
+        remaining_tenths=$((remaining_ticks % 10))
+
+        show_message \
+            "Press ${EVLISTENER_KEYS} for snapshot menu: ${remaining_seconds}.${remaining_tenths}s"
+
+        sleep 0.1
+        tick=$((tick + 1))
+
+        if [ -e "$MARKER" ]; then
+            break
+        fi
+    done
 fi
 
 #
@@ -51,94 +244,65 @@ fi
 # ------------------------------------------------------------
 #
 
-listener_pid=""
+get_listener_pid
+listener_pid="$found_pid"
 
-if [ -r "$PIDFILE" ]; then
-    IFS= read -r listener_pid <"$PIDFILE" ||
-        listener_pid=""
+if [ -n "$listener_pid" ]; then
+    kill -TERM "$listener_pid" 2>/dev/null || :
+
+    #
+    # Wait up to 200 ms for clean termination.
+    #
+    count=0
+
+    while kill -0 "$listener_pid" 2>/dev/null &&
+          [ "$count" -lt 20 ]; do
+
+        sleep 0.01
+        count=$((count + 1))
+    done
 fi
-
-case "$listener_pid" in
-    ''|*[!0-9]*)
-        listener_pid=""
-        ;;
-
-    *)
-        actual_exe="$(
-            readlink -f "/proc/$listener_pid/exe" 2>/dev/null
-        )"
-
-        if [ "$actual_exe" = "$LISTENER" ]; then
-            kill -TERM "$listener_pid" 2>/dev/null || :
-
-            #
-            # Wait briefly for clean listener termination.
-            #
-            count=0
-
-            while kill -0 "$listener_pid" 2>/dev/null &&
-                  [ "$count" -lt 20 ]; do
-
-                sleep 0.01
-                count=$((count + 1))
-            done
-        fi
-        ;;
-esac
 
 rm -f "$PIDFILE"
 
 #
 # ------------------------------------------------------------
-# Determine result
+# Silent completion
+# ------------------------------------------------------------
+#
+
+if [ "$silent_mode" -eq 1 ]; then
+    exit 0
+fi
+
+#
+# ------------------------------------------------------------
+# Display final result
 # ------------------------------------------------------------
 #
 
 if [ -e "$MARKER" ]; then
-    status_text="Snapshot menu ENABLED"
-    console_text='Snapshot menu: ENABLED'
+    show_message "Snapshot menu ENABLED"
 else
-    status_text="Snapshot menu not requested"
-    console_text='Snapshot menu: not requested'
+    show_message "Snapshot menu not requested"
 fi
 
-#
-# ------------------------------------------------------------
-# Show result
-# ------------------------------------------------------------
-#
+if [ "$result_ticks" -gt 0 ]; then
+    tick=0
 
-if command -v plymouth >/dev/null 2>&1 &&
-   plymouth --ping >/dev/null 2>&1; then
-
-    plymouth display-message \
-        --text="$status_text" \
-        >/dev/null 2>&1 || :
-else
-    printf '\n%s\n' "$console_text" \
-        >/dev/console 2>/dev/null || :
+    while [ "$tick" -lt "$result_ticks" ]; do
+        sleep 0.1
+        tick=$((tick + 1))
+    done
 fi
 
-case "$message_time" in
-    ''|*[!0-9.]*)
-        message_time="$DEFAULT_MESSAGE_TIME"
-        ;;
-esac
+hide_message
 
-if [ "$message_time" != "0" ]; then
-    sleep "$message_time" 2>/dev/null || :
-fi
+if [ "$plymouth_active" -eq 0 ] &&
+   [ -c "$menu_tty" ]; then
 
-#
-# Remove the Plymouth message before cryptsetup displays its
-# password prompt.
-#
-if command -v plymouth >/dev/null 2>&1 &&
-   plymouth --ping >/dev/null 2>&1; then
-
-    plymouth hide-message \
-        --text="$status_text" \
-        >/dev/null 2>&1 || :
+    printf '\n' \
+        >"$menu_tty" 2>/dev/null || :
 fi
 
 exit 0

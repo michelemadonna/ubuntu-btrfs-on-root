@@ -65,7 +65,7 @@ root_subvolume=$root_sub_vol/@
 
 
 install -d -m 0700 /etc/uki/keys
-
+install -d -m 0755 /etc/snapshot-menu
 install -d -m 0755 /usr/lib/dracut/modules.d/92snapshot-menu
 
 cat >/etc/kernel/install.conf <<-'EOF'
@@ -137,7 +137,7 @@ if [[ $snapshot_menu == "yes" ]]; then
 		-std=c17 \
 		-s \
 		-o /usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener \
-		/usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-alt-listener.c
+		/usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener.c
 
 	chmod 0755 \
 		/usr/lib/dracut/modules.d/92snapshot-menu/module-setup.sh \
@@ -146,7 +146,7 @@ if [[ $snapshot_menu == "yes" ]]; then
 		/usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener \
 		/usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener-stop
 
-	cat > /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf <<- EOF
+	cat > /etc/snapshot-menu.conf <<- EOF
 		ROOT_SUBVOL="${root_subvolume}"
 		SNAPSHOT_DIR=".snapshots"
 		TTY="/dev/tty1"
@@ -155,21 +155,14 @@ if [[ $snapshot_menu == "yes" ]]; then
 		CMDLINE_DIR="/etc/cmdline.d"
 		SNAPSHOT_CMDLINE="/etc/cmdline.d/99-snapshot.conf"
 		PAGE_SIZE=20
-		#
-		# Time allowed for the early listener to detect the trigger before
-		# cryptsetup starts. Value expressed in seconds.
-		#
-		SNAPSHOT_TRIGGER_GRACE="0.5"
-
-		#
-		# How long the confirmation remains visible.
-		# Set to 0 to disable the pause.
-		#
-		SNAPSHOT_TRIGGER_MESSAGE_TIME="1"
+		DESCRIPTION_MAX_LENGTH=24
+        EVLISTENER_KEYS="ALT+B"
+        SNAPSHOT_TRIGGER_WINDOW_TICKS=50
+        SNAPSHOT_TRIGGER_RESULT_TICKS=0
 	EOF
 
 	chmod 0644 \
-		/usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf
+		/etc/snapshot-menu.conf
 
     if [[ $snapshot_menu_pin == "yes" ]]; then
         echo "Snapshot menu PIN support enabled."
@@ -177,7 +170,7 @@ if [[ $snapshot_menu == "yes" ]]; then
         pin="$snapshot_menu_pin_value"
         pinhash="$(echo -n "${salt}${pin}" | sha256sum | awk '{print $1}')"
 
-		cat >> /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf <<- EOF
+		cat >> /etc/snapshot-menu.conf <<- EOF
 			
 			SNAPSHOT_PIN_ENABLED=yes
 			SNAPSHOT_PIN_ATTEMPTS=3
@@ -224,4 +217,4 @@ echo
 echo "UKI support installed."
 echo "UKI destination: ${esp_directory}/EFI/Linux/${distro_id}"
 
-. "$repository_root/uki/scripts/generate-uki"
+. "$repository_root/uki/scripts/generate-uki" --all

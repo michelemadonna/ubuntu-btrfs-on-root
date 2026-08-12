@@ -38,6 +38,19 @@ if [[ ! "$PAGE_SIZE" =~ ^[1-9][0-9]*$ ]]; then
 fi
 
 #
+# Optional description length configuration.
+#
+DESCRIPTION_MAX_LENGTH="${DESCRIPTION_MAX_LENGTH:-24}"
+
+if [[ ! "$DESCRIPTION_MAX_LENGTH" =~ ^[1-9][0-9]*$ ]]; then
+    DESCRIPTION_MAX_LENGTH=24
+fi
+
+if (( DESCRIPTION_MAX_LENGTH > 40 )); then
+    DESCRIPTION_MAX_LENGTH=40
+fi
+
+#
 # Optional snapshot PIN configuration.
 #
 SNAPSHOT_PIN_ENABLED="${SNAPSHOT_PIN_ENABLED:-no}"
@@ -82,7 +95,7 @@ SNAPSHOT_PIN_READY="no"
 if [[ "$SNAPSHOT_PIN_ENABLED" == "yes" ]]; then
 
     if [[ -n "$SNAPSHOT_PIN_SALT" &&
-          "$SNAPSHOT_PIN_HASH" =~ ^[[:xdigit:]]{64}$ ]]
+        "$SNAPSHOT_PIN_HASH" =~ ^[[:xdigit:]]{64}$ ]]
     then
 
         SNAPSHOT_PIN_HASH="${SNAPSHOT_PIN_HASH,,}"
@@ -395,13 +408,57 @@ load_entry() {
     [[ -n "$description" ]] ||
         description="Snapshot"
 
+    #
+# Remove characters capable of breaking the terminal layout.
+#
+description="${description//$'\n'/ }"
+description="${description//$'\r'/ }"
+description="${description//$'\t'/ }"
+
+type="${type//$'\n'/ }"
+type="${type//$'\r'/ }"
+type="${type//$'\t'/ }"
+
+#
+# Truncate the description and append "..." when necessary.
+#
+if (( ${#description} > DESCRIPTION_MAX_LENGTH )); then
+
+    if (( DESCRIPTION_MAX_LENGTH > 3 )); then
+        description="${
+            description:0:DESCRIPTION_MAX_LENGTH-3
+        }..."
+    else
+        description="${description:0:DESCRIPTION_MAX_LENGTH}"
+    fi
+
+fi
+
+#
+# Build a fixed-width label:
+#
+#   snapshot  date                 description               type
+#   #9        2026-08-12 14:40:21  boot                      single
+#
     if [[ -n "$date" ]]; then
 
-        LABELS[$index]="#${snap}   ${date}   ${description}   ${type}"
+        printf -v 'LABELS[index]' \
+            '#%-5.5s  %-19.19s  %-*s  %-8.8s' \
+            "$snap" \
+            "$date" \
+            "$DESCRIPTION_MAX_LENGTH" \
+            "$description" \
+            "$type"
 
     else
 
-        LABELS[$index]="#${snap}   ${description}   ${type}"
+        printf -v 'LABELS[index]' \
+            '#%-5.5s  %-19s  %-*s  %-8.8s' \
+            "$snap" \
+            "-" \
+            "$DESCRIPTION_MAX_LENGTH" \
+            "$description" \
+            "$type"
 
     fi
 
@@ -458,6 +515,9 @@ draw_menu() {
     local page
     local first
     local last
+    local label_width
+
+    label_width=$((5 + 4 + 19 + 2 + DESCRIPTION_MAX_LENGTH + 2 + 8))
 
     page=$((selected / PAGE_SIZE))
     first=$((page * PAGE_SIZE))
@@ -495,11 +555,19 @@ draw_menu() {
         "$last" \
         "$COUNT" >&3
 
-    printf '   %-62s %-10s\n' \
+    printf '   %-7s  %-19s  %-*s  %-8s  %-10s\n' \
         'Snapshot' \
+        'Date' \
+        "$DESCRIPTION_MAX_LENGTH" \
+        'Description' \
+        'Type' \
         'Kernel' >&3
 
-    printf '   %-62s %-10s\n' \
+    printf '   %-7s  %-19s  %-*s  %-8s  %-10s\n' \
+        '--------' \
+        '-------------------' \
+        "$DESCRIPTION_MAX_LENGTH" \
+        '-----------' \
         '--------' \
         '------' >&3
 
@@ -511,7 +579,9 @@ draw_menu() {
 
             printf '\033[7m' >&3
 
-            printf ' > %-62.62s %-10s' \
+            printf ' > %-*.*s  %-10.10s' \
+                "$label_width" \
+                "$label_width" \
                 "${LABELS[$i]}" \
                 "${KERNEL_STATUS[$i]}" >&3
 
@@ -519,7 +589,9 @@ draw_menu() {
 
         else
 
-            printf '   %-62.62s %-10s\n' \
+            printf '   %-*.*s  %-10.10s\n' \
+                "$label_width" \
+                "$label_width" \
                 "${LABELS[$i]}" \
                 "${KERNEL_STATUS[$i]}" >&3
 
