@@ -91,13 +91,14 @@ main()
 
 	if [[ -f /etc/securebootmode.conf ]]; then
 		export SETUP_MODE="$(cat /etc/securebootmode.conf)"
-		cat > /etc/securebootmode.conf <<- EOF
-			$SETUP_MODE
-		EOF
+		
 	else
 		export SETUP_MODE="$(
 			read_efi_uint8 SetupMode
 		)" || die "Cannot read UEFI SetupMode."
+		cat > /etc/securebootmode.conf <<- EOF
+		$SETUP_MODE
+		EOF
 	fi
 
     export SECURE_BOOT="$(
