@@ -1,0 +1,382 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+
+# ============================================================
+# Configuration
+# ============================================================
+
+SBCTL_VERSION="${SBCTL_VERSION:-0.17}"
+
+SBCTL_KEYROOT="${SBCTL_KEYROOT:-/var/lib/sbctl/keys}"
+
+PK_KEY="$SBCTL_KEYROOT/PK/PK.key"
+PK_CERT="$SBCTL_KEYROOT/PK/PK.pem"
+
+KEK_KEY="$SBCTL_KEYROOT/KEK/KEK.key"
+KEK_CERT="$SBCTL_KEYROOT/KEK/KEK.pem"
+
+DB_KEY="${DB_KEY:-$SBCTL_KEYROOT/db/db.key}"
+DB_CERT="${DB_CERT:-$SBCTL_KEYROOT/db/db.pem}"
+
+PRESERVE_MICROSOFT="${PRESERVE_MICROSOFT:-true}"
+PRESERVE_FIRMWARE_DEFAULTS="${PRESERVE_FIRMWARE_DEFAULTS:-true}"
+
+SETUP_MODE="${SETUP_MODE:-}"
+
+
+# ============================================================
+# Helpers
+# ============================================================
+
+log()
+{
+    printf '==> %s\n' "$*"
+}
+
+warn()
+{
+    printf 'WARNING: %s\n' "$*" >&2
+}
+
+die()
+{
+    printf 'ERROR: %s\n' "$*" >&2
+    exit 1
+}
+
+require_command()
+{
+    command -v "$1" >/dev/null 2>&1 ||
+        die "Required command not found: $1"
+}
+
+read_efi_uint8()
+{
+    local name="$1"
+    local file
+
+    file="$(
+        find /sys/firmware/efi/efivars \
+            -maxdepth 1 \
+            -name "${name}-*" \
+            -print \
+            -quit 2>/dev/null
+    )"
+
+    [[ -n "$file" ]] || return 1
+
+    od -An -j4 -N1 -t u1 "$file" |
+        tr -d '[:space:]'
+}
+
+
+# ============================================================
+# Dependencies
+# ============================================================
+
+install_dependencies()
+{
+    export DEBIAN_FRONTEND=noninteractive
+
+    apt-get update
+
+    apt-get install -y \
+        ca-certificates \
+        curl \
+        tar \
+        file \
+        python3 \
+        findutils \
+        coreutils
+
+    #
+    # Prefer distro package.
+    #
+    if ! command -v sbctl >/dev/null 2>&1; then
+
+        log "Trying to install sbctl from distribution repository..."
+
+        apt-get install -y sbctl || true
+    fi
+}
+
+
+# ============================================================
+# sbctl fallback
+# ============================================================
+
+install_sbctl_upstream()
+{
+    local tmp
+    local url
+    local archive
+    local binary
+
+    command -v sbctl >/dev/null 2>&1 &&
+        return
+
+    tmp="$(mktemp -d /tmp/sbctl.XXXXXX)"
+
+    trap 'rm -rf "${tmp:-}"' RETURN
+
+    log "sbctl package unavailable."
+    log "Downloading sbctl ${SBCTL_VERSION} from upstream..."
+
+    curl \
+        --fail \
+        --location \
+        --silent \
+        --show-error \
+        "https://api.github.com/repos/Foxboron/sbctl/releases/tags/${SBCTL_VERSION}" \
+        -o "$tmp/release.json"
+
+    url="$(
+        python3 - "$tmp/release.json" <<'PY'
+import json
+import re
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    release = json.load(f)
+
+patterns = [
+    re.compile(r"linux.*(amd64|x86_64).*(tar\.gz|tar\.xz|tar\.zst|zip)$", re.I),
+    re.compile(r"(amd64|x86_64).*linux.*(tar\.gz|tar\.xz|tar\.zst|zip)$", re.I),
+]
+
+for pattern in patterns:
+    for asset in release.get("assets", []):
+        if pattern.search(asset.get("name", "")):
+            print(asset["browser_download_url"])
+            raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+    )" || die "No suitable sbctl release asset found."
+
+    archive="$tmp/$(basename "$url")"
+
+    curl \
+        --fail \
+        --location \
+        --show-error \
+        "$url" \
+        -o "$archive"
+
+    case "$archive" in
+
+        *.tar.gz|*.tgz)
+            tar -xzf "$archive" -C "$tmp"
+            ;;
+
+        *.tar.xz)
+            tar -xJf "$archive" -C "$tmp"
+            ;;
+
+        *.tar.zst)
+            tar --zstd -xf "$archive" -C "$tmp"
+            ;;
+
+        *.zip)
+            apt-get install -y unzip
+            unzip -q "$archive" -d "$tmp"
+            ;;
+
+        *)
+            chmod +x "$archive"
+            ;;
+    esac
+
+    binary="$(
+        find "$tmp" \
+            -type f \
+            -name sbctl \
+            -perm /111 \
+            -print \
+            -quit
+    )"
+
+    [[ -n "$binary" ]] ||
+        die "Unable to locate sbctl binary."
+
+    install \
+        -m 0755 \
+        "$binary" \
+        /usr/local/sbin/sbctl
+
+    rm -rf "$tmp"
+    trap - RETURN
+}
+
+
+# ============================================================
+# Keys
+# ============================================================
+
+keys_exist()
+{
+    [[ -f "$PK_KEY" ]] &&
+    [[ -f "$PK_CERT" ]] &&
+    [[ -f "$KEK_KEY" ]] &&
+    [[ -f "$KEK_CERT" ]] &&
+    [[ -f "$DB_KEY" ]] &&
+    [[ -f "$DB_CERT" ]]
+}
+
+create_keys()
+{
+    if keys_exist; then
+        log "sbctl key hierarchy already exists."
+        return
+    fi
+
+    if [[ -d "$SBCTL_KEYROOT" ]] &&
+       find "$SBCTL_KEYROOT" \
+            -mindepth 1 \
+            -print \
+            -quit 2>/dev/null |
+       grep -q .
+    then
+        die "Incomplete sbctl key hierarchy in $SBCTL_KEYROOT."
+    fi
+
+    log "Generating Secure Boot keys..."
+
+    sbctl create-keys
+
+    keys_exist ||
+        die "sbctl did not create the expected key hierarchy."
+}
+
+
+# ============================================================
+# Enrollment
+# ============================================================
+
+sbctl_supports()
+{
+    sbctl enroll-keys --help 2>&1 |
+        grep -q -- "$1"
+}
+
+efi_variable_exists()
+{
+    local name="$1"
+
+    find /sys/firmware/efi/efivars \
+        -maxdepth 1 \
+        -name "${name}-*" \
+        -print \
+        -quit 2>/dev/null |
+        grep -q .
+}
+
+enroll_db()
+{
+    local args=(
+        enroll-keys
+        --partial db
+    )
+
+    if efi_variable_exists db; then
+        args+=(--append)
+    fi
+
+    if [[ "$PRESERVE_MICROSOFT" == "true" ]]; then
+        args+=(--microsoft)
+    fi
+
+    if [[ "$PRESERVE_FIRMWARE_DEFAULTS" == "true" ]] &&
+       sbctl_supports "--firmware-builtin"
+    then
+        args+=(--firmware-builtin db)
+    fi
+
+    log "Enrolling db..."
+
+    sbctl "${args[@]}"
+}
+
+enroll_kek()
+{
+    local args=(
+        enroll-keys
+        --partial KEK
+    )
+
+    if efi_variable_exists KEK; then
+        args+=(--append)
+    fi
+
+    if [[ "$PRESERVE_FIRMWARE_DEFAULTS" == "true" ]] &&
+       sbctl_supports "--firmware-builtin"
+    then
+        args+=(--firmware-builtin KEK)
+    fi
+
+    log "Enrolling KEK..."
+
+    sbctl "${args[@]}"
+}
+
+enroll_pk()
+{
+    log "Enrolling PK..."
+
+    #
+    # Always last.
+    #
+    sbctl enroll-keys \
+        --partial PK
+}
+
+enroll_if_setup_mode()
+{
+    if [[ -z "$SETUP_MODE" ]]; then
+        SETUP_MODE="$(read_efi_uint8 SetupMode)"
+    fi
+
+    if [[ "$SETUP_MODE" != "1" ]]; then
+
+        log "SetupMode=0."
+        log "Firmware PK/KEK/db will not be modified."
+
+        return
+    fi
+
+    log "SetupMode=1."
+    log "Performing conservative firmware enrollment..."
+
+    enroll_db
+    enroll_kek
+
+    #
+    # Installing PK exits Setup Mode.
+    #
+    enroll_pk
+}
+
+
+# ============================================================
+# Main
+# ============================================================
+
+main()
+{
+    [[ $EUID -eq 0 ]] ||
+        die "Run as root."
+
+    install_dependencies
+    install_sbctl_upstream
+
+    require_command sbctl
+
+    create_keys
+    enroll_if_setup_mode
+
+    sbctl status || true
+}
+
+main "$@"

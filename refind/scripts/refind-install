@@ -18,10 +18,10 @@ source $repository_root/setup.conf
 
 echo -e "\e[32mINFO:\e[0mInstall rEFInd Bootloader"
 
-echo "refind refind/install_to_esp boolean true" | debconf-set-selections
+echo "refind refind/install_to_esp boolean false" | debconf-set-selections
 DEBIAN_FRONTEND=noninteractive apt install -y refind
-mkdir -p /boot/efi/EFI/refind/drivers_x64/
-cp /usr/share/refind/refind/drivers_x64/{btrfs,iso9660,ext2,ext4}_x64.efi /boot/efi/EFI/refind/drivers_x64/
+#mkdir -p /boot/efi/EFI/refind/drivers_x64/
+#cp /usr/share/refind/refind/drivers_x64/{btrfs,iso9660,ext2,ext4}_x64.efi /boot/efi/EFI/refind/drivers_x64/
 
 unzip $repository_root/refind/refind_themes.zip -d /boot/efi/EFI/refind/
 			

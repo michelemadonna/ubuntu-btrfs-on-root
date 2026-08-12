@@ -63,8 +63,6 @@ apt install -y \
     pcscd \
     fwupd-unsigned
 
-apt remove -y fwupd-signed
-
 if [[ $pre_download = "no" ]]; then
     go install github.com/foxboron/sbctl/cmd/sbctl@latest
 fi
@@ -74,6 +72,7 @@ mv -f ~/go/bin/sbctl /usr/sbin/
 sbctl create-keys
 sbctl enroll-keys --microsoft
 sbctl status
+
 
 cat >> /etc/fwupd/fwupd.conf <<-EOL
     

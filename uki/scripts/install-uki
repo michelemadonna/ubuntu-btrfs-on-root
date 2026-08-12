@@ -199,6 +199,7 @@ fi
 install -m 755 \
     "$repository_root/uki/hooks/99-refind-menu.install" \
     /usr/lib/kernel/install.d/99-refind-menu.install
+echo "include refind-linux-$suite.conf" >> "/boot/efi/EFI/refind/refind.conf"
 
 
 if [[ $enable_tpm == "yes" ]]; then
