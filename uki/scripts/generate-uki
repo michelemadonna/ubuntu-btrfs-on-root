@@ -18,12 +18,12 @@ trim() {
     value="${value#"${value%%[![:space:]]*}"}"
     value="${value%"${value##*[![:space:]]}"}"
 
-printf '%s' "$value"
+    printf '%s' "$value"
 }
 
 
 PREFIX_FILE="/etc/kernel/entry-token"
-SNAPSHOT_MENU_CONFIG="/etc/snapshot-menu/snapshot-menu.conf"
+SNAPSHOT_MENU_CONFIG="/etc/snapshot-menu.conf"
 
 usage() {
     printf 'Usage: %s [--all | KERNEL_VERSION]\n' "${0##*/}" >&2
@@ -276,17 +276,17 @@ for kernel in "${kernels[@]}"; do
                 fi
 
                 if grep -qE 'usr/libexec/snapshot-key-listener$' <<<"$initrd_listing"; then
-                    echo "   ✅ Snapshot [alt] listener"
+                    echo "   ✅ Snapshot key listener"
                 else
-                    echo "   ❌ Snapshot [alt] listener missing"
-                    kernel_errors+=("snapshot [alt] listener missing")
+                    echo "   ❌ Snapshot key listener missing"
+                    kernel_errors+=("snapshot key listener missing")
                 fi
 
                 if grep -qE 'usr/libexec/snapshot-key-listener-stop$' <<<"$initrd_listing"; then
-                    echo "   ✅ Snapshot [alt] listener stop"
+                    echo "   ✅ Snapshot key listener stop"
                 else
-                    echo "   ❌ Snapshot [alt] listener stop missing"
-                    kernel_errors+=("snapshot [alt] listener stop missing")
+                    echo "   ❌ Snapshot key listener stop missing"
+                    kernel_errors+=("snapshot key listener stop missing")
                 fi
 
                 if grep -qE 'etc/systemd/system/systemd-cryptsetup@\.service\.d/50-snapshot-key-listener-stop\.conf$' <<<"$initrd_listing"; then
@@ -341,9 +341,9 @@ for kernel in "${kernels[@]}"; do
 done
 
 
-        # ==================================================================
-        # Final report
-        # ==================================================================
+# ==================================================================
+# Final report
+# ==================================================================
 
 echo
 echo
