@@ -1,21 +1,144 @@
 #!/bin/sh
 
-PIDFILE="/run/snapshot-key-listener.pid"
+CONFIG="/etc/snapshot-menu.conf"
+
+LISTENER="/usr/libexec/snapshot-alt-listener"
+PIDFILE="/run/snapshot-alt-listener.pid"
+MARKER="/run/snapshot-menu-requested"
+
+DEFAULT_GRACE="0.5"
+DEFAULT_MESSAGE_TIME="1"
+
+#
+# ------------------------------------------------------------
+# Configuration
+# ------------------------------------------------------------
+#
+
+if [ -r "$CONFIG" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG"
+fi
+
+grace="${SNAPSHOT_TRIGGER_GRACE:-$DEFAULT_GRACE}"
+message_time="${
+    SNAPSHOT_TRIGGER_MESSAGE_TIME:-$DEFAULT_MESSAGE_TIME
+}"
+
+#
+# ------------------------------------------------------------
+# Grace period
+# ------------------------------------------------------------
+#
+# Leave the listener active for a short final interval immediately
+# before cryptsetup. This reduces the race between input-device
+# initialization, key detection and cryptsetup startup.
+#
+
+case "$grace" in
+    ''|*[!0-9.]*)
+        grace="$DEFAULT_GRACE"
+        ;;
+esac
+
+if [ "$grace" != "0" ]; then
+    sleep "$grace" 2>/dev/null || :
+fi
+
+#
+# ------------------------------------------------------------
+# Stop listener safely
+# ------------------------------------------------------------
+#
+
+listener_pid=""
 
 if [ -r "$PIDFILE" ]; then
     IFS= read -r listener_pid <"$PIDFILE" ||
         listener_pid=""
-
-    case "$listener_pid" in
-        ''|*[!0-9]*)
-            ;;
-        *)
-            kill -TERM "$listener_pid" \
-                2>/dev/null || :
-            ;;
-    esac
 fi
 
+case "$listener_pid" in
+    ''|*[!0-9]*)
+        listener_pid=""
+        ;;
+
+    *)
+        actual_exe="$(
+            readlink -f "/proc/$listener_pid/exe" 2>/dev/null
+        )"
+
+        if [ "$actual_exe" = "$LISTENER" ]; then
+            kill -TERM "$listener_pid" 2>/dev/null || :
+
+            #
+            # Wait briefly for clean listener termination.
+            #
+            count=0
+
+            while kill -0 "$listener_pid" 2>/dev/null &&
+                  [ "$count" -lt 20 ]; do
+
+                sleep 0.01
+                count=$((count + 1))
+            done
+        fi
+        ;;
+esac
+
 rm -f "$PIDFILE"
+
+#
+# ------------------------------------------------------------
+# Determine result
+# ------------------------------------------------------------
+#
+
+if [ -e "$MARKER" ]; then
+    status_text="Snapshot menu ENABLED"
+    console_text='Snapshot menu: ENABLED'
+else
+    status_text="Snapshot menu not requested"
+    console_text='Snapshot menu: not requested'
+fi
+
+#
+# ------------------------------------------------------------
+# Show result
+# ------------------------------------------------------------
+#
+
+if command -v plymouth >/dev/null 2>&1 &&
+   plymouth --ping >/dev/null 2>&1; then
+
+    plymouth display-message \
+        --text="$status_text" \
+        >/dev/null 2>&1 || :
+else
+    printf '\n%s\n' "$console_text" \
+        >/dev/console 2>/dev/null || :
+fi
+
+case "$message_time" in
+    ''|*[!0-9.]*)
+        message_time="$DEFAULT_MESSAGE_TIME"
+        ;;
+esac
+
+if [ "$message_time" != "0" ]; then
+    sleep "$message_time" 2>/dev/null || :
+fi
+
+#
+# Remove the Plymouth message before cryptsetup displays its
+# password prompt.
+#
+if command -v plymouth >/dev/null 2>&1 &&
+   plymouth --ping >/dev/null 2>&1; then
+
+    plymouth hide-message \
+        --text="$status_text" \
+        >/dev/null 2>&1 || :
+fi
 
 exit 0
