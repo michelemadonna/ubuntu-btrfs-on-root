@@ -135,7 +135,8 @@ case "$answer" in
                     .cmdline \
                     .uname \
                     .pcrpkey \
-                    .pcrsig
+                    .pcrsig \
+                    .sbat
                 do
                     if grep -Fq "$section" <<<"$sections"; then
                         printf '   ✅ %-10s present\n' "$section"
@@ -243,24 +244,24 @@ case "$answer" in
                     fi
 
                     if grep -qE 'usr/libexec/snapshot-key-listener$' <<<"$initrd_listing"; then
-                        echo "   ✅ Snapshot alt-b listener"
+                        echo "   ✅ Snapshot [alt] listener"
                     else
-                        echo "   ❌ Snapshot alt-b listener missing"
-                        kernel_errors+=("snapshot alt-b listener missing")
+                        echo "   ❌ Snapshot [alt] listener missing"
+                        kernel_errors+=("snapshot [alt] listener missing")
                     fi
 
                     if grep -qE 'usr/libexec/snapshot-key-listener-stop$' <<<"$initrd_listing"; then
-                        echo "   ✅ Snapshot alt-b listener stop"
+                        echo "   ✅ Snapshot [alt] listener stop"
                     else
-                        echo "   ❌ Snapshot alt-b listener stop missing"
-                        kernel_errors+=("snapshot alt-b listener stop missing")
+                        echo "   ❌ Snapshot [alt] listener stop missing"
+                        kernel_errors+=("snapshot [alt] listener stop missing")
                     fi
 
                     if grep -qE 'etc/systemd/system/systemd-cryptsetup@\.service\.d/50-snapshot-key-listener-stop\.conf$' <<<"$initrd_listing"; then
-                        echo "   ✅ Snapshot menu systemd stopper configuration"
+                        echo "   ✅ Snapshot menu systemd key listener stopper configuration"
                     else
-                        echo "   ❌ Snapshot menu systemd stopper configuration missing"
-                        kernel_errors+=("snapshot menu systemd stopper configuration missing")
+                        echo "   ❌ Snapshot menu systemd key listener stopper configuration missing"
+                        kernel_errors+=("snapshot menu systemd key listener stopper configuration missing")
                     fi
 
                 else

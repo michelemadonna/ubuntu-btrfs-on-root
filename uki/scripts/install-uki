@@ -102,50 +102,9 @@ ln -sf \
     /etc/kernel/uki.conf \
     /etc/systemd/ukify.conf
 
-rsync \
-    -a \
-    --delete \
-    $repository_root/uki"/dracut/92snapshot-menu/" \
-    /usr/lib/dracut/modules.d/92snapshot-menu/
-
-gcc \
-    -O2 \
-    -Wall \
-    -Wextra \
-    -Wpedantic \
-    -std=c17 \
-    -s \
-    -o /usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener \
-    /usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-alt-listener.c
-
-chmod 0755 \
-    /usr/lib/dracut/modules.d/92snapshot-menu/module-setup.sh \
-    /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu-hook.sh \
-    /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.sh \
-    /usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener \
-    /usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener-stop
-
-cat > /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf <<- EOF
-    ROOT_SUBVOL="${root_subvolume}"
-    SNAPSHOT_DIR=".snapshots"
-    TTY="/dev/tty1"
-    MOUNTPOINT="/run/snapshot-menu-root"
-    RESULT="/run/snapshot-menu-selected"
-    CMDLINE_DIR="/etc/cmdline.d"
-    SNAPSHOT_CMDLINE="/etc/cmdline.d/99-snapshot.conf"
-EOF
-
-chmod 0644 \
-    /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf
-
-cat > /etc/dracut.conf.d/52-snapshot-menu.conf <<-'EOF'
-    force_add_dracutmodules+=" snapshot-menu "
-EOF
-
 cat > /etc/dracut.conf.d/53-uki-cmdline.conf <<-'EOF'
     hostonly_cmdline="no"
 EOF
-
 
 if [[ ! -s /etc/uki/keys/pcr-private.pem ]]; then
     openssl genpkey \
@@ -165,7 +124,77 @@ chmod 0644 /etc/uki/keys/pcr-public.pem
 echo "root=UUID=${btrfs_uuid} rootfstype=btrfs rootflags=${btrfs_options},subvol=${root_subvolume} rd.luks.uuid=luks-${luks_uuid} quiet splash" > /etc/kernel/cmdline
 chmod 0644 /etc/kernel/cmdline
 
-echo 'add_dracutmodules+=" overlayfs "' | tee /etc/dracut.conf.d/99_overlayfs.conf
+if [[ $snapshot_menu == "yes" ]]; then
+    echo "Snapshot menu support enabled."
+
+	rsync \
+		-a \
+		--delete \
+		$repository_root/uki"/dracut/92snapshot-menu/" \
+		/usr/lib/dracut/modules.d/92snapshot-menu/
+
+	gcc \
+		-O2 \
+		-Wall \
+		-Wextra \
+		-Wpedantic \
+		-std=c17 \
+		-s \
+		-o /usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener \
+		/usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-alt-listener.c
+
+	chmod 0755 \
+		/usr/lib/dracut/modules.d/92snapshot-menu/module-setup.sh \
+		/usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu-hook.sh \
+		/usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.sh \
+		/usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener \
+		/usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener-stop
+
+	cat > /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf <<- EOF
+		ROOT_SUBVOL="${root_subvolume}"
+		SNAPSHOT_DIR=".snapshots"
+		TTY="/dev/tty1"
+		MOUNTPOINT="/run/snapshot-menu-root"
+		RESULT="/run/snapshot-menu-selected"
+		CMDLINE_DIR="/etc/cmdline.d"
+		SNAPSHOT_CMDLINE="/etc/cmdline.d/99-snapshot.conf"
+		PAGE_SIZE=2		
+		SNAPSHOT_PIN_ENABLED=yes
+		SNAPSHOT_PIN_ATTEMPTS=3
+		SNAPSHOT_PIN_MAX_LENGTH=12
+		SNAPSHOT_PIN_SALT="${salt}"
+		SNAPSHOT_PIN_HASH="${pinhash}"
+	EOF
+
+	chmod 0644 \
+		/usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf
+
+    if [[ $snapshot_menu_pin == "yes" ]]; then
+        echo "Snapshot menu PIN support enabled."
+        salt="$(openssl rand -hex 16)"
+        pin="$snapshot_menu_pin_value"
+        pinhash="$(echo -n "${salt}${pin}" | sha256sum | awk '{print $1}')"
+
+		cat > /usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.conf <<- EOF
+			
+			SNAPSHOT_PIN_ENABLED=yes
+			SNAPSHOT_PIN_ATTEMPTS=3
+			SNAPSHOT_PIN_MAX_LENGTH=12
+			SNAPSHOT_PIN_SALT="${salt}"
+			SNAPSHOT_PIN_HASH="${pinhash}"
+		EOF
+    else
+        echo "Snapshot menu PIN support disabled."
+    fi
+    
+
+    cat > /etc/dracut.conf.d/52-snapshot-menu.conf <<- 'EOF'
+		force_add_dracutmodules+=" snapshot-menu "
+	EOF
+    echo 'add_dracutmodules+=" overlayfs "' | tee /etc/dracut.conf.d/99_overlayfs.conf
+else
+    echo "Snapshot menu support disabled."
+fi
 
 install -m 755 \
     "$repository_root/uki/hooks/99-refind-menu.install" \

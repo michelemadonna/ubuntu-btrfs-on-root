@@ -25,7 +25,8 @@ install() {
         chvt \
         plymouth \
         stty \
-        touch
+        touch \
+        sha256sum
 
     inst_simple \
         "$moddir/snapshot-menu.sh" \
