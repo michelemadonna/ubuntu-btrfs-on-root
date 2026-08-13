@@ -231,8 +231,8 @@ pre_download_all(){
     cryptsetup-bin \
 	tpm2-tools tpm2-tss libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64 libtss2-tcti-tabrmd0 build-essential  fwupd-unsigned  git
 	
-	apt install -y asciidoc-base pkgconf pkgconf-bin curl libpcsclite-dev libpcsclite1 golang-go sbsigntool pcscd  
-	go install github.com/foxboron/sbctl/cmd/sbctl@latest
+	#apt install -y asciidoc-base pkgconf pkgconf-bin curl libpcsclite-dev libpcsclite1 golang-go sbsigntool pcscd  
+	#go install github.com/foxboron/sbctl/cmd/sbctl@latest
 	
 	
 	apt install -y openssh-server open-vm-tools-desktop
