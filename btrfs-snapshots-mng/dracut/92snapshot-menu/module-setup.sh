@@ -37,10 +37,10 @@ install() {
         "/etc/snapshot-menu.conf"
     
 
-    inst_hook \
-        pre-mount \
-        00 \
-        "$moddir/snapshot-menu-hook.sh"
+    #inst_hook \
+    #    pre-mount \
+    #    00 \
+    #    "$moddir/snapshot-menu-hook.sh"
     
     inst_hook \
         cmdline \

@@ -29,12 +29,6 @@ result_ticks="${SNAPSHOT_TRIGGER_RESULT_TICKS:-$DEFAULT_RESULT_TICKS}"
 probe_ticks="${SNAPSHOT_TRIGGER_PROBE_TICKS:-$DEFAULT_PROBE_TICKS}"
 menu_tty="${TTY:-$DEFAULT_TTY}"
 
-#
-# ------------------------------------------------------------
-# Validate configuration
-# ------------------------------------------------------------
-#
-
 case "$window_ticks" in
     ''|*[!0-9]*)
         window_ticks="$DEFAULT_WINDOW_TICKS"
@@ -62,10 +56,8 @@ if [ ! -c "$menu_tty" ]; then
 fi
 
 #
-# A zero interactive window must still allow the C listener to
-# inspect the current keyboard state.
-#
-# Enforce at least one 100 ms probe tick.
+# With no interactive window, retain a minimal interval in which
+# the C listener can inspect EVIOCGKEY.
 #
 if [ "$window_ticks" -eq 0 ] &&
    [ "$probe_ticks" -eq 0 ]; then
@@ -77,13 +69,6 @@ fi
 # ------------------------------------------------------------
 # Silent mode
 # ------------------------------------------------------------
-#
-# If both visual timers are zero:
-#
-#   - do not query or interact with Plymouth;
-#   - do not write anything to the console;
-#   - still run the C listener for probe_ticks;
-#   - detect a trigger already being held.
 #
 
 silent_mode=0
@@ -112,7 +97,7 @@ fi
 
 #
 # ------------------------------------------------------------
-# Display helpers
+# Message helpers
 # ------------------------------------------------------------
 #
 
@@ -173,27 +158,53 @@ listener_pid=""
 
 stop_listener()
 {
-    if [ -n "$listener_pid" ] &&
-       kill -0 "$listener_pid" 2>/dev/null; then
+    if [ -z "$listener_pid" ]; then
+        rm -f "$PIDFILE"
+        return 0
+    fi
+
+    if kill -0 "$listener_pid" 2>/dev/null; then
 
         kill -TERM "$listener_pid" 2>/dev/null || :
 
+        #
+        # Give the listener up to 500 ms to run cleanup(), release
+        # EVIOCGRAB and close every evdev descriptor.
+        #
         count=0
 
         while kill -0 "$listener_pid" 2>/dev/null &&
-              [ "$count" -lt 20 ]; do
+              [ "$count" -lt 50 ]; do
 
             sleep 0.01
             count=$((count + 1))
         done
+
+        #
+        # Never allow cryptsetup to start while the listener still
+        # owns an EVIOCGRAB. Force termination if cleanup stalled.
+        #
+        if kill -0 "$listener_pid" 2>/dev/null; then
+            kill -KILL "$listener_pid" 2>/dev/null || :
+        fi
     fi
 
-    if [ -n "$listener_pid" ]; then
-        wait "$listener_pid" 2>/dev/null || :
-    fi
+    #
+    # Reap the child. When the process is dead, the kernel has
+    # necessarily closed its evdev descriptors and released every
+    # EVIOCGRAB, even if SIGKILL was required.
+    #
+    wait "$listener_pid" 2>/dev/null || :
 
     listener_pid=""
+
     rm -f "$PIDFILE"
+
+    #
+    # Small settling interval before systemd-cryptsetup creates its
+    # password request. Do not read from the TTY here.
+    #
+    sleep 0.05
 }
 
 #
@@ -204,8 +215,8 @@ stop_listener()
 
 cleanup_and_exit()
 {
-    stop_listener
     hide_message
+    stop_listener
     exit 0
 }
 
@@ -215,9 +226,6 @@ trap cleanup_and_exit HUP INT TERM
 # ------------------------------------------------------------
 # Start listener
 # ------------------------------------------------------------
-#
-# Do not delete MARKER: it may contain a valid request already
-# detected during this boot.
 #
 
 rm -f "$PIDFILE"
@@ -238,11 +246,6 @@ fi
 # Held-key probe
 # ------------------------------------------------------------
 #
-# When the interactive window is disabled, the C listener is
-# allowed to run briefly and inspect EVIOCGKEY.
-#
-# Nothing is displayed during this phase.
-#
 
 if [ "$window_ticks" -eq 0 ] &&
    [ ! -e "$MARKER" ] &&
@@ -256,9 +259,6 @@ if [ "$window_ticks" -eq 0 ] &&
             break
         fi
 
-        #
-        # Listener terminated without detecting the trigger.
-        #
         if ! kill -0 "$listener_pid" 2>/dev/null; then
             break
         fi
@@ -285,12 +285,9 @@ if [ "$window_ticks" -gt 0 ] &&
             break
         fi
 
-        #
-        # An invalid trigger or listener failure must not hold up
-        # cryptsetup for the entire configured interval.
-        #
         if [ -z "$listener_pid" ] ||
            ! kill -0 "$listener_pid" 2>/dev/null; then
+
             break
         fi
 
@@ -308,50 +305,44 @@ fi
 
 #
 # ------------------------------------------------------------
-# Stop listener
+# Final result
+# ------------------------------------------------------------
+#
+# Keep EVIOCGRAB active while displaying the result so repeated
+# trigger characters cannot enter the future password prompt.
+#
+
+if [ "$silent_mode" -eq 0 ]; then
+
+    if [ -e "$MARKER" ]; then
+        show_message "Snapshot menu ENABLED"
+    else
+        show_message "Snapshot menu not requested"
+    fi
+
+    if [ "$result_ticks" -gt 0 ]; then
+
+        tick=0
+
+        while [ "$tick" -lt "$result_ticks" ]; do
+            sleep 0.1
+            tick=$((tick + 1))
+        done
+    fi
+
+    hide_message
+fi
+
+#
+# ------------------------------------------------------------
+# Release keyboard before cryptsetup
 # ------------------------------------------------------------
 #
 
 stop_listener
 
-#
-# ------------------------------------------------------------
-# Silent completion
-# ------------------------------------------------------------
-#
-# The held-key probe has already happened. Do not touch Plymouth
-# or the console when both visual timers are zero.
-#
-
-if [ "$silent_mode" -eq 1 ]; then
-    exit 0
-fi
-
-#
-# ------------------------------------------------------------
-# Final result
-# ------------------------------------------------------------
-#
-
-if [ -e "$MARKER" ]; then
-    show_message "Snapshot menu ENABLED"
-else
-    show_message "Snapshot menu not requested"
-fi
-
-if [ "$result_ticks" -gt 0 ]; then
-
-    tick=0
-
-    while [ "$tick" -lt "$result_ticks" ]; do
-        sleep 0.1
-        tick=$((tick + 1))
-    done
-fi
-
-hide_message
-
-if [ "$plymouth_active" -eq 0 ] &&
+if [ "$silent_mode" -eq 0 ] &&
+   [ "$plymouth_active" -eq 0 ] &&
    [ -c "$menu_tty" ]; then
 
     printf '\n' \

@@ -141,11 +141,6 @@ main()
 	#
 	. "$repository_root/secure-boot/scripts/fwupd-setup"
 
-	#
-	# Sign fwupd.efi and rEFInd for Secure Boot.
-	#
-    . "$repository_root/secure-boot/scripts/sign-efi"
-
     echo
     log "Secure Boot setup completed."
 

@@ -329,7 +329,81 @@ install_with_shim()
     rm -rf "$work"
 }
 
+#
+# Helpers for signing rEFInd and its drivers with sbctl.
+#
+sign_efi()
+{
+    local file="$1"
 
+    [[ -f "$file" ]] ||
+        die "EFI file not found: $file"
+
+    log "Signing with sbctl:"
+    log "  $file"
+
+    sbctl sign \
+        --save \
+        "$file"
+}
+
+# ============================================================
+# Verify signature
+# ============================================================
+
+verify()
+{
+	local refind="$REFIND_EFI/refind_x64.efi"
+
+    [[ -f "$refind" ]] ||
+        die "rEFInd EFI binary not found."
+
+    log "Checking rEFInd signature..."
+
+    if sbverify --cert /var/lib/sbctl/keys/db/db.pem "$refind"; then
+        echo "✅ sbverify verification passed"
+    else
+        echo "❌ sbverify verification failed"
+    fi
+
+    if [[ "$SETUP_MODE" == "0" ]]; then
+
+        [[ -f "$REFIND_EFI/shimx64.efi" ]] ||
+            die "Shim missing from rEFInd directory."
+
+        [[ -f "$REFIND_EFI/mmx64.efi" ]] ||
+            die "MokManager missing from rEFInd directory."
+    fi
+	
+}
+
+
+#
+# rEFInd and its drivers signing with sbctl.
+#
+sign_refind()
+{
+    local refind="$REFIND_EFI/refind_x64.efi"
+
+    sign_efi "$refind"
+
+    if [[ -d "$REFIND_EFI/drivers_x64" ]]; then
+
+        while IFS= read -r -d '' driver
+        do
+            sign_efi "$driver"
+
+        done < <(
+            find "$REFIND_EFI/drivers_x64" \
+                -maxdepth 1 \
+                -type f \
+                -name '*.efi' \
+                -print0
+        )
+    fi
+
+
+}
 
 
 
@@ -374,9 +448,18 @@ main()
     esac
 
 	log "Installing rEFInd themes..."
-	unzip $repository_root/refind/refind_themes.zip -d /boot/efi/EFI/refind/
+	unzip $repository_root/refind_themes.zip -d /boot/efi/EFI/refind/
 	
+    #
+    # Do NOT touch shimx64.efi or mmx64.efi.
+    #
+    # Sign only rEFInd and its drivers.
+    #
+    log "Signing rEFInd EFI and drivers with sbctl..."
+    sign_refind
 
+    log "Verifying rEFInd signature..."
+    verify
 	
 	apt-mark hold \
 		refind \

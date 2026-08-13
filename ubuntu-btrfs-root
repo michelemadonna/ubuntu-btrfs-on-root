@@ -220,7 +220,7 @@ pre_download_all(){
 	#	libpcsclite-dev libpcsclite1 golang-go sbsigntool tpm2-tools tpm2-tss libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64 libtss2-tcti-tabrmd0
 	apt install --no-install-recommends -y --download-only btrfs-assistant btrfsmaintenance
 	
-	apt install -y --download-only refind snapper inotify-tools cryptsetup-initramfs \
+	apt install -y refind snapper inotify-tools cryptsetup-initramfs \
 	dracut \
     dialog \
     systemd-ukify \
@@ -229,7 +229,37 @@ pre_download_all(){
     openssl \
 	systemd-cryptsetup \
     cryptsetup-bin \
-	tpm2-tools tpm2-tss libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64 libtss2-tcti-tabrmd0 build-essential  fwupd-unsigned  git
+	tpm2-tools tpm2-tss libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64 libtss2-tcti-tabrmd0 build-essential  fwupd-unsigned  git \
+	ca-certificates \
+        findutils \
+        coreutils \
+		fwupd \
+        efibootmgr \
+        sbsigntool \
+        findutils \
+        coreutils \
+        ca-certificates \
+		fwupd-unsigned \
+		ca-certificates \
+        efibootmgr \
+        sbsigntool \
+        dosfstools \
+        util-linux \
+        findutils \
+        coreutils \
+		asciidoc-base \
+    pkgconf \
+    pkgconf-bin \
+    curl \
+    jq \
+    libpcsclite-dev \
+    libpcsclite1 \
+    golang-go \
+    sbsigntool \
+    git \
+    build-essential \
+    pcscd \
+    fwupd-unsigned
 	
 	#apt install -y asciidoc-base pkgconf pkgconf-bin curl libpcsclite-dev libpcsclite1 golang-go sbsigntool pcscd  
 	#go install github.com/foxboron/sbctl/cmd/sbctl@latest
@@ -263,7 +293,7 @@ if [[ "$1" = "//inner" ]]; then
 	setup_fstab_crpttab
 	
 	. ./secure-boot/scripts/secure-boot-setup
-	. ./snapper/scripts/snapper-install
+	. ./btrfs-snapshots-mng/scripts/snapper-setup
 	. ./uki/scripts/install-uki
 
 	exit
@@ -304,21 +334,12 @@ while :; do
 			show_help
 			exit
 			;;
-		--setup-custom-secure-boot)
-			setup_custom_secure_boot_key
-			exit
-			;;
 		--setup-tpm-luks-auto_ulock)
-			setup_tpm_luks_auto_ulock
+			tpm_enroll
 			exit
 			;;
 		--seal-luks-disk-tpm)
-			seal_luks_disk_tpm_unlock_to_secure_boot
-			exit
-			;;
-		--setup-refind)
-			setup_refind
-			setup_refind_btrfs_menu
+			tpm_reseal
 			exit
 			;;
 		--*)
@@ -408,7 +429,7 @@ create_subvols
 encrypt_and_enlarge
 prepare_chroot
 chroot_and_mkinitramfs
-#unmount_everything
+unmount_everything
 
 echo "Finished"
 

@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+[[ $EUID -eq 0 ]] || {
+    echo "Run btrfs-snapshots-mng-setup as root." >&2
+    exit 1
+}
+
+repository_root="$(
+    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
+        pwd
+)"
+
+source $repository_root/setup.conf
+
+apt-get install -y \
+    dracut \
+    binutils \
+    rsync
+
+install -d -m 0755 /usr/lib/dracut/modules.d/92snapshot-menu
+
+root_subvolume=$root_sub_vol/@
+
+echo -e "\e[32mINFO:\e[0mInstall Snapper..."
+. $repository_root/btrfs-snapshots-mng/scripts/snapper-setup
+
+if [[ $snapshot_menu == "yes" ]]; then
+    echo "Snapshot menu support enabled."
+
+	rsync \
+		-a \
+		--delete \
+		"$repository_root/btrfs-snapshots-mng/scripts/dracut/92snapshot-menu/" \
+		/usr/lib/dracut/modules.d/92snapshot-menu/
+
+	gcc \
+		-O2 \
+		-Wall \
+		-Wextra \
+		-Wpedantic \
+		-std=c17 \
+		-s \
+		-o /usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener \
+		/usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener.c
+
+	chmod 0755 \
+		/usr/lib/dracut/modules.d/92snapshot-menu/module-setup.sh \
+		/usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu-hook.sh \
+		/usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.sh \
+		/usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener \
+		/usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener-stop
+
+	cat > /etc/snapshot-menu.conf <<- EOF
+		ROOT_SUBVOL="${root_subvolume}"
+		SNAPSHOT_DIR=".snapshots"
+		TTY="/dev/tty1"
+		MOUNTPOINT="/run/snapshot-menu-root"
+		RESULT="/run/snapshot-menu-selected"
+		CMDLINE_DIR="/etc/cmdline.d"
+		SNAPSHOT_CMDLINE="/etc/cmdline.d/99-snapshot.conf"
+		PAGE_SIZE=20
+		DESCRIPTION_MAX_LENGTH=24
+        EVLISTENER_KEYS="ALT+B"
+        SNAPSHOT_TRIGGER_WINDOW_TICKS=50
+        SNAPSHOT_TRIGGER_RESULT_TICKS=0
+	EOF
+
+	chmod 0644 \
+		/etc/snapshot-menu.conf
+
+    if [[ $snapshot_menu_pin == "yes" ]]; then
+        echo "Snapshot menu PIN support enabled."
+        salt="$(openssl rand -hex 16)"
+        pin="$snapshot_menu_pin_value"
+        pinhash="$(echo -n "${salt}${pin}" | sha256sum | awk '{print $1}')"
+
+		cat >> /etc/snapshot-menu.conf <<- EOF
+			
+			SNAPSHOT_PIN_ENABLED=yes
+			SNAPSHOT_PIN_ATTEMPTS=3
+			SNAPSHOT_PIN_MAX_LENGTH=12
+			SNAPSHOT_PIN_SALT="${salt}"
+			SNAPSHOT_PIN_HASH="${pinhash}"
+		EOF
+    else
+        echo "Snapshot menu PIN support disabled."
+    fi
+    
+
+    cat > /etc/dracut.conf.d/52-snapshot-menu.conf <<- 'EOF'
+		force_add_dracutmodules+=" snapshot-menu "
+	EOF
+    echo 'add_dracutmodules+=" overlayfs "' > /etc/dracut.conf.d/99_overlayfs.conf
+
+	install -m 755 \
+		"$repository_root/btrfs-snapshots-mng/scripts/hooks/99-refind-menu.install" \
+		/usr/lib/kernel/install.d/99-refind-menu.install
+	echo "include refind-linux-$suite.conf" >> "/boot/efi/EFI/refind/refind.conf"
+else
+    echo "Snapshot menu support disabled."
+fi
+
+

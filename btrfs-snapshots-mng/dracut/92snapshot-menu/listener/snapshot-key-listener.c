@@ -14,7 +14,7 @@
 #include <unistd.h>
 
 #define MAX_INPUT_DEVICES 64
-#define MAX_TRIGGER_KEYS   8
+#define MAX_TRIGGER_KEYS 8
 #define MAX_TRIGGER_LENGTH 128
 
 #define MARKER_FILE "/run/snapshot-menu-requested"
@@ -23,10 +23,11 @@
 #define BITS_PER_LONG (sizeof(unsigned long) * 8U)
 #define BIT_WORD(bit) ((bit) / BITS_PER_LONG)
 #define BIT_MASK(bit) (1UL << ((bit) % BITS_PER_LONG))
-#define KEY_LONGS     (BIT_WORD(KEY_MAX) + 1U)
+#define KEY_LONGS (BIT_WORD(KEY_MAX) + 1U)
 
 struct input_device {
     int fd;
+    bool grabbed;
     unsigned long supported[KEY_LONGS];
     unsigned long pressed[KEY_LONGS];
 };
@@ -38,9 +39,10 @@ struct trigger_key {
 
 static struct input_device devices[MAX_INPUT_DEVICES];
 static struct trigger_key trigger_keys[MAX_TRIGGER_KEYS];
-static size_t trigger_key_count = 0;
 
+static size_t trigger_key_count = 0;
 static volatile sig_atomic_t running = 1;
+static bool marker_created = false;
 
 static void handle_signal(int signal_number)
 {
@@ -55,7 +57,10 @@ static bool test_bit(
     if (bit > KEY_MAX)
         return false;
 
-    return (bits[BIT_WORD(bit)] & BIT_MASK(bit)) != 0;
+    return (
+        bits[BIT_WORD(bit)] &
+        BIT_MASK(bit)
+    ) != 0;
 }
 
 static void set_bit(
@@ -66,10 +71,11 @@ static void set_bit(
     if (bit > KEY_MAX)
         return;
 
-    if (enabled)
+    if (enabled) {
         bits[BIT_WORD(bit)] |= BIT_MASK(bit);
-    else
+    } else {
         bits[BIT_WORD(bit)] &= ~BIT_MASK(bit);
+    }
 }
 
 static bool create_marker(void)
@@ -78,7 +84,10 @@ static bool create_marker(void)
 
     fd = open(
         MARKER_FILE,
-        O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
+        O_WRONLY |
+        O_CREAT |
+        O_TRUNC |
+        O_CLOEXEC,
         0600
     );
 
@@ -98,7 +107,12 @@ static bool write_pid_file(void)
     if (file == NULL)
         return false;
 
-    if (fprintf(file, "%ld\n", (long)getpid()) < 0) {
+    if (fprintf(
+            file,
+            "%ld\n",
+            (long)getpid()
+        ) < 0) {
+
         fclose(file);
         unlink(PID_FILE);
         return false;
@@ -212,11 +226,19 @@ static int function_key_code(const char *token)
     char *end = NULL;
     long number;
 
-    if (token[0] != 'F' || token[1] == '\0')
+    if (token[0] != 'F' ||
+        token[1] == '\0') {
+
         return -1;
+    }
 
     errno = 0;
-    number = strtol(token + 1, &end, 10);
+
+    number = strtol(
+        token + 1,
+        &end,
+        10
+    );
 
     if (errno != 0 ||
         end == token + 1 ||
@@ -234,9 +256,6 @@ static bool parse_trigger_token(const char *token)
 {
     int key_code;
 
-    /*
-     * Generic modifiers accept either left or right key.
-     */
     if (strcmp(token, "ALT") == 0 ||
         strcmp(token, "OPTION") == 0) {
 
@@ -265,8 +284,8 @@ static bool parse_trigger_token(const char *token)
     if (strcmp(token, "META") == 0 ||
         strcmp(token, "SUPER") == 0 ||
         strcmp(token, "WIN") == 0 ||
-        strcmp(token, "COMMAND") == 0 ||
-        strcmp(token, "CMD") == 0) {
+        strcmp(token, "CMD") == 0 ||
+        strcmp(token, "COMMAND") == 0) {
 
         return add_alternative_keys(
             KEY_LEFTMETA,
@@ -274,9 +293,6 @@ static bool parse_trigger_token(const char *token)
         );
     }
 
-    /*
-     * Explicit left/right modifiers.
-     */
     if (strcmp(token, "LEFTALT") == 0)
         return add_single_key(KEY_LEFTALT);
 
@@ -301,9 +317,6 @@ static bool parse_trigger_token(const char *token)
     if (strcmp(token, "RIGHTMETA") == 0)
         return add_single_key(KEY_RIGHTMETA);
 
-    /*
-     * Named keys.
-     */
     if (strcmp(token, "ESC") == 0 ||
         strcmp(token, "ESCAPE") == 0)
         return add_single_key(KEY_ESC);
@@ -355,28 +368,33 @@ static bool parse_trigger_token(const char *token)
     if (strcmp(token, "RIGHT") == 0)
         return add_single_key(KEY_RIGHT);
 
-    /*
-     * Single letter or digit.
-     */
-    if (token[0] != '\0' && token[1] == '\0') {
+    if (token[0] != '\0' &&
+        token[1] == '\0') {
+
         key_code = letter_key_code(token[0]);
 
-        if (key_code >= 0)
-            return add_single_key((unsigned short)key_code);
+        if (key_code >= 0) {
+            return add_single_key(
+                (unsigned short)key_code
+            );
+        }
 
         key_code = digit_key_code(token[0]);
 
-        if (key_code >= 0)
-            return add_single_key((unsigned short)key_code);
+        if (key_code >= 0) {
+            return add_single_key(
+                (unsigned short)key_code
+            );
+        }
     }
 
-    /*
-     * Function keys F1-F24.
-     */
     key_code = function_key_code(token);
 
-    if (key_code >= 0)
-        return add_single_key((unsigned short)key_code);
+    if (key_code >= 0) {
+        return add_single_key(
+            (unsigned short)key_code
+        );
+    }
 
     return false;
 }
@@ -395,9 +413,6 @@ static bool parse_trigger(const char *trigger_argument)
         trigger_argument = "ALT";
     }
 
-    /*
-     * Copy the expression while removing whitespace.
-     */
     for (source_index = 0;
          trigger_argument[source_index] != '\0';
          source_index++) {
@@ -421,16 +436,25 @@ static bool parse_trigger(const char *trigger_argument)
 
     uppercase_string(trigger);
 
-    token = strtok_r(trigger, "+", &save_pointer);
+    token = strtok_r(
+        trigger,
+        "+",
+        &save_pointer
+    );
 
     while (token != NULL) {
+
         if (token[0] == '\0')
             return false;
 
         if (!parse_trigger_token(token))
             return false;
 
-        token = strtok_r(NULL, "+", &save_pointer);
+        token = strtok_r(
+            NULL,
+            "+",
+            &save_pointer
+        );
     }
 
     return trigger_key_count > 0;
@@ -523,10 +547,21 @@ static void close_input_device(unsigned int index)
     if (index >= MAX_INPUT_DEVICES)
         return;
 
-    if (devices[index].fd >= 0)
+    if (devices[index].fd >= 0) {
+
+        if (devices[index].grabbed) {
+            ioctl(
+                devices[index].fd,
+                EVIOCGRAB,
+                0
+            );
+        }
+
         close(devices[index].fd);
+    }
 
     devices[index].fd = -1;
+    devices[index].grabbed = false;
 
     memset(
         devices[index].supported,
@@ -562,18 +597,29 @@ static bool open_input_device(unsigned int number)
 
     fd = open(
         path,
-        O_RDONLY | O_NONBLOCK | O_CLOEXEC
+        O_RDONLY |
+        O_NONBLOCK |
+        O_CLOEXEC
     );
 
     if (fd < 0)
         return false;
 
-    memset(&candidate, 0, sizeof(candidate));
+    memset(
+        &candidate,
+        0,
+        sizeof(candidate)
+    );
+
     candidate.fd = fd;
+    candidate.grabbed = false;
 
     if (ioctl(
             fd,
-            EVIOCGBIT(EV_KEY, sizeof(candidate.supported)),
+            EVIOCGBIT(
+                EV_KEY,
+                sizeof(candidate.supported)
+            ),
             candidate.supported
         ) < 0) {
 
@@ -582,8 +628,8 @@ static bool open_input_device(unsigned int number)
     }
 
     /*
-     * Ignore devices that cannot generate the complete trigger.
-     * This prevents combining keys from unrelated devices.
+     * Open only a device capable of generating the complete
+     * configured trigger.
      */
     if (!device_supports_trigger(&candidate)) {
         close(fd);
@@ -606,12 +652,32 @@ static bool open_input_device(unsigned int number)
     devices[number] = candidate;
 
     /*
-     * Detect a trigger already being held when the listener starts.
+     * Prevent all events from this keyboard from reaching the
+     * console or Plymouth while the listener is active.
      */
-    return trigger_is_pressed(&devices[number]);
+    if (ioctl(
+            devices[number].fd,
+            EVIOCGRAB,
+            1
+        ) == 0) {
+
+        devices[number].grabbed = true;
+    }
+
+    /*
+     * Detect a combination already being held.
+     */
+    if (trigger_is_pressed(&devices[number]) &&
+        !marker_created) {
+
+        if (create_marker())
+            marker_created = true;
+    }
+
+    return true;
 }
 
-static bool scan_input_devices(void)
+static void scan_input_devices(void)
 {
     unsigned int index;
 
@@ -619,11 +685,8 @@ static bool scan_input_devices(void)
          index < MAX_INPUT_DEVICES;
          index++) {
 
-        if (open_input_device(index))
-            return true;
+        open_input_device(index);
     }
-
-    return false;
 }
 
 static bool process_input_device(unsigned int index)
@@ -640,8 +703,12 @@ static bool process_input_device(unsigned int index)
     );
 
     if (bytes_read < 0) {
-        if (errno == EAGAIN || errno == EINTR)
+
+        if (errno == EAGAIN ||
+            errno == EINTR) {
+
             return false;
+        }
 
         close_input_device(index);
         return false;
@@ -653,7 +720,8 @@ static bool process_input_device(unsigned int index)
     }
 
     event_count =
-        (size_t)bytes_read / sizeof(struct input_event);
+        (size_t)bytes_read /
+        sizeof(struct input_event);
 
     for (event_index = 0;
          event_index < event_count;
@@ -668,19 +736,14 @@ static bool process_input_device(unsigned int index)
         if (event->code > KEY_MAX)
             continue;
 
-        /*
-         * EV_KEY:
-         *
-         *   0 = released
-         *   1 = pressed
-         *   2 = autorepeat
-         */
         if (event->value == 0) {
+
             set_bit(
                 devices[index].pressed,
                 event->code,
                 false
             );
+
         } else if (event->value == 1 ||
                    event->value == 2) {
 
@@ -691,9 +754,6 @@ static bool process_input_device(unsigned int index)
             );
         }
 
-        /*
-         * Evaluate only after an initial press or autorepeat.
-         */
         if (event->value != 1 &&
             event->value != 2) {
 
@@ -732,9 +792,11 @@ int main(int argc, char *argv[])
     int poll_result;
     int exit_status = EXIT_SUCCESS;
 
-    trigger_argument = argc >= 2 ? argv[1] : "ALT";
+    trigger_argument =
+        argc >= 2 ? argv[1] : "ALT";
 
     if (!parse_trigger(trigger_argument)) {
+
         fprintf(
             stderr,
             "snapshot-key-listener: invalid trigger: %s\n",
@@ -749,11 +811,17 @@ int main(int argc, char *argv[])
          index++) {
 
         devices[index].fd = -1;
+        devices[index].grabbed = false;
     }
 
-    memset(&signal_action, 0, sizeof(signal_action));
+    memset(
+        &signal_action,
+        0,
+        sizeof(signal_action)
+    );
 
     signal_action.sa_handler = handle_signal;
+
     sigemptyset(&signal_action.sa_mask);
 
     if (sigaction(
@@ -779,15 +847,11 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
 
     while (running) {
-        /*
-         * Devices may appear after the listener starts.
-         */
-        if (scan_input_devices()) {
-            if (!create_marker())
-                exit_status = EXIT_FAILURE;
 
-            break;
-        }
+        /*
+         * Devices may appear after listener startup.
+         */
+        scan_input_devices();
 
         poll_count = 0;
 
@@ -808,6 +872,7 @@ int main(int argc, char *argv[])
                 0;
 
             device_indexes[poll_count] = index;
+
             poll_count++;
         }
 
@@ -818,6 +883,7 @@ int main(int argc, char *argv[])
         );
 
         if (poll_result < 0) {
+
             if (errno == EINTR)
                 continue;
 
@@ -837,22 +903,28 @@ int main(int argc, char *argv[])
             if (poll_fds[index].revents == 0)
                 continue;
 
-            device_index = device_indexes[index];
+            device_index =
+                device_indexes[index];
 
             if (poll_fds[index].revents &
-                (POLLERR | POLLHUP | POLLNVAL)) {
+                (POLLERR |
+                 POLLHUP |
+                 POLLNVAL)) {
 
                 close_input_device(device_index);
                 continue;
             }
 
             if (poll_fds[index].revents & POLLIN) {
-                if (process_input_device(device_index)) {
-                    if (!create_marker())
-                        exit_status = EXIT_FAILURE;
 
-                    running = 0;
-                    break;
+                if (process_input_device(device_index) &&
+                    !marker_created) {
+
+                    if (create_marker()) {
+                        marker_created = true;
+                    } else {
+                        exit_status = EXIT_FAILURE;
+                    }
                 }
             }
         }

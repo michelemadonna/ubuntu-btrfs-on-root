@@ -362,8 +362,51 @@ show_summary()
         "$FWUPD_CONF" || true
 
     echo
+    log "Verifying fwupd EFI signature..."
+
+    if sbverify --cert "$DB_CERT" "$FWUPD_EFI"; then
+        echo "✅ sbverify verification passed"
+    else
+        echo "❌ sbverify verification failed"
+    fi
 }
 
+# ============================================================
+# sbctl signing
+# ============================================================
+
+sign_efi()
+{
+    local file="$1"
+
+    [[ -f "$file" ]] ||
+        die "EFI file not found: $file"
+
+    log "Signing with sbctl:"
+    log "  $file"
+
+    sbctl sign \
+        --save \
+        "$file"
+}
+
+# ============================================================
+# Sign fwupd EFI with sbctl
+# ============================================================
+
+sign_fwupd_efi()
+{
+    log "Signing fwupd EFI with sbctl..."
+    require_command sbctl
+    require_file "$DB_KEY"
+    require_file "$DB_CERT"
+    require_file "$FWUPD_EFI"
+
+    log "Signing fwupd EFI with sbctl:"
+    log "  $FWUPD_EFI"
+
+    sign_efi "$FWUPD_EFI"
+}
 
 # ============================================================
 # Main
@@ -404,7 +447,7 @@ main()
 
     configure_service
     refresh_metadata
-
+    sign_fwupd_efi
     show_summary
 }
 

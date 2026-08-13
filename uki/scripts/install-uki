@@ -65,8 +65,7 @@ root_subvolume=$root_sub_vol/@
 
 
 install -d -m 0700 /etc/uki/keys
-install -d -m 0755 /etc/snapshot-menu
-install -d -m 0755 /usr/lib/dracut/modules.d/92snapshot-menu
+
 
 cat >/etc/kernel/install.conf <<-'EOF'
     layout=uki
@@ -120,92 +119,8 @@ chmod 0644 /etc/uki/keys/pcr-public.pem
 echo "root=UUID=${btrfs_uuid} rootfstype=btrfs rootflags=${btrfs_options},subvol=${root_subvolume} rd.luks.uuid=luks-${luks_uuid} quiet splash" > /etc/kernel/cmdline
 chmod 0644 /etc/kernel/cmdline
 
-if [[ $snapshot_menu == "yes" ]]; then
-    echo "Snapshot menu support enabled."
-
-	rsync \
-		-a \
-		--delete \
-		$repository_root/uki"/dracut/92snapshot-menu/" \
-		/usr/lib/dracut/modules.d/92snapshot-menu/
-
-	gcc \
-		-O2 \
-		-Wall \
-		-Wextra \
-		-Wpedantic \
-		-std=c17 \
-		-s \
-		-o /usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener \
-		/usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener.c
-
-	chmod 0755 \
-		/usr/lib/dracut/modules.d/92snapshot-menu/module-setup.sh \
-		/usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu-hook.sh \
-		/usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.sh \
-		/usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener \
-		/usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener-stop
-
-	cat > /etc/snapshot-menu.conf <<- EOF
-		ROOT_SUBVOL="${root_subvolume}"
-		SNAPSHOT_DIR=".snapshots"
-		TTY="/dev/tty1"
-		MOUNTPOINT="/run/snapshot-menu-root"
-		RESULT="/run/snapshot-menu-selected"
-		CMDLINE_DIR="/etc/cmdline.d"
-		SNAPSHOT_CMDLINE="/etc/cmdline.d/99-snapshot.conf"
-		PAGE_SIZE=20
-		DESCRIPTION_MAX_LENGTH=24
-        EVLISTENER_KEYS="ALT+B"
-        SNAPSHOT_TRIGGER_WINDOW_TICKS=50
-        SNAPSHOT_TRIGGER_RESULT_TICKS=0
-	EOF
-
-	chmod 0644 \
-		/etc/snapshot-menu.conf
-
-    if [[ $snapshot_menu_pin == "yes" ]]; then
-        echo "Snapshot menu PIN support enabled."
-        salt="$(openssl rand -hex 16)"
-        pin="$snapshot_menu_pin_value"
-        pinhash="$(echo -n "${salt}${pin}" | sha256sum | awk '{print $1}')"
-
-		cat >> /etc/snapshot-menu.conf <<- EOF
-			
-			SNAPSHOT_PIN_ENABLED=yes
-			SNAPSHOT_PIN_ATTEMPTS=3
-			SNAPSHOT_PIN_MAX_LENGTH=12
-			SNAPSHOT_PIN_SALT="${salt}"
-			SNAPSHOT_PIN_HASH="${pinhash}"
-		EOF
-    else
-        echo "Snapshot menu PIN support disabled."
-    fi
-    
-
-    cat > /etc/dracut.conf.d/52-snapshot-menu.conf <<- 'EOF'
-		force_add_dracutmodules+=" snapshot-menu "
-	EOF
-    echo 'add_dracutmodules+=" overlayfs "' | tee /etc/dracut.conf.d/99_overlayfs.conf
-else
-    echo "Snapshot menu support disabled."
-fi
-
-install -m 755 \
-    "$repository_root/uki/hooks/99-refind-menu.install" \
-    /usr/lib/kernel/install.d/99-refind-menu.install
-echo "include refind-linux-$suite.conf" >> "/boot/efi/EFI/refind/refind.conf"
-
-
 if [[ $enable_tpm == "yes" ]]; then
-    echo 'add_dracutmodules+=" tpm2-tss crypt "' > /etc/dracut.conf.d/99_tpm2.conf
     . $repository_root/tpm/scripts/install-tpm
-    if grep -qE 'rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes' /etc/kernel/cmdline; then
-        echo "The kernel command line already contains the TPM2 options."
-    else
-        echo "Appending TPM2 options to the kernel command line."
-        echo "rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes" >> /etc/kernel/cmdline
-    fi
 fi
 
 install \
