@@ -60,7 +60,7 @@ sudo chronyc burst 4/4
 sleep 5
 chronyc sources -v
 sudo chronyc makestep
-sudo apt install -y  git
+sudo apt install -y  git micro
 git clone https://github.com/michelemadonna/ubuntu-btrfs-on-root.git ~/ubuntu-btrfs-on-root
 cd ~/ubuntu-btrfs-on-root
 git checkout one-subvol-per-distro

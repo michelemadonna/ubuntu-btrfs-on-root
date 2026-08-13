@@ -32,7 +32,7 @@ if [[ $snapshot_menu == "yes" ]]; then
 	rsync \
 		-a \
 		--delete \
-		"$repository_root/btrfs-snapshots-mng/scripts/dracut/92snapshot-menu/" \
+		"$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/" \
 		/usr/lib/dracut/modules.d/92snapshot-menu/
 
 	gcc \
@@ -94,10 +94,7 @@ if [[ $snapshot_menu == "yes" ]]; then
 	EOF
     echo 'add_dracutmodules+=" overlayfs "' > /etc/dracut.conf.d/99_overlayfs.conf
 
-	install -m 755 \
-		"$repository_root/btrfs-snapshots-mng/scripts/hooks/99-refind-menu.install" \
-		/usr/lib/kernel/install.d/99-refind-menu.install
-	echo "include refind-linux-$suite.conf" >> "/boot/efi/EFI/refind/refind.conf"
+	
 else
     echo "Snapshot menu support disabled."
 fi
