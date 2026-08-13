@@ -119,12 +119,24 @@ install_dependencies()
 
 install_sbctl_upstream()
 {
-    local tmp
+    
     apt-get install -y \
         ca-certificates \
         git \
         golang-go \
-        make
+        make \
+        asciidoc-base \
+        pkgconf \
+        pkgconf-bin \
+        curl \
+        jq \
+        libpcsclite-dev \
+        libpcsclite1 \
+        golang-go \
+        sbsigntool \
+        git \
+        build-essential \
+        pcscd
 
     local tmp
 
@@ -132,7 +144,7 @@ install_sbctl_upstream()
 
     git clone \
         --depth 1 \
-        --branch "$SBCTL_VERSION" \
+        --branch "${SBCTL_VERSION}" \
         https://github.com/Foxboron/sbctl.git \
         "$tmp/src"
 

@@ -301,6 +301,8 @@ install_with_shim()
         "$shim" \
         "$work/shimx64.efi"
 
+    # Explicitly keep the MokManager selected by shim-setup.
+    #
     install -m 0644 \
         "$mm" \
         "$work/mmx64.efi"
@@ -320,14 +322,9 @@ install_with_shim()
 		use_graphics_for osx,linux,windows
 		include themes/refind-theme-regular/theme.conf
 	EOF
-
-    #
-    # Explicitly keep the MokManager selected by shim-setup.
-    #
-    install -m 0644 \
-        "$mm" \
-        "$REFIND_EFI/mmx64.efi"
-
+    cp "$REFIND_EFI/shimx64.efi" "$REFIND_EFI/../BOOT/BOOTX64.EFI"
+    cp "$REFIND_EFI/mmx64.efi" "$REFIND_EFI/../BOOT/mmx64.efi"
+    cp "$REFIND_EFI/grubx64.efi" "$REFIND_EFI/../BOOT/grubx64.efi"
     rm -rf "$work"
 }
 
@@ -354,11 +351,23 @@ sign_efi()
 # ============================================================
 
 verify()
-{
-	local refind="$REFIND_EFI/refind_x64.efi"
+{   local refind=""
+    if [[ "$SETUP_MODE" == "0" ]]; then
+        refind="$REFIND_EFI/shimx64.efi"
 
-    [[ -f "$refind" ]] ||
-        die "rEFInd EFI binary not found."
+        [[ -f "$REFIND_EFI/mmx64.efi" ]] ||
+            die "MokManager missing from rEFInd directory."
+        [[ -f "$REFIND_EFI/shimx64.efi" ]] ||
+            die "Shim missing from rEFInd directory."
+
+        [[ -f "$REFIND_EFI/mmx64.efi" ]] ||
+            die "MokManager missing from rEFInd directory."
+    else
+        refind="$REFIND_EFI/refind_x64.efi"
+        
+        [[ -f "$REFIND_EFI/refind_x64.efi" ]] ||
+            die "rEFInd EFI binary missing from rEFInd directory."
+    fi
 
     log "Checking rEFInd signature..."
 
@@ -368,14 +377,7 @@ verify()
         echo "❌ sbverify verification failed"
     fi
 
-    if [[ "$SETUP_MODE" == "0" ]]; then
-
-        [[ -f "$REFIND_EFI/shimx64.efi" ]] ||
-            die "Shim missing from rEFInd directory."
-
-        [[ -f "$REFIND_EFI/mmx64.efi" ]] ||
-            die "MokManager missing from rEFInd directory."
-    fi
+    
 	
 }
 
@@ -385,10 +387,19 @@ verify()
 #
 sign_refind()
 {
-    local refind="$REFIND_EFI/refind_x64.efi"
+    local refind=""
+
+    if [[ "$SETUP_MODE" == "0" ]]; then
+        refind="$REFIND_EFI/shimx64.efi"
+    else
+        refind="$REFIND_EFI/refind_x64.efi"
+    fi
 
     sign_efi "$refind"
-    sign_efi "$REFIND_EFI/../BOOT/BOOTX64.EFI"
+    if [[ "$SETUP_MODE" == "1" ]]; then
+        sign_efi "$REFIND_EFI/../BOOT/BOOTX64.EFI"
+    fi
+    
 
     if [[ -d "$REFIND_EFI/drivers_x64" ]]; then
 
