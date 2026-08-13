@@ -62,7 +62,7 @@ if [[ $snapshot_menu == "yes" ]]; then
 		SNAPSHOT_CMDLINE="/etc/cmdline.d/99-snapshot.conf"
 		PAGE_SIZE=20
 		DESCRIPTION_MAX_LENGTH=24
-        EVLISTENER_KEYS="ALT+B"
+        SNAPSHOT_TRIGGER="ALT+B"
         SNAPSHOT_TRIGGER_WINDOW_TICKS=50
         SNAPSHOT_TRIGGER_RESULT_TICKS=0
 	EOF
