@@ -255,25 +255,25 @@ for kernel in "${kernels[@]}"; do
                     kernel_errors+=("snapshot menu configuration missing")
                 fi
 
-                #if grep -qE \
-                #    'hooks/pre-mount/.+snapshot-menu-hook\.sh$' \
-                #    <<<"$initrd_listing"
-                #then
-                #    echo "   ✅ Snapshot menu pre-mount hook"
-                #else
-                #    echo "   ❌ Snapshot menu pre-mount hook missing"
-                #    kernel_errors+=("snapshot menu pre-mount hook missing")
-                #fi
-
                 if grep -qE \
-                    'hooks/cmdline/.+01-snapshot-key-listener\.sh$' \
+                    'hooks/pre-mount/.+snapshot-menu-hook\.sh$' \
                     <<<"$initrd_listing"
                 then
-                    echo "   ✅ Snapshot menu cmdline hook"
+                    echo "   ✅ Snapshot menu pre-mount hook"
                 else
-                    echo "   ❌ Snapshot menu cmdline hook missing"
-                    kernel_errors+=("snapshot menu cmdline hook missing")
+                    echo "   ❌ Snapshot menu pre-mount hook missing"
+                    kernel_errors+=("snapshot menu pre-mount hook missing")
                 fi
+
+                #if grep -qE \
+                #    'hooks/cmdline/.+01-snapshot-key-listener\.sh$' \
+                #    <<<"$initrd_listing"
+                #then
+                #    echo "   ✅ Snapshot menu cmdline hook"
+                #else
+                #    echo "   ❌ Snapshot menu cmdline hook missing"
+                #    kernel_errors+=("snapshot menu cmdline hook missing")
+                #fi
 
                 if grep -qE 'usr/libexec/snapshot-key-listener$' <<<"$initrd_listing"; then
                     echo "   ✅ Snapshot key listener"
