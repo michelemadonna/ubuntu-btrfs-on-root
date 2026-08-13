@@ -272,6 +272,8 @@ install_direct()
 		use_graphics_for osx,linux,windows
 		include themes/refind-theme-regular/theme.conf
 	EOF
+
+    cp "$REFIND_EFI/refind_x64.efi" "$REFIND_EFI/../BOOT/BOOTX64.EFI"
 }
 
 
@@ -386,6 +388,7 @@ sign_refind()
     local refind="$REFIND_EFI/refind_x64.efi"
 
     sign_efi "$refind"
+    sign_efi "$REFIND_EFI/../BOOT/BOOTX64.EFI"
 
     if [[ -d "$REFIND_EFI/drivers_x64" ]]; then
 

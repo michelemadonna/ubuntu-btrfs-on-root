@@ -37,15 +37,15 @@ install() {
         "/etc/snapshot-menu.conf"
     
 
-    #inst_hook \
-    #    pre-mount \
-    #    00 \
-    #    "$moddir/snapshot-menu-hook.sh"
-    
     inst_hook \
-        cmdline \
-        01\
-        "$moddir/01-snapshot-key-listener.sh"
+        pre-mount \
+        00 \
+        "$moddir/snapshot-menu-hook.sh"
+    
+    #inst_hook \
+    #    cmdline \
+    #    01\
+    #    "$moddir/01-snapshot-key-listener.sh"
 
     inst_binary \
         "$moddir/listener/snapshot-key-listener" \
