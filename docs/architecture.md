@@ -258,6 +258,12 @@ Conceptually:
 The exact detection and installation procedure belongs to the installation
 logic rather than to this architecture document.
 
+The installer records the trust path selected from the initial firmware
+`SetupMode` in `/etc/securebootmode.conf`. This is an installation-mode
+decision, not a continuously refreshed report of the current firmware bit:
+enrolling `PK` necessarily exits Setup Mode while the installed system remains
+on the direct trust path.
+
 ## 7. Unified Kernel Image
 
 Each UKI contains the components required for early boot.
@@ -378,6 +384,34 @@ The installer must preserve the existing firmware trust hierarchy unless
 the selected installation mode explicitly requires and permits its
 modification.
 
+The implementation uses isolated phase entry points:
+
+    secure-boot-setup
+          |
+          +-- sbctl-setup
+          |     create or reuse PK / KEK / db
+          |     direct enrollment order: db -> KEK -> PK
+          |
+          +-- shim-setup        (shim/MOK path only)
+          |     prepare vendor-signed shim and MokManager
+          |     request db certificate enrollment as MOK
+          |
+          +-- refind-setup
+          |     direct: sign refind_x64.efi
+          |     shim: sign grubx64.efi behind shim
+          |
+          `-- fwupd-setup
+                configure the matching trust path
+                sign and verify the fwupd EFI companion
+
+Each phase remains in its owning script and is executed as a subprocess.
+Exported configuration carries the selected trust path and key locations
+across phase boundaries.
+
+Pinned Debian Snapshot fallbacks are accepted only when package metadata is
+authenticated with the Debian archive keyring. HTTPS transport alone is not
+a substitute for package signature verification.
+
 ## 9. TPM architecture
 
 The TPM is used to release LUKS unlocking material when the measured boot
@@ -414,19 +448,28 @@ Example module:
 ```bash
 /usr/lib/dracut/modules.d/92snapshot-menu/
 ```
-Typical components include:
-module-setup.sh
-```bash
+The installed module is assembled from
+`btrfs-snapshots-mng/dracut/92snapshot-menu`. Its relevant artifacts are:
+```text
 installed executables:
     /usr/libexec/snapshot-menu
     /usr/libexec/snapshot-key-listener
+    /usr/libexec/snapshot-key-listener-stop
 
 configuration:
     /etc/snapshot-menu.conf
 
 hooks:
-    initqueue / pre-mount / related early-boot hooks
+    pre-mount/00 snapshot-menu-hook.sh
+
+systemd integration:
+    systemd-cryptsetup@.service.d/50-snapshot-key-listener-stop.conf
 ```
+
+The systemd cryptsetup drop-in runs the listener controller as
+`ExecStartPre`. It owns the short trigger window, stops the C input listener
+and leaves `/run/snapshot-menu-requested` only when `ALT+B` was detected.
+The pre-mount hook consumes that marker after `/dev/root` becomes available.
 
 The module must execute after the encrypted root device becomes available
 but before the final root filesystem is mounted.
@@ -463,6 +506,15 @@ prompt.
 
 Input consumed by the snapshot trigger must not leak into later password
 input.
+
+The menu always contains the current-system entry. Snapshot entries are
+accepted only when their `/usr/lib/modules` tree contains the kernel version
+already running from the UKI. A selected snapshot is mounted read-only as the
+OverlayFS lower layer; a tmpfs-backed upper layer receives runtime writes.
+
+Optional snapshot PIN protection applies only to snapshot entries. Its salt
+and SHA-256 hash are embedded in the initramfs configuration, so it is a UI
+authorization measure rather than an encryption or offline-attack boundary.
 
 ## 12. Normal boot path
 

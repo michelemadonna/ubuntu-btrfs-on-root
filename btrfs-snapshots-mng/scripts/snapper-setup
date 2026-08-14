@@ -1,29 +1,42 @@
 #!/usr/bin/env bash
+
 set -Eeuo pipefail
+umask 077
 
-script="${BASH_SOURCE[0]}"
-scriptname="$(basename "$script")"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
 
+snapper-setup.configure_profile() {
+	local profile=$1
+	local mountpoint=$2
 
-source $repository_root/setup.conf
-
-[[ $EUID -eq 0 ]] || {
-    echo "Run $scriptname as root." >&2
-    exit 1
+	common.log_info "Create Snapper profile '$profile' for $mountpoint"
+	snapper -c "$profile" create-config "$mountpoint"
+	common.log_info "Enable timeline snapshots, sudo access and ACL synchronization for '$profile'"
+	snapper -c "$profile" set-config \
+		'TIMELINE_CREATE=yes' \
+		'ALLOW_GROUPS=sudo' \
+		'SYNC_ACL=yes'
 }
 
-echo -e "\e[32mINFO:\e[0mInstall Snapper..."
+snapper-setup.run() {
+	common.require_root
+	common.require_commands apt
+	common.log_section "Snapper installation"
+	common.log_info "Install Snapper and filesystem change monitoring"
+	apt install -y snapper inotify-tools
+	common.require_commands snapper
 
-apt install -y snapper inotify-tools 
+	snapper-setup.configure_profile root /
+	snapper-setup.configure_profile home /home
 
-snapper -c root create-config /
-snapper -c root set-config 'TIMELINE_CREATE=yes'
-snapper -c root set-config 'ALLOW_GROUPS=sudo'
-snapper -c root set-config 'SYNC_ACL=yes'
+	common.log_info "Install Btrfs Assistant and maintenance integration without recommended packages"
+	apt --no-install-recommends -y install btrfs-assistant btrfsmaintenance
+	common.log_success "Snapper root and home profiles configured"
+}
 
-snapper -c home create-config /home
-snapper -c home set-config 'TIMELINE_CREATE=yes'
-snapper -c home set-config 'ALLOW_GROUPS=sudo'
-snapper -c home set-config 'SYNC_ACL=yes'   
-
-apt --no-install-recommends -y install btrfs-assistant btrfsmaintenance
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	snapper-setup.run
+fi

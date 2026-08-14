@@ -1,5 +1,6 @@
-#!/bin/sh
+#!/bin/bash
 
+# shellcheck source=/dev/null
 command -v getarg >/dev/null 2>&1 || . /lib/dracut-lib.sh
 
 LISTENER="/usr/libexec/snapshot-key-listener"
@@ -16,9 +17,9 @@ MARKER="/run/snapshot-menu-requested"
 [ -x "$LISTENER" ] || return 0
 
 "$LISTENER" \
-    </dev/null \
-    >/dev/null \
-    2>&1 &
+	</dev/null \
+	>/dev/null \
+	2>&1 &
 
 unset LISTENER
 unset PIDFILE

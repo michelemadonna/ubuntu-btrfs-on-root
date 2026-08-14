@@ -149,11 +149,9 @@ setup.inner_installation() {
 	apt-get install -y cryptsetup-initramfs
 
 	# The Btrfs/LUKS storage phase has already completed outside the chroot.
-	# The remaining phase scripts intentionally execute in this shell.
-	# shellcheck source=/dev/null
-	source "$repository_root/secure-boot/scripts/secure-boot-setup"
-	# shellcheck source=/dev/null
-	source "$repository_root/btrfs-snapshots-mng/scripts/btrfs-snapshots-mng-setup"
+	# Security-sensitive phase coordinators execute as isolated entry points.
+	"$repository_root/secure-boot/scripts/secure-boot-setup"
+	"$repository_root/btrfs-snapshots-mng/scripts/btrfs-snapshots-mng-setup"
 	# shellcheck source=/dev/null
 	source "$repository_root/uki/scripts/install-uki"
 }

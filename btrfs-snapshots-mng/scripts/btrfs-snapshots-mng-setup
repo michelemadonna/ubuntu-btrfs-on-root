@@ -1,53 +1,43 @@
 #!/usr/bin/env bash
+# Configuration variables are loaded from setup.conf.
+# shellcheck disable=SC2154
+
 set -Eeuo pipefail
 umask 077
 
-[[ $EUID -eq 0 ]] || {
-    echo "Run btrfs-snapshots-mng-setup as root." >&2
-    exit 1
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
+module_source="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu"
+module_target=/usr/lib/dracut/modules.d/92snapshot-menu
+menu_config=/etc/snapshot-menu.conf
+
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/setup.conf"
+
+btrfs-snapshots-mng-setup.validate_configuration() {
+	common.require_nonempty "root_sub_vol" "${root_sub_vol:-}"
+	common.require_nonempty "snapshot_menu" "${snapshot_menu:-}"
+	common.require_nonempty "snapshot_menu_pin" "${snapshot_menu_pin:-}"
+
+	case $snapshot_menu in
+	yes | no) ;;
+	*) common.die "snapshot_menu must be either 'yes' or 'no'." ;;
+	esac
+	case $snapshot_menu_pin in
+	yes | no) ;;
+	*) common.die "snapshot_menu_pin must be either 'yes' or 'no'." ;;
+	esac
+	if [[ $snapshot_menu_pin == yes ]]; then
+		common.require_nonempty "snapshot_menu_pin_value" "${snapshot_menu_pin_value:-}"
+	fi
 }
 
-source $repository_root/setup.conf
+btrfs-snapshots-mng-setup.render_base_config() {
+	local root_subvolume=$1
 
-apt-get install -y \
-    dracut \
-    binutils \
-    rsync
-
-install -d -m 0755 /usr/lib/dracut/modules.d/92snapshot-menu
-
-root_subvolume=$root_sub_vol/@
-
-echo -e "\e[32mINFO:\e[0mInstall Snapper..."
-. $repository_root/btrfs-snapshots-mng/scripts/snapper-setup
-
-if [[ $snapshot_menu == "yes" ]]; then
-    echo "Snapshot menu support enabled."
-
-	rsync \
-		-a \
-		--delete \
-		"$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/" \
-		/usr/lib/dracut/modules.d/92snapshot-menu/
-
-	gcc \
-		-O2 \
-		-Wall \
-		-Wextra \
-		-Wpedantic \
-		-std=c17 \
-		-s \
-		-o /usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener \
-		/usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener.c
-
-	chmod 0755 \
-		/usr/lib/dracut/modules.d/92snapshot-menu/module-setup.sh \
-		/usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu-hook.sh \
-		/usr/lib/dracut/modules.d/92snapshot-menu/snapshot-menu.sh \
-		/usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener \
-		/usr/lib/dracut/modules.d/92snapshot-menu/listener/snapshot-key-listener-stop
-
-	cat > /etc/snapshot-menu.conf <<- EOF
+	cat <<-EOF
 		ROOT_SUBVOL="${root_subvolume}"
 		SNAPSHOT_DIR=".snapshots"
 		TTY="/dev/tty1"
@@ -57,41 +47,118 @@ if [[ $snapshot_menu == "yes" ]]; then
 		SNAPSHOT_CMDLINE="/etc/cmdline.d/99-snapshot.conf"
 		PAGE_SIZE=20
 		DESCRIPTION_MAX_LENGTH=24
-        SNAPSHOT_TRIGGER="ALT+B"
-        SNAPSHOT_TRIGGER_WINDOW_TICKS=50
-        SNAPSHOT_TRIGGER_RESULT_TICKS=0
+		SNAPSHOT_TRIGGER="ALT+B"
+		SNAPSHOT_TRIGGER_WINDOW_TICKS=50
+		SNAPSHOT_TRIGGER_RESULT_TICKS=0
 	EOF
+}
 
-	chmod 0644 \
-		/etc/snapshot-menu.conf
+btrfs-snapshots-mng-setup.hash_pin() {
+	local salt=$1
+	local pin=$2
 
-    if [[ $snapshot_menu_pin == "yes" ]]; then
-        echo "Snapshot menu PIN support enabled."
-        salt="$(openssl rand -hex 16)"
-        pin="$snapshot_menu_pin_value"
-        pinhash="$(echo -n "${salt}${pin}" | sha256sum | awk '{print $1}')"
+	printf '%s' "${salt}${pin}" | sha256sum | awk '{print $1}'
+}
 
-		cat >> /etc/snapshot-menu.conf <<- EOF
-			
-			SNAPSHOT_PIN_ENABLED=yes
-			SNAPSHOT_PIN_ATTEMPTS=3
-			SNAPSHOT_PIN_MAX_LENGTH=12
-			SNAPSHOT_PIN_SALT="${salt}"
-			SNAPSHOT_PIN_HASH="${pinhash}"
-		EOF
-    else
-        echo "Snapshot menu PIN support disabled."
-    fi
-    
+btrfs-snapshots-mng-setup.append_pin_config() {
+	local salt=$1
+	local pin_hash=$2
 
-    cat > /etc/dracut.conf.d/52-snapshot-menu.conf <<- 'EOF'
+	cat <<-EOF
+
+		SNAPSHOT_PIN_ENABLED=yes
+		SNAPSHOT_PIN_ATTEMPTS=3
+		SNAPSHOT_PIN_MAX_LENGTH=12
+		SNAPSHOT_PIN_SALT="${salt}"
+		SNAPSHOT_PIN_HASH="${pin_hash}"
+	EOF
+}
+
+btrfs-snapshots-mng-setup.install_module() {
+	local root_subvolume="$root_sub_vol/@"
+	local salt
+	local pin_hash
+
+	common.log_section "Snapshot-menu dracut module"
+	common.log_info "Synchronize module source $module_source to $module_target"
+	install -d -m 0755 "$module_target"
+	rsync -a --delete "$module_source/" "$module_target/"
+
+	common.log_info "Compile the early keyboard listener with C17 warnings enabled"
+	gcc \
+		-O2 \
+		-Wall \
+		-Wextra \
+		-Wpedantic \
+		-std=c17 \
+		-s \
+		-o "$module_target/listener/snapshot-key-listener" \
+		"$module_target/listener/snapshot-key-listener.c"
+
+	chmod 0755 \
+		"$module_target/module-setup.sh" \
+		"$module_target/snapshot-menu-hook.sh" \
+		"$module_target/snapshot-menu.sh" \
+		"$module_target/listener/snapshot-key-listener" \
+		"$module_target/listener/snapshot-key-listener-stop"
+
+	common.log_info "Write snapshot-menu configuration for normal root $root_subvolume"
+	btrfs-snapshots-mng-setup.render_base_config "$root_subvolume" >"$menu_config"
+	if [[ $snapshot_menu_pin == yes ]]; then
+		salt="$(openssl rand -hex 16)"
+		pin_hash="$(btrfs-snapshots-mng-setup.hash_pin "$salt" "$snapshot_menu_pin_value")"
+		btrfs-snapshots-mng-setup.append_pin_config "$salt" "$pin_hash" >>"$menu_config"
+		common.log_info "Snapshot PIN enabled with three attempts; plaintext PIN is never written or logged"
+	else
+		common.log_info "Snapshot PIN disabled"
+	fi
+	chmod 0644 "$menu_config"
+
+	common.log_info "Force inclusion of snapshot-menu and overlayfs dracut modules"
+	cat >/etc/dracut.conf.d/52-snapshot-menu.conf <<-'EOF'
 		force_add_dracutmodules+=" snapshot-menu "
 	EOF
-    echo 'add_dracutmodules+=" overlayfs "' > /etc/dracut.conf.d/99_overlayfs.conf
+	cat >/etc/dracut.conf.d/99_overlayfs.conf <<-'EOF'
+		add_dracutmodules+=" overlayfs "
+	EOF
+	common.log_success "Snapshot-menu dracut module installed"
+}
 
-	
-else
-    echo "Snapshot menu support disabled."
+btrfs-snapshots-mng-setup.print_summary() {
+	common.log_section "Snapshot management summary"
+	common.log_summary_item "Status" "completed successfully"
+	common.log_summary_item "Snapper profiles" "root, home"
+	common.log_summary_item "Snapshot menu" "$snapshot_menu"
+	common.log_summary_item "Snapshot PIN" "$snapshot_menu_pin"
+	if [[ $snapshot_menu == yes ]]; then
+		common.log_summary_item "Normal root" "$root_sub_vol/@"
+		common.log_summary_item "Module" "$module_target"
+		common.log_summary_item "Configuration" "$menu_config"
+		common.log_summary_item "Trigger" "ALT+B (5.0 seconds)"
+		common.log_summary_item "Snapshot root" "read-only lower layer + tmpfs overlay"
+	fi
+	common.log_success "Btrfs snapshot management setup completed"
+}
+
+btrfs-snapshots-mng-setup.run() {
+	common.require_root
+	btrfs-snapshots-mng-setup.validate_configuration
+	common.require_commands apt-get install rsync
+
+	common.log_section "Btrfs snapshot management"
+	common.log_info "Install dracut module build and synchronization dependencies"
+	apt-get install -y dracut binutils coreutils gcc openssl rsync
+	"$script_dir/snapper-setup"
+
+	if [[ $snapshot_menu == yes ]]; then
+		common.require_commands awk gcc openssl sha256sum
+		btrfs-snapshots-mng-setup.install_module
+	else
+		common.log_info "Snapshot menu disabled; skip dracut module installation"
+	fi
+	btrfs-snapshots-mng-setup.print_summary
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	btrfs-snapshots-mng-setup.run
 fi
-
-

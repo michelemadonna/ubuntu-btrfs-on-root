@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 CONFIG="/etc/snapshot-menu.conf"
 
@@ -19,8 +19,8 @@ DEFAULT_TTY="/dev/tty1"
 #
 
 if [ -r "$CONFIG" ]; then
-    # shellcheck disable=SC1090
-    . "$CONFIG"
+	# shellcheck disable=SC1090
+	. "$CONFIG"
 fi
 
 trigger="${SNAPSHOT_TRIGGER:-$DEFAULT_TRIGGER}"
@@ -36,29 +36,29 @@ menu_tty="${TTY:-$DEFAULT_TTY}"
 #
 
 case "$window_ticks" in
-    ''|*[!0-9]*)
-        window_ticks="$DEFAULT_WINDOW_TICKS"
-        ;;
+'' | *[!0-9]*)
+	window_ticks="$DEFAULT_WINDOW_TICKS"
+	;;
 esac
 
 case "$result_ticks" in
-    ''|*[!0-9]*)
-        result_ticks="$DEFAULT_RESULT_TICKS"
-        ;;
+'' | *[!0-9]*)
+	result_ticks="$DEFAULT_RESULT_TICKS"
+	;;
 esac
 
 case "$probe_ticks" in
-    ''|*[!0-9]*)
-        probe_ticks="$DEFAULT_PROBE_TICKS"
-        ;;
+'' | *[!0-9]*)
+	probe_ticks="$DEFAULT_PROBE_TICKS"
+	;;
 esac
 
 if [ -z "$trigger" ]; then
-    trigger="$DEFAULT_TRIGGER"
+	trigger="$DEFAULT_TRIGGER"
 fi
 
 if [ ! -c "$menu_tty" ]; then
-    menu_tty="/dev/console"
+	menu_tty="/dev/console"
 fi
 
 #
@@ -68,9 +68,9 @@ fi
 # Enforce at least one 100 ms probe tick.
 #
 if [ "$window_ticks" -eq 0 ] &&
-   [ "$probe_ticks" -eq 0 ]; then
+	[ "$probe_ticks" -eq 0 ]; then
 
-    probe_ticks=1
+	probe_ticks=1
 fi
 
 #
@@ -89,9 +89,9 @@ fi
 silent_mode=0
 
 if [ "$window_ticks" -eq 0 ] &&
-   [ "$result_ticks" -eq 0 ]; then
+	[ "$result_ticks" -eq 0 ]; then
 
-    silent_mode=1
+	silent_mode=1
 fi
 
 #
@@ -104,10 +104,10 @@ plymouth_active=0
 current_message=""
 
 if [ "$silent_mode" -eq 0 ] &&
-   command -v plymouth >/dev/null 2>&1 &&
-   plymouth --ping >/dev/null 2>&1; then
+	command -v plymouth >/dev/null 2>&1 &&
+	plymouth --ping >/dev/null 2>&1; then
 
-    plymouth_active=1
+	plymouth_active=1
 fi
 
 #
@@ -116,51 +116,49 @@ fi
 # ------------------------------------------------------------
 #
 
-hide_message()
-{
-    if [ "$silent_mode" -eq 1 ]; then
-        return 0
-    fi
+snapshot-key-listener-stop.hide_message() {
+	if [ "$silent_mode" -eq 1 ]; then
+		return 0
+	fi
 
-    if [ "$plymouth_active" -eq 1 ]; then
+	if [ "$plymouth_active" -eq 1 ]; then
 
-        if [ -n "$current_message" ]; then
-            plymouth hide-message \
-                --text="$current_message" \
-                >/dev/null 2>&1 || :
-        fi
+		if [ -n "$current_message" ]; then
+			plymouth hide-message \
+				--text="$current_message" \
+				>/dev/null 2>&1 || :
+		fi
 
-    elif [ -c "$menu_tty" ]; then
+	elif [ -c "$menu_tty" ]; then
 
-        printf '\r\033[2K' \
-            >"$menu_tty" 2>/dev/null || :
-    fi
+		printf '\r\033[2K' \
+			>"$menu_tty" 2>/dev/null || :
+	fi
 
-    current_message=""
+	current_message=""
 }
 
-show_message()
-{
-    message="$1"
+snapshot-key-listener-stop.show_message() {
+	message="$1"
 
-    if [ "$silent_mode" -eq 1 ]; then
-        return 0
-    fi
+	if [ "$silent_mode" -eq 1 ]; then
+		return 0
+	fi
 
-    hide_message
-    current_message="$message"
+	snapshot-key-listener-stop.hide_message
+	current_message="$message"
 
-    if [ "$plymouth_active" -eq 1 ]; then
+	if [ "$plymouth_active" -eq 1 ]; then
 
-        plymouth display-message \
-            --text="$message" \
-            >/dev/null 2>&1 || :
+		plymouth display-message \
+			--text="$message" \
+			>/dev/null 2>&1 || :
 
-    elif [ -c "$menu_tty" ]; then
+	elif [ -c "$menu_tty" ]; then
 
-        printf '\r\033[2K%s' "$message" \
-            >"$menu_tty" 2>/dev/null || :
-    fi
+		printf '\r\033[2K%s' "$message" \
+			>"$menu_tty" 2>/dev/null || :
+	fi
 }
 
 #
@@ -171,29 +169,28 @@ show_message()
 
 listener_pid=""
 
-stop_listener()
-{
-    if [ -n "$listener_pid" ] &&
-       kill -0 "$listener_pid" 2>/dev/null; then
+snapshot-key-listener-stop.stop_listener() {
+	if [ -n "$listener_pid" ] &&
+		kill -0 "$listener_pid" 2>/dev/null; then
 
-        kill -TERM "$listener_pid" 2>/dev/null || :
+		kill -TERM "$listener_pid" 2>/dev/null || :
 
-        count=0
+		count=0
 
-        while kill -0 "$listener_pid" 2>/dev/null &&
-              [ "$count" -lt 20 ]; do
+		while kill -0 "$listener_pid" 2>/dev/null &&
+			[ "$count" -lt 20 ]; do
 
-            sleep 0.01
-            count=$((count + 1))
-        done
-    fi
+			sleep 0.01
+			count=$((count + 1))
+		done
+	fi
 
-    if [ -n "$listener_pid" ]; then
-        wait "$listener_pid" 2>/dev/null || :
-    fi
+	if [ -n "$listener_pid" ]; then
+		wait "$listener_pid" 2>/dev/null || :
+	fi
 
-    listener_pid=""
-    rm -f "$PIDFILE"
+	listener_pid=""
+	rm -f "$PIDFILE"
 }
 
 #
@@ -202,14 +199,15 @@ stop_listener()
 # ------------------------------------------------------------
 #
 
-cleanup_and_exit()
-{
-    stop_listener
-    hide_message
-    exit 0
+# Invoked indirectly by signal traps.
+# shellcheck disable=SC2329
+snapshot-key-listener-stop.cleanup_and_exit() {
+	snapshot-key-listener-stop.stop_listener
+	snapshot-key-listener-stop.hide_message
+	exit 0
 }
 
-trap cleanup_and_exit HUP INT TERM
+trap snapshot-key-listener-stop.cleanup_and_exit HUP INT TERM
 
 #
 # ------------------------------------------------------------
@@ -223,14 +221,14 @@ trap cleanup_and_exit HUP INT TERM
 rm -f "$PIDFILE"
 
 if [ ! -e "$MARKER" ] &&
-   [ -x "$LISTENER" ]; then
+	[ -x "$LISTENER" ]; then
 
-    "$LISTENER" "$trigger" \
-        </dev/null \
-        >/dev/null \
-        2>&1 &
+	"$LISTENER" "$trigger" \
+		</dev/null \
+		>/dev/null \
+		2>&1 &
 
-    listener_pid=$!
+	listener_pid=$!
 fi
 
 #
@@ -245,27 +243,27 @@ fi
 #
 
 if [ "$window_ticks" -eq 0 ] &&
-   [ ! -e "$MARKER" ] &&
-   [ -n "$listener_pid" ]; then
+	[ ! -e "$MARKER" ] &&
+	[ -n "$listener_pid" ]; then
 
-    tick=0
+	tick=0
 
-    while [ "$tick" -lt "$probe_ticks" ]; do
+	while [ "$tick" -lt "$probe_ticks" ]; do
 
-        if [ -e "$MARKER" ]; then
-            break
-        fi
+		if [ -e "$MARKER" ]; then
+			break
+		fi
 
-        #
-        # Listener terminated without detecting the trigger.
-        #
-        if ! kill -0 "$listener_pid" 2>/dev/null; then
-            break
-        fi
+		#
+		# Listener terminated without detecting the trigger.
+		#
+		if ! kill -0 "$listener_pid" 2>/dev/null; then
+			break
+		fi
 
-        sleep 0.1
-        tick=$((tick + 1))
-    done
+		sleep 0.1
+		tick=$((tick + 1))
+	done
 fi
 
 #
@@ -275,35 +273,35 @@ fi
 #
 
 if [ "$window_ticks" -gt 0 ] &&
-   [ ! -e "$MARKER" ]; then
+	[ ! -e "$MARKER" ]; then
 
-    tick=0
+	tick=0
 
-    while [ "$tick" -lt "$window_ticks" ]; do
+	while [ "$tick" -lt "$window_ticks" ]; do
 
-        if [ -e "$MARKER" ]; then
-            break
-        fi
+		if [ -e "$MARKER" ]; then
+			break
+		fi
 
-        #
-        # An invalid trigger or listener failure must not hold up
-        # cryptsetup for the entire configured interval.
-        #
-        if [ -z "$listener_pid" ] ||
-           ! kill -0 "$listener_pid" 2>/dev/null; then
-            break
-        fi
+		#
+		# An invalid trigger or listener failure must not hold up
+		# cryptsetup for the entire configured interval.
+		#
+		if [ -z "$listener_pid" ] ||
+			! kill -0 "$listener_pid" 2>/dev/null; then
+			break
+		fi
 
-        remaining_ticks=$((window_ticks - tick))
-        remaining_seconds=$((remaining_ticks / 10))
-        remaining_tenths=$((remaining_ticks % 10))
+		remaining_ticks=$((window_ticks - tick))
+		remaining_seconds=$((remaining_ticks / 10))
+		remaining_tenths=$((remaining_ticks % 10))
 
-        show_message \
-            "Press ${trigger} for snapshot menu: ${remaining_seconds}.${remaining_tenths}s"
+		snapshot-key-listener-stop.show_message \
+			"Press ${trigger} for snapshot menu: ${remaining_seconds}.${remaining_tenths}s"
 
-        sleep 0.1
-        tick=$((tick + 1))
-    done
+		sleep 0.1
+		tick=$((tick + 1))
+	done
 fi
 
 #
@@ -312,7 +310,7 @@ fi
 # ------------------------------------------------------------
 #
 
-stop_listener
+snapshot-key-listener-stop.stop_listener
 
 #
 # ------------------------------------------------------------
@@ -324,7 +322,7 @@ stop_listener
 #
 
 if [ "$silent_mode" -eq 1 ]; then
-    exit 0
+	exit 0
 fi
 
 #
@@ -334,28 +332,28 @@ fi
 #
 
 if [ -e "$MARKER" ]; then
-    show_message "Snapshot menu ENABLED"
+	snapshot-key-listener-stop.show_message "Snapshot menu ENABLED"
 else
-    show_message "Snapshot menu not requested"
+	snapshot-key-listener-stop.show_message "Snapshot menu not requested"
 fi
 
 if [ "$result_ticks" -gt 0 ]; then
 
-    tick=0
+	tick=0
 
-    while [ "$tick" -lt "$result_ticks" ]; do
-        sleep 0.1
-        tick=$((tick + 1))
-    done
+	while [ "$tick" -lt "$result_ticks" ]; do
+		sleep 0.1
+		tick=$((tick + 1))
+	done
 fi
 
-hide_message
+snapshot-key-listener-stop.hide_message
 
 if [ "$plymouth_active" -eq 0 ] &&
-   [ -c "$menu_tty" ]; then
+	[ -c "$menu_tty" ]; then
 
-    printf '\n' \
-        >"$menu_tty" 2>/dev/null || :
+	printf '\n' \
+		>"$menu_tty" 2>/dev/null || :
 fi
 
 exit 0

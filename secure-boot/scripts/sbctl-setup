@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
+# Firmware state is supplied by secure-boot-setup or detected at runtime.
+# shellcheck disable=SC2154
 
 set -Eeuo pipefail
+umask 077
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
 
 # ============================================================
 # Configuration
@@ -25,64 +32,38 @@ PRESERVE_FIRMWARE_DEFAULTS="${PRESERVE_FIRMWARE_DEFAULTS:-true}"
 
 SETUP_MODE="${SETUP_MODE:-}"
 
-
 # ============================================================
-# Helpers
+# Firmware helpers
 # ============================================================
 
-log()
-{
-    printf '==> %s\n' "$*"
+sbctl-setup.read_efi_uint8() {
+	local name="$1"
+	local file
+
+	file="$(
+		find /sys/firmware/efi/efivars \
+			-maxdepth 1 \
+			-name "${name}-*" \
+			-print \
+			-quit 2>/dev/null
+	)"
+
+	[[ -n "$file" ]] || return 1
+
+	od -An -j4 -N1 -t u1 "$file" |
+		tr -d '[:space:]'
 }
-
-warn()
-{
-    printf 'WARNING: %s\n' "$*" >&2
-}
-
-die()
-{
-    printf 'ERROR: %s\n' "$*" >&2
-    exit 1
-}
-
-require_command()
-{
-    command -v "$1" >/dev/null 2>&1 ||
-        die "Required command not found: $1"
-}
-
-read_efi_uint8()
-{
-    local name="$1"
-    local file
-
-    file="$(
-        find /sys/firmware/efi/efivars \
-            -maxdepth 1 \
-            -name "${name}-*" \
-            -print \
-            -quit 2>/dev/null
-    )"
-
-    [[ -n "$file" ]] || return 1
-
-    od -An -j4 -N1 -t u1 "$file" |
-        tr -d '[:space:]'
-}
-
 
 # ============================================================
 # Dependencies
 # ============================================================
 
-install_dependencies()
-{
-    export DEBIAN_FRONTEND=noninteractive
+sbctl-setup.install_dependencies() {
+	export DEBIAN_FRONTEND=noninteractive
 
-    apt-get update
+	apt-get update
 
-    apt-get install -y \
+	apt-get install -y \
 		ca-certificates \
 		curl \
 		git \
@@ -94,369 +75,340 @@ install_dependencies()
 		findutils \
 		coreutils
 
-    #
-    # Prefer distro package.
-    #
-    if ! command -v sbctl >/dev/null 2>&1; then
+	#
+	# Prefer distro package.
+	#
+	if ! command -v sbctl >/dev/null 2>&1; then
 
-        log "Trying to install sbctl from distribution repository..."
-        if apt-cache search sbctl | grep -q sbctl; then
-            echo "sbctl package available in distribution repository."
+		common.log_info "Try to install sbctl from the distribution repository"
+		if apt-cache search sbctl | grep -q sbctl; then
+			common.log_info "sbctl package available in distribution repository"
 			apt-get install -y sbctl || true
-        else
-			log "sbctl package unavailable in distribution repository."
-			log "Trying to install sbctl from upstream GitHub releases..."
-			install_sbctl_upstream
-		fi	
-		
-    fi
-}
+		else
+			common.log_info "sbctl package unavailable in distribution repository"
+			common.log_info "Build sbctl version $SBCTL_VERSION from upstream source"
+			sbctl-setup.install_upstream
+		fi
 
+	fi
+}
 
 # ============================================================
 # sbctl fallback
 # ============================================================
 
-install_sbctl_upstream()
-{
-    
-    apt-get install -y \
-        ca-certificates \
-        git \
-        golang-go \
-        make \
-        asciidoc-base \
-        pkgconf \
-        pkgconf-bin \
-        curl \
-        jq \
-        libpcsclite-dev \
-        libpcsclite1 \
-        golang-go \
-        sbsigntool \
-        git \
-        build-essential \
-        pcscd
+sbctl-setup.install_upstream() {
 
-    local tmp
+	apt-get install -y \
+		ca-certificates \
+		git \
+		golang-go \
+		make \
+		asciidoc-base \
+		pkgconf \
+		pkgconf-bin \
+		curl \
+		jq \
+		libpcsclite-dev \
+		libpcsclite1 \
+		golang-go \
+		sbsigntool \
+		git \
+		build-essential \
+		file \
+		pcscd
 
-    tmp="$(mktemp -d /tmp/sbctl-build.XXXXXX)"
+	local tmp
 
-    git clone \
-        --depth 1 \
-        --branch "${SBCTL_VERSION}" \
-        https://github.com/Foxboron/sbctl.git \
-        "$tmp/src"
+	tmp="$(mktemp -d /tmp/sbctl-build.XXXXXX)"
 
-    (
-        cd "$tmp/src"
+	git clone \
+		--depth 1 \
+		--branch "${SBCTL_VERSION}" \
+		https://github.com/Foxboron/sbctl.git \
+		"$tmp/src"
 
-        go build \
-            -trimpath \
-            -o "$tmp/sbctl" \
-            ./cmd/sbctl
-    )
+	(
+		cd "$tmp/src"
 
-    file "$tmp/sbctl" |
-        grep -q 'ELF' ||
-        die "Built sbctl is not an ELF executable."
+		go build \
+			-trimpath \
+			-o "$tmp/sbctl" \
+			./cmd/sbctl
+	)
 
-    install \
-        -m 0755 \
-        "$tmp/sbctl" \
-        /usr/local/sbin/sbctl
+	file "$tmp/sbctl" |
+		grep -q 'ELF' ||
+		common.die "Built sbctl is not an ELF executable."
 
-    rm -rf "$tmp"
-    trap - RETURN
+	install \
+		-m 0755 \
+		"$tmp/sbctl" \
+		/usr/local/sbin/sbctl
+
+	rm -rf "$tmp"
+	trap - RETURN
 }
-
 
 # ============================================================
 # Keys
 # ============================================================
 
-keys_exist()
-{
-    [[ -f "$PK_KEY" ]] &&
-    [[ -f "$PK_CERT" ]] &&
-    [[ -f "$KEK_KEY" ]] &&
-    [[ -f "$KEK_CERT" ]] &&
-    [[ -f "$DB_KEY" ]] &&
-    [[ -f "$DB_CERT" ]]
+sbctl-setup.keys_exist() {
+	[[ -f "$PK_KEY" ]] &&
+		[[ -f "$PK_CERT" ]] &&
+		[[ -f "$KEK_KEY" ]] &&
+		[[ -f "$KEK_CERT" ]] &&
+		[[ -f "$DB_KEY" ]] &&
+		[[ -f "$DB_CERT" ]]
 }
 
-create_keys()
-{
-    if keys_exist; then
-        log "sbctl key hierarchy already exists."
-        return
-    fi
+sbctl-setup.create_keys() {
+	if sbctl-setup.keys_exist; then
+		common.log_info "Complete sbctl key hierarchy already exists at $SBCTL_KEYROOT"
+		return
+	fi
 
-    if [[ -d "$SBCTL_KEYROOT" ]] &&
-       find "$SBCTL_KEYROOT" \
-            -mindepth 1 \
-            -print \
-            -quit 2>/dev/null |
-       grep -q .
-    then
-        die "Incomplete sbctl key hierarchy in $SBCTL_KEYROOT."
-    fi
+	if [[ -d "$SBCTL_KEYROOT" ]] &&
+		find "$SBCTL_KEYROOT" \
+			-mindepth 1 \
+			-print \
+			-quit 2>/dev/null |
+		grep -q .; then
+		common.die "Incomplete sbctl key hierarchy in $SBCTL_KEYROOT."
+	fi
 
-    log "Generating Secure Boot keys..."
+	common.log_info "Generate new PK, KEK and db Secure Boot key hierarchy in $SBCTL_KEYROOT"
 
-    sbctl create-keys
+	sbctl create-keys
 	sbctl setup --migrate || true
-    keys_exist ||
-        die "sbctl did not create the expected key hierarchy."
-
-	migrate_sbctl()
-	{
-		log "Migrating sbctl configuration if necessary..."
-	
-		sbctl setup --migrate || true
-	}
+	sbctl-setup.keys_exist ||
+		common.die "sbctl did not create the expected key hierarchy."
 }
-
 
 # ============================================================
 # Enrollment
 # ============================================================
 
-sbctl_supports()
-{
-    sbctl enroll-keys --help 2>&1 |
-        grep -q -- "$1"
+sbctl-setup.supports() {
+	sbctl enroll-keys --help 2>&1 |
+		grep -q -- "$1"
 }
 
-efi_variable_exists()
-{
-    local name="$1"
+sbctl-setup.efi_variable_exists() {
+	local name="$1"
 
-    find /sys/firmware/efi/efivars \
-        -maxdepth 1 \
-        -name "${name}-*" \
-        -print \
-        -quit 2>/dev/null |
-        grep -q .
+	find /sys/firmware/efi/efivars \
+		-maxdepth 1 \
+		-name "${name}-*" \
+		-print \
+		-quit 2>/dev/null |
+		grep -q .
 }
 
-enroll_db()
-{
-    local args=(
-        enroll-keys
-        --partial db
-    )
+sbctl-setup.enroll_db() {
+	local args=(
+		enroll-keys
+		--partial db
+	)
 
-    if efi_variable_exists db; then
-        args+=(--append)
-    fi
+	if sbctl-setup.efi_variable_exists db; then
+		args+=(--append)
+	fi
 
-    if [[ "$PRESERVE_MICROSOFT" == "true" ]]; then
-        args+=(--microsoft)
-    fi
+	if [[ "$PRESERVE_MICROSOFT" == "true" ]]; then
+		args+=(--microsoft)
+	fi
 
-    if [[ "$PRESERVE_FIRMWARE_DEFAULTS" == "true" ]] &&
-		sbctl_supports "--firmware-builtin"
-    then
-        args+=(--firmware-builtin db)
-    fi
+	if [[ "$PRESERVE_FIRMWARE_DEFAULTS" == "true" ]] &&
+		sbctl-setup.supports "--firmware-builtin"; then
+		args+=(--firmware-builtin db)
+	fi
 
-    #
-    # IMPORTANT:
-    # Previous enrollment operations may have recreated
-    # EFI variables with the immutable flag.
-    #
-    unprotect_efi_variables
-
-    log "Enrolling db..."
-
-    sbctl "${args[@]}"
-}
-
-enroll_kek()
-{
-    local args=(
-        enroll-keys
-        --partial KEK
-    )
-
-    if efi_variable_exists KEK; then
-        args+=(--append)
-    fi
-
-    if [[ "$PRESERVE_FIRMWARE_DEFAULTS" == "true" ]] &&
-		sbctl_supports "--firmware-builtin"
-    then
-        args+=(--firmware-builtin KEK)
-    fi
-	 #
-    # IMPORTANT:
-    # Previous enrollment operations may have recreated
-    # EFI variables with the immutable flag.
-    #
-    unprotect_efi_variables
-
-    log "Enrolling KEK..."
-
-    sbctl "${args[@]}"
-}
-
-enroll_pk()
-{	
 	#
-    # KEK has just been rewritten and can have become
-    # immutable again.
-    #
-    unprotect_efi_variables
+	# IMPORTANT:
+	# Previous enrollment operations may have recreated
+	# EFI variables with the immutable flag.
+	#
+	sbctl-setup.unprotect_efi_variables
 
-    log "Enrolling PK..."
+	common.log_info "Enroll db last-level trust certificate; preserve configured existing trust sources"
 
-    #
-    # Always last.
-    #
-    sbctl enroll-keys \
-        --partial PK
+	sbctl "${args[@]}"
 }
 
-unprotect_efi_variables()
-{
-    local var
-    local file
+sbctl-setup.enroll_kek() {
+	local args=(
+		enroll-keys
+		--partial KEK
+	)
 
-    for var in PK KEK db; do
+	if sbctl-setup.efi_variable_exists KEK; then
+		args+=(--append)
+	fi
 
-        while IFS= read -r file; do
-            [[ -e "$file" ]] || continue
+	if [[ "$PRESERVE_FIRMWARE_DEFAULTS" == "true" ]] &&
+		sbctl-setup.supports "--firmware-builtin"; then
+		args+=(--firmware-builtin KEK)
+	fi
+	#
+	# IMPORTANT:
+	# Previous enrollment operations may have recreated
+	# EFI variables with the immutable flag.
+	#
+	sbctl-setup.unprotect_efi_variables
 
-            if lsattr "$file" 2>/dev/null |
+	common.log_info "Enroll KEK after db"
+
+	sbctl "${args[@]}"
+}
+
+sbctl-setup.enroll_pk() {
+	#
+	# KEK has just been rewritten and can have become
+	# immutable again.
+	#
+	sbctl-setup.unprotect_efi_variables
+
+	common.log_info "Enroll PK last; this exits firmware Setup Mode"
+
+	#
+	# Always last.
+	#
+	sbctl enroll-keys \
+		--partial PK
+}
+
+sbctl-setup.unprotect_efi_variables() {
+	local var
+	local file
+
+	for var in PK KEK db; do
+
+		while IFS= read -r file; do
+			[[ -e "$file" ]] || continue
+
+			if lsattr "$file" 2>/dev/null |
 				awk '{print $1}' |
-				grep -q 'i'
-            then
-                log "Removing immutable flag from $(basename "$file")"
-                chattr -i "$file"
-            fi
+				grep -q 'i'; then
+				common.log_info "Temporarily remove immutable flag from $(basename "$file")"
+				chattr -i "$file"
+			fi
 
-        done < <(
-            find /sys/firmware/efi/efivars \
-                -maxdepth 1 \
-                -type f \
-                -name "${var}-*" \
-                -print 2>/dev/null
-        )
+		done < <(
+			find /sys/firmware/efi/efivars \
+				-maxdepth 1 \
+				-type f \
+				-name "${var}-*" \
+				-print 2>/dev/null
+		)
 
-    done
+	done
 }
 
-efi_protect()
-{
-    local var
-    local file
+sbctl-setup.protect_efi_variables() {
+	local var
+	local file
 
-    for var in PK KEK db; do
+	for var in PK KEK db; do
 
-        while IFS= read -r file; do
-            [[ -e "$file" ]] || continue
+		while IFS= read -r file; do
+			[[ -e "$file" ]] || continue
 
-            log "Restoring immutable flag on $(basename "$file")"
+			common.log_info "Restore immutable flag on $(basename "$file")"
 
-            chattr +i "$file" 2>/dev/null || true
+			chattr +i "$file" 2>/dev/null || true
 
-        done < <(
-            find /sys/firmware/efi/efivars \
-                -maxdepth 1 \
-                -type f \
-                -name "${var}-*" \
-                -print 2>/dev/null
-        )
+		done < <(
+			find /sys/firmware/efi/efivars \
+				-maxdepth 1 \
+				-type f \
+				-name "${var}-*" \
+				-print 2>/dev/null
+		)
 
-    done
+	done
 }
 
-migrate_sbctl()
-{
-    log "Checking sbctl configuration..."
+sbctl-setup.migrate_configuration() {
+	local output
 
-    if sbctl setup --migrate 2>&1 |
-		tee /tmp/sbctl-migrate.log |
-		grep -q 'old configuration detected'
-    then
-        :
-    fi
+	common.log_info "Check whether the sbctl configuration requires migration"
+
+	output="$(sbctl setup --migrate 2>&1 || true)"
+	if [[ $output == *"old configuration detected"* ]]; then
+		common.log_info "Migrated an older sbctl configuration"
+	else
+		common.log_info "No sbctl configuration migration was required"
+	fi
 }
 
-enroll_if_setup_mode()
-{
-    if [[ -z "$SETUP_MODE" ]]; then
-        if [[ -f /etc/securebootmode.conf ]]; then
-			SETUP_MODE="$(cat /etc/securebootmode.conf)"
-			cat > /etc/securebootmode.conf <<- EOF
-				$SETUP_MODE
-			EOF
+sbctl-setup.enroll_if_setup_mode() {
+	if [[ -z "$SETUP_MODE" ]]; then
+		if [[ -f /etc/securebootmode.conf ]]; then
+			SETUP_MODE="$(</etc/securebootmode.conf)"
 		else
 			SETUP_MODE="$(
-				read_efi_uint8 SetupMode
-			)" || die "Cannot read UEFI SetupMode."
+				sbctl-setup.read_efi_uint8 SetupMode
+			)" || common.die "Cannot read UEFI SetupMode."
 		fi
-    fi
+	fi
 
-    if [[ "$SETUP_MODE" != "1" ]]; then
+	if [[ "$SETUP_MODE" != "1" ]]; then
 
-        log "SetupMode=0."
-        log "Skipping firmware enrollment."
+		common.log_info "SetupMode=0; skip firmware PK/KEK/db enrollment and preserve the existing hierarchy"
 
-        return
-    fi
+		return
+	fi
 
-    log "SetupMode=1."
-    log "Preparing EFI variables..."
+	common.log_info "SetupMode=1; prepare EFI variables for direct enrollment"
 
-    #
-    # Make sure we attempt to restore protection even if
-    # enrollment fails.
-    #
-    trap 'efi_protect' RETURN
+	#
+	# Make sure we attempt to restore protection even if
+	# enrollment fails.
+	#
+	trap 'sbctl-setup.protect_efi_variables' RETURN
 
-    log "Performing Secure Boot enrollment..."
+	common.log_info "Enroll Secure Boot hierarchy in db, KEK, PK order"
 
-    #
-    # db first.
-    #
-    enroll_db
+	#
+	# db first.
+	#
+	sbctl-setup.enroll_db
 
-    #
-    # KEK second.
-    #
-    enroll_kek
+	#
+	# KEK second.
+	#
+	sbctl-setup.enroll_kek
 
-    #
-    # PK LAST.
-    #
-    # Installing PK exits Setup Mode.
-    #
-    enroll_pk
+	#
+	# PK LAST.
+	#
+	# Installing PK exits Setup Mode.
+	#
+	sbctl-setup.enroll_pk
 
-    efi_protect
-    trap - RETURN
+	sbctl-setup.protect_efi_variables
+	trap - RETURN
 
-    log "Secure Boot enrollment completed."
+	common.log_success "Direct firmware Secure Boot enrollment completed"
 }
-
 
 # ============================================================
 # Main
 # ============================================================
 
-main()
-{
-    [[ $EUID -eq 0 ]] ||
-        die "Run as root."
+sbctl-setup.run() {
+	common.require_root
 
-    install_dependencies
-    require_command sbctl
-    create_keys
-    enroll_if_setup_mode
-	sbctl setup --migrate || true
-    sbctl status || true
+	sbctl-setup.install_dependencies
+	common.require_commands awk basename chattr find grep lsattr sbctl
+	sbctl-setup.create_keys
+	sbctl-setup.enroll_if_setup_mode
+	sbctl-setup.migrate_configuration
+	sbctl status || true
 }
 
-main "$@"
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	sbctl-setup.run
+fi

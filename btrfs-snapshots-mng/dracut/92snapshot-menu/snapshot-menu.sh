@@ -11,7 +11,7 @@ CONFIG="/etc/snapshot-menu.conf"
 #
 
 if [[ ! -r "$CONFIG" ]]; then
-    exit 1
+	exit 1
 fi
 
 # shellcheck disable=SC1090
@@ -34,7 +34,7 @@ source "$CONFIG"
 PAGE_SIZE="${PAGE_SIZE:-20}"
 
 if [[ ! "$PAGE_SIZE" =~ ^[1-9][0-9]*$ ]]; then
-    PAGE_SIZE=20
+	PAGE_SIZE=20
 fi
 
 #
@@ -43,11 +43,11 @@ fi
 DESCRIPTION_MAX_LENGTH="${DESCRIPTION_MAX_LENGTH:-24}"
 
 if [[ ! "$DESCRIPTION_MAX_LENGTH" =~ ^[1-9][0-9]*$ ]]; then
-    DESCRIPTION_MAX_LENGTH=24
+	DESCRIPTION_MAX_LENGTH=24
 fi
 
-if (( DESCRIPTION_MAX_LENGTH > 40 )); then
-    DESCRIPTION_MAX_LENGTH=40
+if ((DESCRIPTION_MAX_LENGTH > 40)); then
+	DESCRIPTION_MAX_LENGTH=40
 fi
 
 #
@@ -61,47 +61,46 @@ SNAPSHOT_PIN_HASH="${SNAPSHOT_PIN_HASH:-}"
 
 case "${SNAPSHOT_PIN_ENABLED,,}" in
 
-    yes|true|1)
-        SNAPSHOT_PIN_ENABLED="yes"
-        ;;
+yes | true | 1)
+	SNAPSHOT_PIN_ENABLED="yes"
+	;;
 
-    *)
-        SNAPSHOT_PIN_ENABLED="no"
-        ;;
+*)
+	SNAPSHOT_PIN_ENABLED="no"
+	;;
 
 esac
 
 if [[ ! "$SNAPSHOT_PIN_ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
-    SNAPSHOT_PIN_ATTEMPTS=3
+	SNAPSHOT_PIN_ATTEMPTS=3
 fi
 
 if [[ ! "$SNAPSHOT_PIN_MAX_LENGTH" =~ ^[1-9][0-9]*$ ]]; then
-    SNAPSHOT_PIN_MAX_LENGTH=12
+	SNAPSHOT_PIN_MAX_LENGTH=12
 fi
 
 #
 # Avoid unreasonable values inside the initramfs.
 #
-if (( SNAPSHOT_PIN_ATTEMPTS > 10 )); then
-    SNAPSHOT_PIN_ATTEMPTS=10
+if ((SNAPSHOT_PIN_ATTEMPTS > 10)); then
+	SNAPSHOT_PIN_ATTEMPTS=10
 fi
 
-if (( SNAPSHOT_PIN_MAX_LENGTH > 64 )); then
-    SNAPSHOT_PIN_MAX_LENGTH=64
+if ((SNAPSHOT_PIN_MAX_LENGTH > 64)); then
+	SNAPSHOT_PIN_MAX_LENGTH=64
 fi
 
 SNAPSHOT_PIN_READY="no"
 
 if [[ "$SNAPSHOT_PIN_ENABLED" == "yes" ]]; then
 
-    if [[ -n "$SNAPSHOT_PIN_SALT" &&
-        "$SNAPSHOT_PIN_HASH" =~ ^[[:xdigit:]]{64}$ ]]
-    then
+	if [[ -n "$SNAPSHOT_PIN_SALT" &&
+		"$SNAPSHOT_PIN_HASH" =~ ^[[:xdigit:]]{64}$ ]]; then
 
-        SNAPSHOT_PIN_HASH="${SNAPSHOT_PIN_HASH,,}"
-        SNAPSHOT_PIN_READY="yes"
+		SNAPSHOT_PIN_HASH="${SNAPSHOT_PIN_HASH,,}"
+		SNAPSHOT_PIN_READY="yes"
 
-    fi
+	fi
 
 fi
 
@@ -114,14 +113,14 @@ fi
 ROOT_DEV="${1:-}"
 
 if [[ -z "$ROOT_DEV" || ! -b "$ROOT_DEV" ]]; then
-    exit 1
+	exit 1
 fi
 
 #
 # TTY fallback.
 #
 if [[ ! -c "$TTY" ]]; then
-    TTY="/dev/console"
+	TTY="/dev/console"
 fi
 
 mkdir -p "$MOUNTPOINT"
@@ -148,23 +147,25 @@ PIN_RESULT=""
 # ------------------------------------------------------------
 #
 
-cleanup() {
+# Invoked indirectly by the EXIT trap.
+# shellcheck disable=SC2329
+snapshot-menu.cleanup() {
 
-    if (( terminal_configured )); then
+	if ((terminal_configured)); then
 
-        printf '\033[0m\033[?25h' >&3 2>/dev/null || true
-        stty sane <&3 2>/dev/null || true
+		printf '\033[0m\033[?25h' >&3 2>/dev/null || true
+		stty sane <&3 2>/dev/null || true
 
-    fi
+	fi
 
-    if (( mounted )); then
+	if ((mounted)); then
 
-        umount "$MOUNTPOINT" \
-            >/dev/null 2>&1 || true
+		umount "$MOUNTPOINT" \
+			>/dev/null 2>&1 || true
 
-    fi
+	fi
 
-    exec 3>&- 2>/dev/null || true
+	exec 3>&- 2>/dev/null || true
 }
 
 #
@@ -173,40 +174,42 @@ cleanup() {
 # ------------------------------------------------------------
 #
 
-boot_current_system() {
+# Invoked indirectly by the INT and QUIT traps.
+# shellcheck disable=SC2329
+snapshot-menu.boot_current_system() {
 
-    #
-    # Ctrl-C and Ctrl-\ cancel snapshot selection and explicitly
-    # select the normal root.
-    #
-    printf '%s\n' \
-        "$ROOT_SUBVOL" \
-        >"${RESULT}.tmp"
+	#
+	# Ctrl-C and Ctrl-\ cancel snapshot selection and explicitly
+	# select the normal root.
+	#
+	printf '%s\n' \
+		"$ROOT_SUBVOL" \
+		>"${RESULT}.tmp"
 
-    mv \
-        "${RESULT}.tmp" \
-        "$RESULT"
+	mv \
+		"${RESULT}.tmp" \
+		"$RESULT"
 
-    #
-    # Never leave snapshot overlay enabled after cancellation.
-    #
-    rm -f "$SNAPSHOT_CMDLINE"
+	#
+	# Never leave snapshot overlay enabled after cancellation.
+	#
+	rm -f "$SNAPSHOT_CMDLINE"
 
-    printf '\n\033[0mSnapshot selection cancelled.\n' >&3
-    printf 'Booting current system...\n' >&3
+	printf '\n\033[0mSnapshot selection cancelled.\n' >&3
+	printf 'Booting current system...\n' >&3
 
-    exit 0
+	exit 0
 }
 
 #
 # Ctrl-C.
 #
-trap boot_current_system INT
+trap snapshot-menu.boot_current_system INT
 
 #
 # Ctrl-\.
 #
-trap boot_current_system QUIT
+trap snapshot-menu.boot_current_system QUIT
 
 #
 # Do not allow Ctrl-Z to suspend the menu in the initramfs.
@@ -219,7 +222,7 @@ trap '' TSTP
 trap 'exit 129' HUP
 trap 'exit 143' TERM
 
-trap cleanup EXIT
+trap snapshot-menu.cleanup EXIT
 
 #
 # ------------------------------------------------------------
@@ -228,17 +231,16 @@ trap cleanup EXIT
 #
 
 if ! mount \
-    -t btrfs \
-    -o ro,subvolid=5 \
-    "$ROOT_DEV" \
-    "$MOUNTPOINT"
-then
+	-t btrfs \
+	-o ro,subvolid=5 \
+	"$ROOT_DEV" \
+	"$MOUNTPOINT"; then
 
-    printf '\nUnable to mount Btrfs root: %s\n' \
-        "$ROOT_DEV" >&3
+	printf '\nUnable to mount Btrfs root: %s\n' \
+		"$ROOT_DEV" >&3
 
-    sleep 2
-    exit 1
+	sleep 2
+	exit 1
 fi
 
 mounted=1
@@ -271,7 +273,7 @@ ENTRY_LOADED=()
 # Entry 0 = current system.
 #
 SUBVOLS+=(
-    "$ROOT_SUBVOL"
+	"$ROOT_SUBVOL"
 )
 
 SNAPSHOT_PATHS+=("")
@@ -279,15 +281,15 @@ SNAPSHOT_INFOS+=("")
 SNAPSHOT_NUMBERS+=("")
 
 LABELS+=(
-    "Ubuntu - current system"
+	"Ubuntu - current system"
 )
 
 KERNEL_STATUS+=(
-    "Present"
+	"Present"
 )
 
 ENTRY_LOADED+=(
-    "1"
+	"1"
 )
 
 #
@@ -301,52 +303,52 @@ ENTRY_LOADED+=(
 
 if [[ -d "$SNAPDIR" ]]; then
 
-    while IFS= read -r snap; do
+	while IFS= read -r snap; do
 
-        [[ -n "$snap" ]] || continue
-        [[ "$snap" =~ ^[0-9]+$ ]] || continue
+		[[ -n "$snap" ]] || continue
+		[[ "$snap" =~ ^[0-9]+$ ]] || continue
 
-        snapshot="${SNAPDIR}/${snap}/snapshot"
-        info="${SNAPDIR}/${snap}/info.xml"
+		snapshot="${SNAPDIR}/${snap}/snapshot"
+		info="${SNAPDIR}/${snap}/info.xml"
 
-        [[ -d "$snapshot" ]] || continue
+		[[ -d "$snapshot" ]] || continue
 
-        SUBVOLS+=(
-            "${ROOT_SUBVOL}/${SNAPSHOT_DIR}/${snap}/snapshot"
-        )
+		SUBVOLS+=(
+			"${ROOT_SUBVOL}/${SNAPSHOT_DIR}/${snap}/snapshot"
+		)
 
-        SNAPSHOT_PATHS+=(
-            "$snapshot"
-        )
+		SNAPSHOT_PATHS+=(
+			"$snapshot"
+		)
 
-        SNAPSHOT_INFOS+=(
-            "$info"
-        )
+		SNAPSHOT_INFOS+=(
+			"$info"
+		)
 
-        SNAPSHOT_NUMBERS+=(
-            "$snap"
-        )
+		SNAPSHOT_NUMBERS+=(
+			"$snap"
+		)
 
-        LABELS+=("")
-        KERNEL_STATUS+=("")
-        ENTRY_LOADED+=("0")
+		LABELS+=("")
+		KERNEL_STATUS+=("")
+		ENTRY_LOADED+=("0")
 
-    done < <(
+	done < <(
 
-        for path in "$SNAPDIR"/*; do
+		for path in "$SNAPDIR"/*; do
 
-            [[ -d "$path" ]] || continue
+			[[ -d "$path" ]] || continue
 
-            snap="${path##*/}"
+			snap="${path##*/}"
 
-            [[ "$snap" =~ ^[0-9]+$ ]] || continue
+			[[ "$snap" =~ ^[0-9]+$ ]] || continue
 
-            printf '%s\n' "$snap"
+			printf '%s\n' "$snap"
 
-        done |
-            sort -rn
+		done |
+			sort -rn
 
-    )
+	)
 
 fi
 
@@ -359,124 +361,120 @@ PAGE_COUNT=$(((COUNT + PAGE_SIZE - 1) / PAGE_SIZE))
 # ------------------------------------------------------------
 #
 
-load_entry() {
+snapshot-menu.load_entry() {
 
-    local index="$1"
-    local snapshot
-    local info
-    local snap
-    local description=""
-    local date=""
-    local type=""
+	local index="$1"
+	local snapshot
+	local info
+	local snap
+	local description=""
+	local date=""
+	local type=""
 
-    if [[ "${ENTRY_LOADED[$index]}" == "1" ]]; then
-        return 0
-    fi
+	if [[ "${ENTRY_LOADED[$index]}" == "1" ]]; then
+		return 0
+	fi
 
-    snapshot="${SNAPSHOT_PATHS[$index]}"
-    info="${SNAPSHOT_INFOS[$index]}"
-    snap="${SNAPSHOT_NUMBERS[$index]}"
+	snapshot="${SNAPSHOT_PATHS[$index]}"
+	info="${SNAPSHOT_INFOS[$index]}"
+	snap="${SNAPSHOT_NUMBERS[$index]}"
 
-    #
-    # Read Snapper metadata.
-    #
-    if [[ -r "$info" ]]; then
+	#
+	# Read Snapper metadata.
+	#
+	if [[ -r "$info" ]]; then
 
-        description="$(
-            sed -n \
-                's:.*<description>\(.*\)</description>.*:\1:p' \
-                "$info" |
-            head -n 1
-        )"
+		description="$(
+			sed -n \
+				's:.*<description>\(.*\)</description>.*:\1:p' \
+				"$info" |
+				head -n 1
+		)"
 
-        date="$(
-            sed -n \
-                's:.*<date>\(.*\)</date>.*:\1:p' \
-                "$info" |
-            head -n 1
-        )"
+		date="$(
+			sed -n \
+				's:.*<date>\(.*\)</date>.*:\1:p' \
+				"$info" |
+				head -n 1
+		)"
 
-        type="$(
-            sed -n \
-                's:.*<type>\(.*\)</type>.*:\1:p' \
-                "$info" |
-            head -n 1
-        )"
+		type="$(
+			sed -n \
+				's:.*<type>\(.*\)</type>.*:\1:p' \
+				"$info" |
+				head -n 1
+		)"
 
-    fi
+	fi
 
-    [[ -n "$description" ]] ||
-        description="Snapshot"
+	[[ -n "$description" ]] ||
+		description="Snapshot"
 
-    #
-# Remove characters capable of breaking the terminal layout.
-#
-description="${description//$'\n'/ }"
-description="${description//$'\r'/ }"
-description="${description//$'\t'/ }"
+	#
+	# Remove characters capable of breaking the terminal layout.
+	#
+	description="${description//$'\n'/ }"
+	description="${description//$'\r'/ }"
+	description="${description//$'\t'/ }"
 
-type="${type//$'\n'/ }"
-type="${type//$'\r'/ }"
-type="${type//$'\t'/ }"
+	type="${type//$'\n'/ }"
+	type="${type//$'\r'/ }"
+	type="${type//$'\t'/ }"
 
-#
-# Truncate the description and append "..." when necessary.
-#
-if (( ${#description} > DESCRIPTION_MAX_LENGTH )); then
+	#
+	# Truncate the description and append "..." when necessary.
+	#
+	if ((${#description} > DESCRIPTION_MAX_LENGTH)); then
+		if ((DESCRIPTION_MAX_LENGTH > 3)); then
+			description="${description:0:DESCRIPTION_MAX_LENGTH-3}..."
+		else
+			description="${description:0:DESCRIPTION_MAX_LENGTH}"
+		fi
+	fi
 
-    if (( DESCRIPTION_MAX_LENGTH > 3 )); then
-        description="${
-            description:0:DESCRIPTION_MAX_LENGTH-3
-        }..."
-    else
-        description="${description:0:DESCRIPTION_MAX_LENGTH}"
-    fi
+	#
+	# Build a fixed-width label:
+	#
+	#   snapshot  date                 description               type
+	#   #9        2026-08-12 14:40:21  boot                      single
+	#
+	if [[ -n "$date" ]]; then
 
-fi
+		printf -v 'LABELS[index]' \
+			'#%-5.5s  %-19.19s  %-*s  %-8.8s' \
+			"$snap" \
+			"$date" \
+			"$DESCRIPTION_MAX_LENGTH" \
+			"$description" \
+			"$type"
 
-#
-# Build a fixed-width label:
-#
-#   snapshot  date                 description               type
-#   #9        2026-08-12 14:40:21  boot                      single
-#
-    if [[ -n "$date" ]]; then
+	else
 
-        printf -v 'LABELS[index]' \
-            '#%-5.5s  %-19.19s  %-*s  %-8.8s' \
-            "$snap" \
-            "$date" \
-            "$DESCRIPTION_MAX_LENGTH" \
-            "$description" \
-            "$type"
+		printf -v 'LABELS[index]' \
+			'#%-5.5s  %-19s  %-*s  %-8.8s' \
+			"$snap" \
+			"-" \
+			"$DESCRIPTION_MAX_LENGTH" \
+			"$description" \
+			"$type"
 
-    else
+	fi
 
-        printf -v 'LABELS[index]' \
-            '#%-5.5s  %-19s  %-*s  %-8.8s' \
-            "$snap" \
-            "-" \
-            "$DESCRIPTION_MAX_LENGTH" \
-            "$description" \
-            "$type"
+	#
+	# The UKI contains the running kernel. The selected snapshot
+	# must contain the matching modules.
+	#
+	if [[ -d "${snapshot}/usr/lib/modules/${CURRENT_KERNEL}" ]]; then
 
-    fi
+		KERNEL_STATUS[index]="Present"
 
-    #
-    # The UKI contains the running kernel. The selected snapshot
-    # must contain the matching modules.
-    #
-    if [[ -d "${snapshot}/usr/lib/modules/${CURRENT_KERNEL}" ]]; then
+	else
 
-        KERNEL_STATUS[$index]="Present"
+		KERNEL_STATUS[index]="Missing"
 
-    else
+	fi
 
-        KERNEL_STATUS[$index]="Missing"
-
-    fi
-
-    ENTRY_LOADED[$index]="1"
+	ENTRY_LOADED[index]="1"
 }
 
 #
@@ -486,13 +484,13 @@ fi
 #
 
 stty \
-    -echo \
-    -icanon \
-    -ixon \
-    -ixoff \
-    min 1 \
-    time 0 \
-    <&3
+	-echo \
+	-icanon \
+	-ixon \
+	-ixoff \
+	min 1 \
+	time 0 \
+	<&3
 
 terminal_configured=1
 
@@ -509,102 +507,102 @@ selected=0
 # ------------------------------------------------------------
 #
 
-draw_menu() {
+snapshot-menu.draw_menu() {
 
-    local i
-    local page
-    local first
-    local last
-    local label_width
+	local i
+	local page
+	local first
+	local last
+	local label_width
 
-    label_width=$((5 + 4 + 19 + 2 + DESCRIPTION_MAX_LENGTH + 2 + 8))
+	label_width=$((5 + 4 + 19 + 2 + DESCRIPTION_MAX_LENGTH + 2 + 8))
 
-    page=$((selected / PAGE_SIZE))
-    first=$((page * PAGE_SIZE))
-    last=$((first + PAGE_SIZE))
+	page=$((selected / PAGE_SIZE))
+	first=$((page * PAGE_SIZE))
+	last=$((first + PAGE_SIZE))
 
-    if (( last > COUNT )); then
-        last=$COUNT
-    fi
+	if ((last > COUNT)); then
+		last=$COUNT
+	fi
 
-    printf '\033[2J\033[H' >&3
+	printf '\033[2J\033[H' >&3
 
-    printf '\033[1;36m' >&3
-    printf 'Ubuntu Snapshot Boot\n' >&3
-    printf '\033[0m' >&3
+	printf '\033[1;36m' >&3
+	printf 'Ubuntu Snapshot Boot\n' >&3
+	printf '\033[0m' >&3
 
-    printf 'Kernel: %s\n' \
-        "$CURRENT_KERNEL" >&3
+	printf 'Kernel: %s\n' \
+		"$CURRENT_KERNEL" >&3
 
-    if [[ "$SNAPSHOT_PIN_ENABLED" == "yes" ]]; then
+	if [[ "$SNAPSHOT_PIN_ENABLED" == "yes" ]]; then
 
-        if [[ "$SNAPSHOT_PIN_READY" == "yes" ]]; then
-            printf 'Snapshot PIN: enabled\n' >&3
-        else
-            printf '\033[1;31mSnapshot PIN: configuration error\033[0m\n' >&3
-        fi
+		if [[ "$SNAPSHOT_PIN_READY" == "yes" ]]; then
+			printf 'Snapshot PIN: enabled\n' >&3
+		else
+			printf '\033[1;31mSnapshot PIN: configuration error\033[0m\n' >&3
+		fi
 
-    fi
+	fi
 
-    printf '\n' >&3
+	printf '\n' >&3
 
-    printf 'Select root filesystem:  Page %d/%d  Entries %d-%d of %d\n\n' \
-        "$((page + 1))" \
-        "$PAGE_COUNT" \
-        "$((first + 1))" \
-        "$last" \
-        "$COUNT" >&3
+	printf 'Select root filesystem:  Page %d/%d  Entries %d-%d of %d\n\n' \
+		"$((page + 1))" \
+		"$PAGE_COUNT" \
+		"$((first + 1))" \
+		"$last" \
+		"$COUNT" >&3
 
-    printf '   %-7s  %-19s  %-*s  %-8s  %-10s\n' \
-        'Snapshot' \
-        'Date' \
-        "$DESCRIPTION_MAX_LENGTH" \
-        'Description' \
-        'Type' \
-        'Kernel' >&3
+	printf '   %-7s  %-19s  %-*s  %-8s  %-10s\n' \
+		'Snapshot' \
+		'Date' \
+		"$DESCRIPTION_MAX_LENGTH" \
+		'Description' \
+		'Type' \
+		'Kernel' >&3
 
-    printf '   %-7s  %-19s  %-*s  %-8s  %-10s\n' \
-        '--------' \
-        '-------------------' \
-        "$DESCRIPTION_MAX_LENGTH" \
-        '-----------' \
-        '--------' \
-        '------' >&3
+	printf '   %-7s  %-19s  %-*s  %-8s  %-10s\n' \
+		'--------' \
+		'-------------------' \
+		"$DESCRIPTION_MAX_LENGTH" \
+		'-----------' \
+		'--------' \
+		'------' >&3
 
-    for ((i = first; i < last; i++)); do
+	for ((i = first; i < last; i++)); do
 
-        load_entry "$i"
+		snapshot-menu.load_entry "$i"
 
-        if (( i == selected )); then
+		if ((i == selected)); then
 
-            printf '\033[7m' >&3
+			printf '\033[7m' >&3
 
-            printf ' > %-*.*s  %-10.10s' \
-                "$label_width" \
-                "$label_width" \
-                "${LABELS[$i]}" \
-                "${KERNEL_STATUS[$i]}" >&3
+			printf ' > %-*.*s  %-10.10s' \
+				"$label_width" \
+				"$label_width" \
+				"${LABELS[$i]}" \
+				"${KERNEL_STATUS[$i]}" >&3
 
-            printf '\033[0m\n' >&3
+			printf '\033[0m\n' >&3
 
-        else
+		else
 
-            printf '   %-*.*s  %-10.10s\n' \
-                "$label_width" \
-                "$label_width" \
-                "${LABELS[$i]}" \
-                "${KERNEL_STATUS[$i]}" >&3
+			printf '   %-*.*s  %-10.10s\n' \
+				"$label_width" \
+				"$label_width" \
+				"${LABELS[$i]}" \
+				"${KERNEL_STATUS[$i]}" >&3
 
-        fi
+		fi
 
-    done
+	done
 
-    printf '\n' >&3
+	printf '\n' >&3
 
-    printf '\033[2m' >&3
-    printf 'Up/Down: select    Left/Right: page    Enter: boot\n' >&3
-    printf 'j/k: select        h/l: page          Ctrl-C: current system\n' >&3
-    printf '\033[0m' >&3
+	printf '\033[2m' >&3
+	printf 'Up/Down: select    Left/Right: page    Enter: boot\n' >&3
+	printf 'j/k: select        h/l: page          Ctrl-C: current system\n' >&3
+	printf '\033[0m' >&3
 }
 
 #
@@ -613,100 +611,100 @@ draw_menu() {
 # ------------------------------------------------------------
 #
 
-read_key() {
+snapshot-menu.read_key() {
 
-    local key=""
-    local seq=""
+	local key=""
+	local seq=""
 
-    KEY_RESULT="OTHER"
+	KEY_RESULT="OTHER"
 
-    IFS= read \
-        -r \
-        -s \
-        -n 1 \
-        -u 3 \
-        key || return 1
+	IFS= read \
+		-r \
+		-s \
+		-n 1 \
+		-u 3 \
+		key || return 1
 
-    case "$key" in
+	case "$key" in
 
-        $'\e')
+	$'\e')
 
-            seq=""
+		seq=""
 
-            IFS= read \
-                -r \
-                -s \
-                -n 2 \
-                -t 0.15 \
-                -u 3 \
-                seq || true
+		IFS= read \
+			-r \
+			-s \
+			-n 2 \
+			-t 0.15 \
+			-u 3 \
+			seq || true
 
-            case "$seq" in
+		case "$seq" in
 
-                '[A')
-                    KEY_RESULT="UP"
-                    ;;
+		'[A')
+			KEY_RESULT="UP"
+			;;
 
-                '[B')
-                    KEY_RESULT="DOWN"
-                    ;;
+		'[B')
+			KEY_RESULT="DOWN"
+			;;
 
-                '[C')
-                    KEY_RESULT="RIGHT"
-                    ;;
+		'[C')
+			KEY_RESULT="RIGHT"
+			;;
 
-                '[D')
-                    KEY_RESULT="LEFT"
-                    ;;
+		'[D')
+			KEY_RESULT="LEFT"
+			;;
 
-                *)
-                    KEY_RESULT="ESC"
-                    ;;
+		*)
+			KEY_RESULT="ESC"
+			;;
 
-            esac
-            ;;
+		esac
+		;;
 
-        "")
+	"")
 
-            KEY_RESULT="ENTER"
-            ;;
+		KEY_RESULT="ENTER"
+		;;
 
-        j|J)
+	j | J)
 
-            KEY_RESULT="DOWN"
-            ;;
+		KEY_RESULT="DOWN"
+		;;
 
-        k|K)
+	k | K)
 
-            KEY_RESULT="UP"
-            ;;
+		KEY_RESULT="UP"
+		;;
 
-        h|H)
+	h | H)
 
-            KEY_RESULT="LEFT"
-            ;;
+		KEY_RESULT="LEFT"
+		;;
 
-        l|L)
+	l | L)
 
-            KEY_RESULT="RIGHT"
-            ;;
+		KEY_RESULT="RIGHT"
+		;;
 
-        $'\f')
+	$'\f')
 
-            #
-            # Ctrl-L.
-            #
-            KEY_RESULT="REDRAW"
-            ;;
+		#
+		# Ctrl-L.
+		#
+		KEY_RESULT="REDRAW"
+		;;
 
-        *)
+	*)
 
-            KEY_RESULT="OTHER"
-            ;;
+		KEY_RESULT="OTHER"
+		;;
 
-    esac
+	esac
 
-    return 0
+	return 0
 }
 
 #
@@ -715,80 +713,80 @@ read_key() {
 # ------------------------------------------------------------
 #
 
-read_pin() {
+snapshot-menu.read_pin() {
 
-    local pin=""
-    local char=""
-    local i
+	local pin=""
+	local char=""
+	local i
 
-    PIN_RESULT=""
+	PIN_RESULT=""
 
-    while true; do
+	while true; do
 
-        char=""
+		char=""
 
-        IFS= read \
-            -r \
-            -s \
-            -n 1 \
-            -u 3 \
-            char || return 1
+		IFS= read \
+			-r \
+			-s \
+			-n 1 \
+			-u 3 \
+			char || return 1
 
-        case "$char" in
+		case "$char" in
 
-            "")
+		"")
 
-                PIN_RESULT="$pin"
-                return 0
-                ;;
+			PIN_RESULT="$pin"
+			return 0
+			;;
 
-            $'\e'|$'\004')
+		$'\e' | $'\004')
 
-                #
-                # Esc or Ctrl-D cancels PIN entry.
-                #
-                PIN_RESULT=""
-                return 1
-                ;;
+			#
+			# Esc or Ctrl-D cancels PIN entry.
+			#
+			PIN_RESULT=""
+			return 1
+			;;
 
-            $'\177'|$'\b')
+		$'\177' | $'\b')
 
-                #
-                # Backspace.
-                #
-                if [[ -n "$pin" ]]; then
+			#
+			# Backspace.
+			#
+			if [[ -n "$pin" ]]; then
 
-                    pin="${pin%?}"
-                    printf '\b \b' >&3
+				pin="${pin%?}"
+				printf '\b \b' >&3
 
-                fi
-                ;;
+			fi
+			;;
 
-            $'\025')
+		$'\025')
 
-                #
-                # Ctrl-U: clear the entire PIN.
-                #
-                for ((i = 0; i < ${#pin}; i++)); do
-                    printf '\b \b' >&3
-                done
+			#
+			# Ctrl-U: clear the entire PIN.
+			#
+			for ((i = 0; i < ${#pin}; i++)); do
+				printf '\b \b' >&3
+			done
 
-                pin=""
-                ;;
+			pin=""
+			;;
 
-            [0-9])
+		[0-9])
 
-                if (( ${#pin} < SNAPSHOT_PIN_MAX_LENGTH )); then
+			if ((${#pin} < SNAPSHOT_PIN_MAX_LENGTH)); then
 
-                    pin+="$char"
-                    printf '*' >&3
+				pin+="$char"
+				printf '*' >&3
 
-                fi
-                ;;
+			fi
+			;;
 
-        esac
+		esac
 
-    done
+	done
 }
 
 #
@@ -797,90 +795,90 @@ read_pin() {
 # ------------------------------------------------------------
 #
 
-check_snapshot_pin() {
+snapshot-menu.check_snapshot_pin() {
 
-    local attempt
-    local calculated_hash
+	local attempt
+	local calculated_hash
 
-    if [[ "$SNAPSHOT_PIN_ENABLED" != "yes" ]]; then
-        return 0
-    fi
+	if [[ "$SNAPSHOT_PIN_ENABLED" != "yes" ]]; then
+		return 0
+	fi
 
-    #
-    # Fail closed for snapshots, but keep the current-system
-    # entry available.
-    #
-    if [[ "$SNAPSHOT_PIN_READY" != "yes" ]]; then
+	#
+	# Fail closed for snapshots, but keep the current-system
+	# entry available.
+	#
+	if [[ "$SNAPSHOT_PIN_READY" != "yes" ]]; then
 
-        printf '\033[2J\033[H' >&3
-        printf '\033[1;31mSnapshot PIN configuration error.\033[0m\n\n' >&3
-        printf 'Snapshot boot is disabled.\n' >&3
-        printf 'Press any key to return to the menu.' >&3
+		printf '\033[2J\033[H' >&3
+		printf '\033[1;31mSnapshot PIN configuration error.\033[0m\n\n' >&3
+		printf 'Snapshot boot is disabled.\n' >&3
+		printf 'Press any key to return to the menu.' >&3
 
-        read_key || true
-        return 1
+		snapshot-menu.read_key || true
+		return 1
 
-    fi
+	fi
 
-    for ((attempt = 1; attempt <= SNAPSHOT_PIN_ATTEMPTS; attempt++)); do
+	for ((attempt = 1; attempt <= SNAPSHOT_PIN_ATTEMPTS; attempt++)); do
 
-        printf '\033[2J\033[H' >&3
+		printf '\033[2J\033[H' >&3
 
-        printf '\033[1;36m' >&3
-        printf 'Ubuntu Snapshot Boot\n' >&3
-        printf '\033[0m' >&3
+		printf '\033[1;36m' >&3
+		printf 'Ubuntu Snapshot Boot\n' >&3
+		printf '\033[0m' >&3
 
-        printf '\nSnapshot: %s\n' \
-            "${LABELS[$selected]}" >&3
+		printf '\nSnapshot: %s\n' \
+			"${LABELS[$selected]}" >&3
 
-        printf 'Enter PIN (%d/%d): ' \
-            "$attempt" \
-            "$SNAPSHOT_PIN_ATTEMPTS" >&3
+		printf 'Enter PIN (%d/%d): ' \
+			"$attempt" \
+			"$SNAPSHOT_PIN_ATTEMPTS" >&3
 
-        if ! read_pin; then
+		if ! snapshot-menu.read_pin; then
 
-            printf '\nPIN entry cancelled.\n' >&3
-            sleep 0.5
-            return 1
+			printf '\nPIN entry cancelled.\n' >&3
+			sleep 0.5
+			return 1
 
-        fi
+		fi
 
-        printf '\n' >&3
+		printf '\n' >&3
 
-        calculated_hash="$(
-            printf '%s' \
-                "${SNAPSHOT_PIN_SALT}${PIN_RESULT}" |
-                sha256sum
-        )"
+		calculated_hash="$(
+			printf '%s' \
+				"${SNAPSHOT_PIN_SALT}${PIN_RESULT}" |
+				sha256sum
+		)"
 
-        calculated_hash="${calculated_hash%% *}"
-        calculated_hash="${calculated_hash,,}"
+		calculated_hash="${calculated_hash%% *}"
+		calculated_hash="${calculated_hash,,}"
 
-        #
-        # Remove the plaintext PIN as soon as possible.
-        #
-        PIN_RESULT=""
+		#
+		# Remove the plaintext PIN as soon as possible.
+		#
+		PIN_RESULT=""
 
-        if [[ "$calculated_hash" == "$SNAPSHOT_PIN_HASH" ]]; then
+		if [[ "$calculated_hash" == "$SNAPSHOT_PIN_HASH" ]]; then
 
-            printf '\033[1;32mPIN accepted.\033[0m\n' >&3
-            sleep 0.4
-            return 0
+			printf '\033[1;32mPIN accepted.\033[0m\n' >&3
+			sleep 0.4
+			return 0
 
-        fi
+		fi
 
-        printf '\033[1;31mInvalid PIN.\033[0m\n' >&3
+		printf '\033[1;31mInvalid PIN.\033[0m\n' >&3
 
-        if (( attempt < SNAPSHOT_PIN_ATTEMPTS )); then
-            sleep 1
-        fi
+		if ((attempt < SNAPSHOT_PIN_ATTEMPTS)); then
+			sleep 1
+		fi
 
-    done
+	done
 
-    printf '\nSnapshot boot cancelled.\n' >&3
-    sleep 1.5
+	printf '\nSnapshot boot cancelled.\n' >&3
+	sleep 1.5
 
-    return 1
+	return 1
 }
 
 #
@@ -889,98 +887,108 @@ check_snapshot_pin() {
 # ------------------------------------------------------------
 #
 
-draw_menu
+snapshot-menu.draw_menu
 
 while true; do
 
-    if ! read_key; then
-        continue
-    fi
+	if ! snapshot-menu.read_key; then
+		continue
+	fi
 
-    case "$KEY_RESULT" in
+	case "$KEY_RESULT" in
 
-        UP)
+	UP)
 
-            if (( selected > 0 )); then
-                ((selected--))
-            else
-                selected=$((COUNT - 1))
-            fi
+		if ((selected > 0)); then
+			((selected--))
+		else
+			selected=$((COUNT - 1))
+		fi
 
-            draw_menu
-            ;;
+		snapshot-menu.draw_menu
+		;;
 
-        DOWN)
+	DOWN)
 
-            if (( selected < COUNT - 1 )); then
-                ((selected++))
-            else
-                selected=0
-            fi
+		if ((selected < COUNT - 1)); then
+			((selected++))
+		else
+			selected=0
+		fi
 
-            draw_menu
-            ;;
+		snapshot-menu.draw_menu
+		;;
 
-        LEFT)
+	LEFT)
 
-            current_page=$((selected / PAGE_SIZE))
+		current_page=$((selected / PAGE_SIZE))
 
-            if (( current_page > 0 )); then
+		if ((current_page > 0)); then
 
-                selected=$(((current_page - 1) * PAGE_SIZE))
+			selected=$(((current_page - 1) * PAGE_SIZE))
 
-            else
+		else
 
-                selected=$(((PAGE_COUNT - 1) * PAGE_SIZE))
+			selected=$(((PAGE_COUNT - 1) * PAGE_SIZE))
 
-            fi
+		fi
 
-            draw_menu
-            ;;
+		snapshot-menu.draw_menu
+		;;
 
-        RIGHT)
+	RIGHT)
 
-            current_page=$((selected / PAGE_SIZE))
+		current_page=$((selected / PAGE_SIZE))
 
-            if (( current_page < PAGE_COUNT - 1 )); then
+		if ((current_page < PAGE_COUNT - 1)); then
 
-                selected=$(((current_page + 1) * PAGE_SIZE))
+			selected=$(((current_page + 1) * PAGE_SIZE))
 
-            else
+		else
 
-                selected=0
+			selected=0
 
-            fi
+		fi
 
-            draw_menu
-            ;;
+		snapshot-menu.draw_menu
+		;;
 
-        REDRAW)
+	REDRAW)
 
-            draw_menu
-            ;;
+		snapshot-menu.draw_menu
+		;;
 
-        ENTER)
+	ENTER)
 
-            #
-            # Entry 0 is the current system and never requires
-            # snapshot PIN authentication.
-            #
-            if (( selected != 0 )); then
+		#
+		# Entry 0 is the current system and never requires
+		# snapshot PIN authentication.
+		#
+		if ((selected != 0)); then
 
-                load_entry "$selected"
+			snapshot-menu.load_entry "$selected"
 
-                if ! check_snapshot_pin; then
-                    draw_menu
-                    continue
-                fi
+			if [[ ${KERNEL_STATUS[selected]} != "Present" ]]; then
+				printf '\nCannot boot snapshot %s: kernel modules for %s are missing.\n' \
+					"${LABELS[$selected]}" \
+					"$CURRENT_KERNEL" >&3
+				printf 'Select another entry.\n' >&3
+				sleep 2
+				snapshot-menu.draw_menu
+				continue
+			fi
 
-            fi
+			if ! snapshot-menu.check_snapshot_pin; then
+				snapshot-menu.draw_menu
+				continue
+			fi
 
-            break
-            ;;
+		fi
 
-    esac
+		break
+		;;
+
+	esac
 
 done
 
@@ -990,7 +998,7 @@ done
 # ------------------------------------------------------------
 #
 
-load_entry "$selected"
+snapshot-menu.load_entry "$selected"
 
 SELECTED_SUBVOL="${SUBVOLS[$selected]}"
 SELECTED_LABEL="${LABELS[$selected]}"
@@ -999,12 +1007,12 @@ SELECTED_LABEL="${LABELS[$selected]}"
 # Save selection for snapshot-menu-hook.sh.
 #
 printf '%s\n' \
-    "$SELECTED_SUBVOL" \
-    >"${RESULT}.tmp"
+	"$SELECTED_SUBVOL" \
+	>"${RESULT}.tmp"
 
 mv \
-    "${RESULT}.tmp" \
-    "$RESULT"
+	"${RESULT}.tmp" \
+	"$RESULT"
 
 #
 # ------------------------------------------------------------
@@ -1014,15 +1022,15 @@ mv \
 
 if [[ "$SELECTED_SUBVOL" != "$ROOT_SUBVOL" ]]; then
 
-    mkdir -p "$CMDLINE_DIR"
+	mkdir -p "$CMDLINE_DIR"
 
-    printf '%s\n' \
-        'rd.overlay=1' \
-        >"$SNAPSHOT_CMDLINE"
+	printf '%s\n' \
+		'rd.overlay=1' \
+		>"$SNAPSHOT_CMDLINE"
 
 else
 
-    rm -f "$SNAPSHOT_CMDLINE"
+	rm -f "$SNAPSHOT_CMDLINE"
 
 fi
 
@@ -1038,17 +1046,17 @@ stty sane <&3
 terminal_configured=0
 
 printf '\nBooting: %s\n' \
-    "$SELECTED_LABEL" >&3
+	"$SELECTED_LABEL" >&3
 
 if [[ "$SELECTED_SUBVOL" != "$ROOT_SUBVOL" ]]; then
 
-    printf 'Root:    %s\n' \
-        "$SELECTED_SUBVOL" >&3
+	printf 'Root:    %s\n' \
+		"$SELECTED_SUBVOL" >&3
 
-    printf 'Kernel:  %s\n' \
-        "${KERNEL_STATUS[$selected]}" >&3
+	printf 'Kernel:  %s\n' \
+		"${KERNEL_STATUS[selected]}" >&3
 
-    printf 'Overlay: tmpfs\n' >&3
+	printf 'Overlay: tmpfs\n' >&3
 
 fi
 

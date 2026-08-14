@@ -150,6 +150,10 @@ rEFInd is signed using a key accepted by the firmware Secure Boot
 configuration.
 No shim component participates in this path.
 
+The directly installed `refind_x64.efi` and fallback `BOOTX64.EFI` copy are
+signed with the repository db key. Verification checks `refind_x64.efi`
+against the corresponding db certificate.
+
 ### 3.2 shim trust path
 When the project uses the existing firmware trust hierarchy:
 	UEFI
@@ -168,6 +172,18 @@ When the project uses the existing firmware trust hierarchy:
 
 shim provides the bridge between firmware-established trust and
 repository-managed signing keys.
+
+`refind-install --shim` places the repository-signed rEFInd payload behind
+shim as `grubx64.efi`. The concrete chain is:
+
+    firmware db -> shimx64.efi -> MOK db certificate -> grubx64.efi
+
+MokManager remains the vendor-signed enrollment component. Repository
+signature verification targets `grubx64.efi`, not `shimx64.efi`.
+
+fwupd follows the same selected path: direct mode disables shim for capsule
+loading, while shim/MOK mode retains shim in the fwupd chain.
+
 Both paths converge at rEFInd.
 The remainder of the runtime boot sequence should therefore not depend on
 which of these two paths was used.
@@ -228,7 +244,11 @@ The custom snapshot-menu module participates in this phase.
 ## 8. Snapshot trigger phase
 Snapshot selection must be requested before the normal LUKS password input
 phase can consume keyboard input.
-The snapshot key listener runs during the configured trigger window.
+The `systemd-cryptsetup@.service` drop-in starts
+`snapshot-key-listener-stop` as an `ExecStartPre` operation. That controller
+starts the C input listener for the configured trigger window (currently
+`ALT+B` for 5.0 seconds), stops it, restores the display/input state and then
+returns control to cryptsetup.
 Conceptually:
               listener
                  |
@@ -387,6 +407,16 @@ must result in explicitly defined behavior rather than leaving the
 initramfs in a partially configured state.
 If PIN protection is enabled, authorization occurs before accepting the
 snapshot for boot.
+
+Before PIN authorization, the menu verifies that the selected snapshot
+contains `/usr/lib/modules/$(uname -r)`. A missing module tree makes that
+entry non-bootable because the running kernel was already selected by the
+UKI and cannot be replaced at this stage. The current-system entry bypasses
+both this snapshot check and the snapshot PIN.
+
+The configured PIN is checked against a salted SHA-256 value included in the
+initramfs. It gates menu selection only and must not be described as disk
+encryption or protection against offline inspection.
 
 ### 11.4 Normal root path
 Without a selected snapshot, dracut proceeds using the configured normal

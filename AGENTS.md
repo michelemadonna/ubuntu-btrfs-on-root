@@ -232,6 +232,14 @@ Never weaken these properties unless explicitly requested.
 - Do not enroll or remove firmware keys during validation.
 - UKIs and EFI executables expected to participate in the trusted boot
   chain must remain correctly signed.
+- Secure Boot phase scripts must execute as isolated entry points; do not
+  source an entry point whose main routine performs enrollment or signing.
+- Direct firmware enrollment must preserve the order `db`, `KEK`, then `PK`;
+  `PK` is always last because it exits firmware Setup Mode.
+- Snapshot-package fallbacks must remain authenticated by an archive keyring.
+  Never use `trusted=yes` for shim, rEFInd or other boot-chain packages.
+- Verify the repository-signed loader that follows the selected trust anchor:
+  `refind_x64.efi` for direct trust and `grubx64.efi` for shim/MOK trust.
 
 ### TPM
 
@@ -247,6 +255,11 @@ Never weaken these properties unless explicitly requested.
 - Snapshot boot must not modify the selected snapshot.
 - Preserve the distinction between normal root boot and snapshot boot.
 - Do not change subvolume paths without checking every consumer.
+- Do not offer a snapshot for boot unless it contains modules for the kernel
+  already running from the UKI (`/usr/lib/modules/$(uname -r)`).
+- The current-system menu entry must remain available without snapshot PIN
+  authentication. The snapshot PIN is a menu access control stored in the
+  initramfs as a salted hash; it is not an encryption boundary.
 
 ### dracut / initramfs
 
@@ -260,6 +273,19 @@ Changes must preserve:
 - snapshot boot through the expected overlay mechanism
 - console/input availability
 - cleanup of temporary mounts and resources
+
+The snapshot trigger listener is started immediately before the systemd
+cryptsetup operation and must release the input device before cryptsetup
+prompts. Its request marker is consumed later by the pre-mount hook, after
+the unlocked Btrfs root is available.
+
+Dracut module entry points named `check`, `depends` and `install` are an
+explicit exception to the production-function namespace rule because dracut
+discovers those exact API names. Document any similar external API exception
+at the definition.
+
+Initramfs executables may use `#!/bin/bash` instead of `/usr/bin/env bash`
+when the module installs `/bin/bash` but does not include `/usr/bin/env`.
 
 ---
 

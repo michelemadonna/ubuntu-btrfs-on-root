@@ -392,6 +392,10 @@ Verify detection when:
 - multiple kernel versions exist;
 - expected files are missing.
 
+Artifact validation must also prove that a snapshot reported with missing
+modules cannot pass the ENTER/selection path. Merely rendering a `Missing`
+status is insufficient.
+
 ### Cancellation
 
 Test defined behavior for:
@@ -415,12 +419,20 @@ If snapshot PIN protection is enabled, test:
 
 Fixtures must use fake PINs only.
 
+The pure configuration renderer and PIN configuration renderer should be
+tested without writing `/etc/snapshot-menu.conf`. Tests must also ensure that
+logs and summaries never expose the configured plaintext PIN.
+
 ---
 
 ## 12. Snapshot-trigger tests
 
 The keyboard listener itself may require lower-level testing, but its
 surrounding state logic should be testable.
+
+Compile `snapshot-key-listener.c` with the installation flags (`-std=c17`,
+`-Wall`, `-Wextra`, `-Wpedantic`) as an artifact check when Linux input
+headers are available. This does not authorize opening real input devices.
 
 Verify:
 
@@ -639,6 +651,20 @@ shim/MOK path
 ```
 
 This validates project behavior without touching firmware.
+
+Current pure tests also validate:
+
+- `SetupMode=1` maps to the `direct` policy;
+- `SetupMode=0` maps to the `shim-mok` policy;
+- invalid SetupMode values select no policy;
+- direct rEFInd verification targets `refind_x64.efi`;
+- shim/MOK rEFInd verification targets `grubx64.efi`;
+- fwupd disables shim only for the direct trust path;
+- Secure Boot summaries never contain the configured MOK PIN.
+
+Artifact tests should reject Snapshot source definitions using `trusted=yes`
+and confirm that every phase entry point is guarded so sourcing it for pure
+tests cannot start signing or enrollment.
 
 ---
 

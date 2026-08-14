@@ -1,149 +1,142 @@
 #!/usr/bin/env bash
+# Configuration values are exported for child phase scripts.
+# shellcheck disable=SC2154
 
 set -Eeuo pipefail
+umask 077
 
-script="${BASH_SOURCE[0]}"
-scriptname="$(basename "$script")"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
 
-
-source $repository_root/setup.conf
-
-[[ $EUID -eq 0 ]] || {
-    echo "Run $scriptname as root." >&2
-    exit 1
-}
+# Runtime-derived paths allow direct execution and safe sourcing by tests.
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/setup.conf"
 
 export ESP="${ESP:-/boot/efi}"
-
 export SBCTL_KEYROOT="${SBCTL_KEYROOT:-/var/lib/sbctl/keys}"
 export DB_KEY="${DB_KEY:-$SBCTL_KEYROOT/db/db.key}"
 export DB_CERT="${DB_CERT:-$SBCTL_KEYROOT/db/db.pem}"
 export DB_CERT_DER="${DB_CERT_DER:-$SBCTL_KEYROOT/db/db.cer}"
-
 export SHIM_DIR="${SHIM_DIR:-/usr/local/lib/secureboot/shim}"
-
 export DEBIAN_SNAPSHOT="${DEBIAN_SNAPSHOT:-20260812}"
 export DEBIAN_SUITE="${DEBIAN_SUITE:-unstable}"
 
-log()
-{
-    printf '==> %s\n' "$*"
+secure-boot-setup.read_efi_uint8() {
+	local name=$1
+	local file
+
+	file="$(
+		find /sys/firmware/efi/efivars \
+			-maxdepth 1 \
+			-name "${name}-*" \
+			-print \
+			-quit 2>/dev/null
+	)"
+	[[ -n $file ]] || return 1
+	od -An -j4 -N1 -t u1 "$file" | tr -d '[:space:]'
 }
 
-die()
-{
-    printf 'ERROR: %s\n' "$*" >&2
-    exit 1
-}
+secure-boot-setup.detect_firmware_state() {
+	local state_file=/etc/securebootmode.conf
 
-read_efi_uint8()
-{
-    local name="$1"
-    local file
-
-    file="$(
-        find /sys/firmware/efi/efivars \
-            -maxdepth 1 \
-            -name "${name}-*" \
-            -print \
-            -quit 2>/dev/null
-    )"
-
-    [[ -n "$file" ]] || return 1
-
-    od -An -j4 -N1 -t u1 "$file" |
-        tr -d '[:space:]'
-}
-
-install_dependencies()
-{
-    export DEBIAN_FRONTEND=noninteractive
-
-    apt-get update
-
-    apt-get install -y \
-        ca-certificates \
-        findutils \
-        coreutils
-}
-
-main()
-{
-    [[ $EUID -eq 0 ]] ||
-        die "Run this script as root."
-
-    install_dependencies
-
-    [[ -d /sys/firmware/efi ]] ||
-        die "System was not booted in UEFI mode."
-
-    case "$(uname -m)" in
-        x86_64|amd64)
-            ;;
-        *)
-            die "Only x86-64 UEFI is currently supported."
-            ;;
-    esac
-
-	if [[ -f /etc/securebootmode.conf ]]; then
-		export SETUP_MODE="$(cat /etc/securebootmode.conf)"
-		
+	if [[ -f $state_file ]]; then
+		SETUP_MODE="$(<"$state_file")"
+		common.log_info "Read cached UEFI SetupMode=$SETUP_MODE from $state_file"
 	else
-		export SETUP_MODE="$(
-			read_efi_uint8 SetupMode
-		)" || die "Cannot read UEFI SetupMode."
-		cat > /etc/securebootmode.conf <<- EOF
-		$SETUP_MODE
-		EOF
+		SETUP_MODE="$(secure-boot-setup.read_efi_uint8 SetupMode)" ||
+			common.die "Cannot read UEFI SetupMode."
+		common.log_info "Persist detected UEFI SetupMode=$SETUP_MODE to $state_file"
+		printf '%s\n' "$SETUP_MODE" >"$state_file"
 	fi
 
-    export SECURE_BOOT="$(
-        read_efi_uint8 SecureBoot 2>/dev/null || echo 0
-    )"
-
-	
-
-    log "Setup Mode  : $SETUP_MODE"
-    log "Secure Boot : $SECURE_BOOT"
-
-    #
-    # Always:
-    #
-    # - install sbctl
-    # - create PK/KEK/db
-    # - firmware enrollment only when SetupMode=1
-    #
-    . "$repository_root/secure-boot/scripts/sbctl-setup"
-
-    #
-    # Existing firmware trust:
-    #
-    # SetupMode=0 -> Shim + MOK
-    #
-    # SecureBoot may currently be either enabled or disabled.
-    #
-    if [[ "$SETUP_MODE" == "0" ]]; then
-      .  "$repository_root/secure-boot/scripts/shim-setup"
-    fi
-
-    #
-    # Direct rEFInd in Setup Mode.
-    # rEFInd behind Shim otherwise.
-    #
-    . "$repository_root/secure-boot/scripts/refind-setup"
-
-	#
-	# fwupd setup
-	#
-	. "$repository_root/secure-boot/scripts/fwupd-setup"
-
-    echo
-    log "Secure Boot setup completed."
-
-    if [[ "$SETUP_MODE" == "0" ]]; then
-        echo
-        echo "Complete the MOK enrollment at the next reboot if requested."
-    fi
+	SECURE_BOOT="$(secure-boot-setup.read_efi_uint8 SecureBoot 2>/dev/null || printf '0\n')"
+	case $SETUP_MODE in
+	0 | 1) ;;
+	*) common.die "Invalid SetupMode value: $SETUP_MODE" ;;
+	esac
+	case $SECURE_BOOT in
+	0 | 1) ;;
+	*) common.die "Invalid SecureBoot value: $SECURE_BOOT" ;;
+	esac
+	export SETUP_MODE SECURE_BOOT
 }
 
-main "$@"
+secure-boot-setup.trust_path() {
+	local setup_mode=$1
+
+	case $setup_mode in
+	1) printf 'direct\n' ;;
+	0) printf 'shim-mok\n' ;;
+	*) return 1 ;;
+	esac
+}
+
+secure-boot-setup.run_phase() {
+	local phase_name=$1
+	local phase_script=$2
+
+	common.log_section "$phase_name"
+	common.log_info "Execute $phase_script"
+	"$phase_script"
+	common.log_success "$phase_name completed"
+}
+
+secure-boot-setup.print_summary() {
+	local trust_path
+
+	trust_path="$(secure-boot-setup.trust_path "$SETUP_MODE")"
+	common.log_section "Secure Boot setup summary"
+	common.log_summary_item "Status" "completed successfully"
+	common.log_summary_item "SetupMode" "$SETUP_MODE"
+	common.log_summary_item "SecureBoot" "$SECURE_BOOT"
+	common.log_summary_item "Trust path" "$trust_path"
+	common.log_summary_item "Signing key root" "$SBCTL_KEYROOT"
+	common.log_summary_item "ESP" "$ESP"
+	common.log_summary_item "Shim directory" "$SHIM_DIR"
+	common.log_summary_item "rEFInd" "$ESP/EFI/refind"
+	common.log_success "Secure Boot configuration completed"
+
+	if [[ $SETUP_MODE == 0 ]]; then
+		common.log_warn "Complete the pending MOK enrollment at the next reboot if requested"
+	fi
+}
+
+secure-boot-setup.run() {
+	common.require_root
+	common.require_commands apt-get find od tr uname
+	[[ -d /sys/firmware/efi ]] ||
+		common.die "System was not booted in UEFI mode."
+	case $(uname -m) in
+	x86_64 | amd64) ;;
+	*) common.die "Only x86-64 UEFI is currently supported." ;;
+	esac
+
+	common.log_section "Secure Boot preflight"
+	common.log_info "Install base packages required for firmware-state discovery"
+	export DEBIAN_FRONTEND=noninteractive
+	apt-get update
+	apt-get install -y ca-certificates findutils coreutils
+	secure-boot-setup.detect_firmware_state
+	common.log_info "Detected SetupMode=$SETUP_MODE and SecureBoot=$SECURE_BOOT"
+	common.log_info "Selected trust path: $(secure-boot-setup.trust_path "$SETUP_MODE")"
+
+	secure-boot-setup.run_phase \
+		"Secure Boot key management" "$script_dir/sbctl-setup"
+	if [[ $SETUP_MODE == 0 ]]; then
+		secure-boot-setup.run_phase \
+			"Shim and MOK preparation" "$script_dir/shim-setup"
+	else
+		common.log_info "Skip Shim/MOK preparation because SetupMode=1 selects direct firmware trust"
+	fi
+	secure-boot-setup.run_phase \
+		"rEFInd installation and signing" "$script_dir/refind-setup"
+	secure-boot-setup.run_phase \
+		"fwupd configuration and signing" "$script_dir/fwupd-setup"
+	secure-boot-setup.print_summary
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	secure-boot-setup.run
+fi

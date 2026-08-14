@@ -302,6 +302,30 @@ Private signing keys must never be committed to the repository.
 Tests and fixtures must use obviously fake material where key-like content is
 required.
 
+### 7.5 Enrollment and loader identity
+
+When direct firmware enrollment is authorized, the hierarchy must be written
+in `db`, `KEK`, `PK` order. `PK` must be enrolled last because that transition
+exits Setup Mode. Validation must never exercise this sequence against real
+EFI variables.
+
+Signature verification must target the repository-signed executable in the
+selected chain:
+
+- direct trust verifies `refind_x64.efi` with the repository db certificate;
+- shim/MOK trust verifies the rEFInd payload installed as `grubx64.efi` with
+  the repository db certificate;
+- vendor-signed shim and MokManager are verified as signed PE artifacts, not
+  incorrectly assumed to carry the repository db signature.
+
+Boot-chain packages obtained from a pinned Snapshot repository must retain
+archive-keyring authentication. Missing archive keys are a fatal error;
+`trusted=yes` is forbidden.
+
+The persisted `/etc/securebootmode.conf` value represents the trust path
+selected at installation time. It must not be treated as proof that the live
+firmware is still in Setup Mode after `PK` enrollment.
+
 ---
 
 ## 8. UKI invariants
@@ -453,6 +477,14 @@ The menu must have explicitly defined behavior for:
 - unavailable snapshot kernel;
 - timeout;
 - PIN failure when PIN protection is enabled.
+
+A snapshot whose `/usr/lib/modules` tree does not contain the kernel already
+running from the UKI must never be accepted for boot. Reporting it as
+unavailable in the menu is not sufficient if selection can still continue.
+
+The current-system entry must remain selectable without a snapshot PIN. The
+salted PIN hash stored in the initramfs is a menu access control, not a
+cryptographic boundary and not a substitute for LUKS authentication.
 
 The menu must not leave the terminal/input device in an unusable state when
 exiting.
