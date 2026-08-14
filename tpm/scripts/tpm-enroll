@@ -4,6 +4,10 @@ set -Eeuo pipefail
 umask 077
 
 TPM_CONFIG="${TPM_CONFIG:-/etc/tpm.conf}"
+LOG_SECTION_ACTIVE=false
+LOG_SECTION_TITLE=""
+LOG_SECTION_COLOR=35
+LOG_SECTION_INDEX=0
 
 log.info() {
 	printf '\033[1;36mℹ [INFO]\033[0m %s\n' "$*"
@@ -18,7 +22,20 @@ log.success() {
 }
 
 log.section() {
-	printf '\n\033[1;35m◆ ========== %s ==========\033[0m\n' "$*"
+	local -a colors=(35 34 36 33 32)
+	[[ $LOG_SECTION_ACTIVE == false ]] || log.section_end
+	LOG_SECTION_COLOR=${colors[LOG_SECTION_INDEX % ${#colors[@]}]}
+	LOG_SECTION_INDEX=$((LOG_SECTION_INDEX + 1))
+	LOG_SECTION_TITLE=$*
+	LOG_SECTION_ACTIVE=true
+	printf '\n\033[1;%sm╔══▶ BEGIN: %s\033[0m\n' "$LOG_SECTION_COLOR" "$LOG_SECTION_TITLE"
+}
+
+log.section_end() {
+	[[ $LOG_SECTION_ACTIVE == true ]] || return 0
+	printf '\033[1;%sm╚══■ END:   %s\033[0m\n' "$LOG_SECTION_COLOR" "$LOG_SECTION_TITLE"
+	LOG_SECTION_ACTIVE=false
+	LOG_SECTION_TITLE=""
 }
 
 log.die() {
@@ -27,6 +44,7 @@ log.die() {
 	local command_error=${2:-}
 	local status=${3:-$previous_status}
 	[[ $status =~ ^[0-9]+$ ]] || status=1
+	log.section_end
 	printf '\033[1;31m✖ [ERROR]\033[0m %s\n' "$message" >&2
 	((status == 0)) || printf '\033[1;31m✖ [ERROR]\033[0m Command exit status: %s\n' "$status" >&2
 	[[ -z $command_error ]] || printf '\033[1;31m✖ [ERROR]\033[0m Command error: %s\n' "$command_error" >&2
@@ -124,6 +142,7 @@ tpm-enroll.run() {
 	systemd-cryptenroll "${enroll_arguments[@]}"
 	cryptsetup luksDump "$LUKS_DEVICE" | grep -qi systemd-tpm2 || log.die "No systemd-tpm2 token found after enrollment."
 	log.success "TPM enrollment completed and verified"
+	log.section_end
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

@@ -76,6 +76,7 @@ btrfs-root-setup.validate_result() {
 	grep -Fq "subvol=$root_sub_vol/@swap" "$mp/etc/fstab" || log.die "fstab does not contain the configured swap subvolume."
 	grep -Fq '/swap/swapfile' "$mp/etc/fstab" || log.die "fstab does not contain the configured swapfile."
 	log.success "Validated LUKS container, mapper, root mount, swapfile, crypttab and fstab"
+	log.section_end
 }
 
 btrfs-root-setup.run() {

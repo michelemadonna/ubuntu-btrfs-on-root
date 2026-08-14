@@ -151,6 +151,7 @@ install-uki.validate_result() {
 	done < <(find "$INSTALL_UKI_ESP/EFI/Linux" -maxdepth 1 -type f -name "$suite-*.efi" -print0)
 	((validated > 0)) || log.die "No generated UKI was found for entry token $suite."
 	log.success "Validated UKI configuration, installed hooks and signatures for $validated artifact(s)"
+	log.section_end
 }
 
 install-uki.run() {

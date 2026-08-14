@@ -62,6 +62,9 @@ non-logging helpers. Standalone installed commands embed compatible `log.*`
 primitives so this separation does not create a runtime repository dependency.
 Colored icons distinguish repository logs from raw command output; summary
 labels are styled while their values remain plain text.
+Macro-section banners rotate colors and use paired `BEGIN`/`END` markers. A new
+section automatically closes the previous one, while final post-summary
+validation sections are closed explicitly.
 
 ## Rescue subsystem
 

@@ -96,6 +96,7 @@ setup.install_rescue_system() {
 		SOURCE_DIR=/cdrom \
 		TARGET_DEV="/dev/$rescue_dev" \
 		"$repository_root/rescue/script/install-rescue-live"
+	log.section_end
 }
 
 setup.prepare_chroot() {

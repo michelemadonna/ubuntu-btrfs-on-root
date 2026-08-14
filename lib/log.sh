@@ -3,6 +3,11 @@
 # Shared logging primitives. This library deliberately does not change shell
 # options, traps or umask because those settings belong to the caller.
 
+LOG_SECTION_ACTIVE=false
+LOG_SECTION_TITLE=""
+LOG_SECTION_COLOR=35
+LOG_SECTION_INDEX=0
+
 log.info() {
 	printf '\033[1;36mℹ [INFO]\033[0m %s\n' "$*"
 }
@@ -20,7 +25,21 @@ log.success() {
 }
 
 log.section() {
-	printf '\n\033[1;35m◆ ========== %s ==========\033[0m\n' "$*"
+	local -a colors=(35 34 36 33 32)
+
+	[[ $LOG_SECTION_ACTIVE == false ]] || log.section_end
+	LOG_SECTION_COLOR=${colors[LOG_SECTION_INDEX % ${#colors[@]}]}
+	LOG_SECTION_INDEX=$((LOG_SECTION_INDEX + 1))
+	LOG_SECTION_TITLE=$*
+	LOG_SECTION_ACTIVE=true
+	printf '\n\033[1;%sm╔══▶ BEGIN: %s\033[0m\n' "$LOG_SECTION_COLOR" "$LOG_SECTION_TITLE"
+}
+
+log.section_end() {
+	[[ $LOG_SECTION_ACTIVE == true ]] || return 0
+	printf '\033[1;%sm╚══■ END:   %s\033[0m\n' "$LOG_SECTION_COLOR" "$LOG_SECTION_TITLE"
+	LOG_SECTION_ACTIVE=false
+	LOG_SECTION_TITLE=""
 }
 
 log.summary_item() {
@@ -37,6 +56,7 @@ log.die() {
 	local status=${3:-$previous_status}
 
 	[[ $status =~ ^[0-9]+$ ]] || status=1
+	log.section_end
 
 	log.error "$message"
 	if ((status != 0)); then

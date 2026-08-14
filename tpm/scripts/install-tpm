@@ -87,6 +87,7 @@ install-tpm.validate_result() {
 	option="$(install-tpm.build_kernel_option "$TPM_DEVICE")"
 	grep -Fq "$option" "$INSTALL_TPM_CMDLINE" || log.die "Kernel command line does not contain the required TPM option."
 	log.success "Validated TPM configuration, PCR key, standalone commands and kernel option"
+	log.section_end
 }
 
 install-tpm.run() {

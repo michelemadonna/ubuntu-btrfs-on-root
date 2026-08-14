@@ -149,8 +149,13 @@ output blindly because commands may include credentials or private material.
 Do not add logging functions back to `common.sh`. Standalone installed commands
 must provide compatible local `log.*` primitives instead of sourcing `lib/`.
 Keep the established color/icon semantics and leave summary values unstyled so
-they remain easy to copy: `ℹ` info, `⚠` warning, `✖` error, `✔` success, `◆`
-section and `•` summary item.
+they remain easy to copy: `ℹ` info, `⚠` warning, `✖` error, `✔` success and
+`•` summary item. Macro sections use `╔══▶ BEGIN` and `╚══■ END` banners.
+
+Macro sections use `log.section`, which closes the previous section, rotates
+the banner color and prints an explicit `BEGIN` marker. End the last section of
+a flow with `log.section_end`; fatal exits close it automatically. Do not print
+ad-hoc section banners that obscure these BEGIN/END boundaries.
 
 Do not move domain logic into `lib/`. Btrfs layout decisions belong under
 `btrfs-root/`; signing policy under `secure-boot/`; snapshot selection under

@@ -119,6 +119,7 @@ secure-boot-setup.validate_result() {
 	common.require_readable_file "$loader" "Repository-signed rEFInd loader"
 	sbverify --cert "$SBCTL_KEYROOT/db/db.pem" "$loader" >/dev/null || log.die "rEFInd post-summary signature validation failed: $loader"
 	log.success "Validated Secure Boot keys, selected trust-path loaders and rEFInd signature"
+	log.section_end
 }
 
 secure-boot-setup.run() {

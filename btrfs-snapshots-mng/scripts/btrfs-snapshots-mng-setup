@@ -151,6 +151,7 @@ btrfs-snapshots-mng-setup.validate_result() {
 		grep -Fqx "ROOT_SUBVOL=\"$root_sub_vol/@\"" "$menu_config" || log.die "Snapshot-menu root subvolume is incorrect."
 	fi
 	log.success "Validated Snapper profiles and configured snapshot-menu artifacts"
+	log.section_end
 }
 
 btrfs-snapshots-mng-setup.run() {

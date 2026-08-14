@@ -163,6 +163,7 @@ install-rescue-live.run() {
 	grep -Eqs '^[[:space:]]*linux(efi)?[[:space:]].*/casper/vmlinuz.*[[:space:]]persistent([[:space:]]|$)' \
 		"${grub_paths[@]}" || log.die "Rescue GRUB persistence validation failed."
 	log.success "Validated rescue FAT filesystem, label, ext4 persistence and GRUB configuration"
+	log.section_end
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

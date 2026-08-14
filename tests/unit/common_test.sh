@@ -43,6 +43,20 @@ test_log_error() {
 	assert_equal $'\033[1;31m✖ [ERROR]\033[0m installation failed' "$output"
 }
 
+test_log_section_boundaries_and_color_rotation() {
+	local output
+
+	output="$(
+		log.section "First phase"
+		log.section "Second phase"
+		log.section_end
+	)"
+	[[ $output == *$'\033[1;35m╔══▶ BEGIN: First phase\033[0m'* ]] || fail "first section begin marker is missing"
+	[[ $output == *$'\033[1;35m╚══■ END:   First phase\033[0m'* ]] || fail "automatic section end marker is missing"
+	[[ $output == *$'\033[1;34m╔══▶ BEGIN: Second phase\033[0m'* ]] || fail "section color did not rotate"
+	[[ $output == *$'\033[1;34m╚══■ END:   Second phase\033[0m'* ]] || fail "explicit section end marker is missing"
+}
+
 test_require_readable_file() {
 	common.require_readable_file "$repository_root/setup.conf" "Configuration file"
 }
@@ -82,6 +96,7 @@ test_require_commands() {
 test_log_info
 test_log_summary_item
 test_log_error
+test_log_section_boundaries_and_color_rotation
 test_log_die_preserves_status_and_detail
 test_require_readable_file
 test_require_nonempty

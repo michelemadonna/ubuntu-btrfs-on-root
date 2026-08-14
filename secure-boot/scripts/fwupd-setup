@@ -307,6 +307,7 @@ fwupd-setup.print_summary() {
 	sbverify --cert "$DB_CERT" "$FWUPD_EFI" ||
 		log.die "fwupd EFI signature verification failed: $FWUPD_EFI"
 	log.success "fwupd EFI signature verification passed"
+	log.section_end
 }
 
 # ============================================================
