@@ -56,6 +56,7 @@ rescue-test.partition_backed_persistence_contract() {
 	local installer="$repository_root/rescue/script/install-rescue-live"
 
 	rg -q 'resizepart' "$installer"
+	rg -q -- '---pretend-input-tty' "$installer"
 	rg -q 'mkpart writable ext4' "$installer"
 	rg -q 'mkfs\.ext4 -F -L writable "\$writable_dev"' "$installer"
 	if rg -q 'of=.*writable|mkfs\.ext4.*rescue_mount_dir/writable' "$installer"; then
