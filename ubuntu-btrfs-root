@@ -22,7 +22,7 @@ scriptname="$(basename "$script")"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 script_dir_name="$(basename "$script_dir")"
 
-
+root_uuid="$(blkid --output export /dev/"$root_dev" | grep ^UUID=)"
 
 # shellcheck source=./setup.conf
 . "$script_dir/setup.conf"
@@ -37,65 +37,7 @@ preparation() {
 	mkdir $mp
 }
 
-create_subvols() {
-	
-	echo -e "\e[32mINFO:\e[0mCreate subvolumes"
 
-	mount /dev/$root_dev $mp
-
-	cd $mp
-	btrfs subvolume create $root_sub_vol
-	btrfs subvolume snapshot . $root_sub_vol/@
-	rm -Rf $root_sub_vol/@/@ubuntu
-	
-	btrfs subvolume create $root_sub_vol/@home
-	mv $root_sub_vol/@/home/* $root_sub_vol/@home
-	btrfs subvolume create $root_sub_vol/@cache
-	mv $root_sub_vol/@/var/cache/* $root_sub_vol/@cache
-	
-	btrfs subvolume create $root_sub_vol/@log
-	mv $root_sub_vol/@/var/log/* $root_sub_vol/@log
-	btrfs subvolume create $root_sub_vol/@tmp
-	btrfs subvolume create $root_sub_vol/@libvirt
-	btrfs subvolume create $root_sub_vol/@docker
-
-	btrfs subvolume create $root_sub_vol/@swap
-	btrfs filesystem mkswapfile --size $swap_size $root_sub_vol/@swap/swapfile
-	find . -maxdepth 1 ! -name "@*" ! -name . -exec rm -Rf {} \;
-	
-	cd /
-	umount $mp
-
-	echo -e "\e[32mINFO:\e[0mMount @ instead of /"
-	mount /dev/$root_dev -o subvol=$root_sub_vol/@ $mp
-	
-}
-
-encrypt_and_enlarge() {
-	echo -e "\e[32mINFO:\e[0mEncrypt $root_dev..."
-	
-	btrfs filesystem resize -"${keyslot_size}" $mp
-	
-	cd /
-	umount $mp
-	
-	disk="$(lsblk --noheadings --output pkname /dev/$root_dev)"
-	partition_number="$(lsblk --noheadings --output partn /dev/$root_dev | tr -d "[:space:]")"
-	
-	echo 'You may ignore “Warning: keyslot operation could fail …”.'
-	echo 'See <https://gitlab.com/cryptsetup/cryptsetup/-/issues/896>.'
-	#cryptsetup reencrypt --encrypt --type luks2 --pbkdf pbkdf2 --pbkdf-force-iterations 500000 --reduce-device-size "$keyslot_size" /dev/$root_dev
-	echo "${PASSPHRASE}" | cryptsetup reencrypt --encrypt --type luks2 --pbkdf argon2id --iter-time 2000 --reduce-device-size "$keyslot_size" /dev/$root_dev
-	#--pbkdf argon2id --iter-time 2000 
-	if [[ $enlarge = "yes" ]]; then
-		echo "Enlarge $root_dev"
-		parted --script /dev/"$disk" resizepart "$partition_number" "100%"
-	fi
-	
-	echo "${PASSPHRASE}" | cryptsetup open /dev/$root_dev root
-	mount /dev/mapper/root -o subvol=$root_sub_vol/@ $mp
-	btrfs filesystem resize max $mp
-}
 
 prepare_chroot() {
 	echo -e "\e[32mINFO:\e[0mPrepare $mp for chroot"  
@@ -147,48 +89,6 @@ chroot_and_mkinitramfs() {
 	unshare --mount --fork chroot $mp /root/"$script_dir_name/$scriptname" //inner
 }
 
-#unmount_everything() {
-#	echo -e "\e[32mINFO:\e[0mUnmounting..."    
-#	cd /
-#	findmnt -R $mp  
-#	for dir in sys/firmware/efi/efivars dev/pts proc sys dev run boot/efi; do
-#		umount $mp/$dir
-#	done
-#	umount "$mp"    
-#
-#	sleep 2
-#	cryptsetup close root
-#}
-
-
-setup_fstab_crpttab(){
-	echo -e "\e[32mINFO:\e[0mPatch /etc/fstab"
-	
-	
-	sed -i \
-	"s|^.* / btrfs defaults 0 1\$|/dev/mapper/root / btrfs ${btrfs_options},subvol=${root_sub_vol}/@ 0 1|" \
-	/etc/fstab  
-	
-	
-	cat >> /etc/fstab <<- EOF
-		/dev/mapper/root /home              btrfs $btrfs_options,subvol=$root_sub_vol/@home 0 2
-		/dev/mapper/root /var/log           btrfs $btrfs_options,subvol=$root_sub_vol/@log 0 0 
-		/dev/mapper/root /var/cache         btrfs $btrfs_options,subvol=$root_sub_vol/@cache 0 0
-		/dev/mapper/root /tmp               btrfs $btrfs_options,subvol=$root_sub_vol/@tmp 0 0
-		/dev/mapper/root /var/lib/libvirt/  btrfs defaults,ssd,discard=async,noatime,space_cache=v2,subvol=$root_sub_vol/@libvirt 0 0
-		/dev/mapper/root /var/lib/docker	btrfs	defaults,ssd,discard=async,noatime,compress=zstd:1,subvol=$root_sub_vol/@docker  0 0
-		/dev/mapper/root /swap              btrfs defaults,noatime,subvol=$root_sub_vol/@swap 0 0
-		/swap/swapfile   none               swap  defaults,pri=10 0 0
-	EOF
-	
-	echo -e "\e[32mINFO:\e[0mPatch /etc/crypttab"
-	echo "root $root_uuid none luks,discard" > /etc/crypttab 
-
-	
-
-	apt-get install -y cryptsetup-initramfs
-
-}
 
 suite_selction(){
 	
@@ -289,9 +189,7 @@ if [[ "$1" = "//inner" ]]; then
 	if [[ $pre_download = "yes" ]]; then
 		pre_download_all
 	fi
-
-	setup_fstab_crpttab
-	
+	. ./btrfs-root/scripts/btrfs-root-setup
 	. ./secure-boot/scripts/secure-boot-setup
 	. ./btrfs-snapshots-mng/scripts/btrfs-snapshots-mng-setup
 	. ./uki/scripts/install-uki
@@ -425,8 +323,7 @@ fi
 # ------------------------------
 
 preparation
-create_subvols
-encrypt_and_enlarge
+. /btrfs-root/scripts/btrfs-root-setup
 prepare_chroot
 chroot_and_mkinitramfs
 unmount_everything

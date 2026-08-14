@@ -47,7 +47,7 @@ install -d -m 0755 /usr/local/sbin
 install \
     -m 0644 \
     "$repository_root/tpm/config/tpm.conf" \
-    /etc/uki/tpm.conf
+    /etc/tpm.conf
 
 sed -i \
     "s|^LUKS_DEVICE=.*|LUKS_DEVICE=\"${luks_device}\"|" \
@@ -69,11 +69,11 @@ install \
     /usr/local/sbin/tpm-status
 
 echo 'add_dracutmodules+=" tpm2-tss crypt "' > /etc/dracut.conf.d/99_tpm2.conf
-if grep -qE 'rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes' /etc/kernel/cmdline; then
+if grep -qE 'rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes,tpm2-pin=yes' /etc/kernel/cmdline; then
     echo "The kernel command line already contains the TPM2 options."
 else
     echo "Appending TPM2 options to the kernel command line."
-    echo "rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes" >> /etc/kernel/cmdline
+    echo "rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes,tpm2-pin=yes" >> /etc/kernel/cmdline
 fi
 
 echo

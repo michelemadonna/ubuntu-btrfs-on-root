@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+[[ $EUID -eq 0 ]] || {
+    echo "Run btrfs-subvol-setup as root." >&2
+    exit 1
+}
+
+repository_root="$(
+    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
+        pwd
+)"
+
+source $repository_root/setup.conf
+
+echo -e "\e[32mINFO:\e[0mCreate subvolumes"
+
+mount /dev/$root_dev $mp
+cd $mp
+btrfs subvolume create $root_sub_vol
+btrfs subvolume snapshot . $root_sub_vol/@
+rm -Rf $root_sub_vol/@/@ubuntu
+
+btrfs subvolume create $root_sub_vol/@home
+mv $root_sub_vol/@/home/* $root_sub_vol/@home
+btrfs subvolume create $root_sub_vol/@cache
+mv $root_sub_vol/@/var/cache/* $root_sub_vol/@cache
+
+btrfs subvolume create $root_sub_vol/@log
+mv $root_sub_vol/@/var/log/* $root_sub_vol/@log
+btrfs subvolume create $root_sub_vol/@tmp
+btrfs subvolume create $root_sub_vol/@libvirt
+btrfs subvolume create $root_sub_vol/@docker
+btrfs subvolume create $root_sub_vol/@swap
+btrfs filesystem mkswapfile --size $swap_size $root_sub_vol/@swap/swapfile
+find . -maxdepth 1 ! -name "@*" ! -name . -exec rm -Rf {} \;
+
+cd /
+umount $mp
+echo -e "\e[32mINFO:\e[0mMount @ instead of /"
+mount /dev/$root_dev -o subvol=$root_sub_vol/@ $mp

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+[[ $EUID -eq 0 ]] || {
+    echo "Run btrfs-root-setup as root." >&2
+    exit 1
+}
+
+repository_root="$(
+    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
+        pwd
+)"
+
+source $repository_root/setup.conf
+
+. ./btrfs-subvol-setup
+. ./luks-setup
+. ./fstab-setup

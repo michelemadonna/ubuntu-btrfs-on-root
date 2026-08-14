@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+[[ $EUID -eq 0 ]] || {
+    echo "Run luks-setup as root." >&2
+    exit 1
+}
+
+repository_root="$(
+    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
+        pwd
+)"
+
+source $repository_root/setup.conf
+
+echo -e "\e[32mINFO:\e[0mEncrypt $root_dev..."
+
+btrfs filesystem resize -"${keyslot_size}" $mp
+
+cd /
+umount $mp
+
+disk="$(lsblk --noheadings --output pkname /dev/$root_dev)"
+partition_number="$(lsblk --noheadings --output partn /dev/$root_dev | tr -d "[:space:]")"
+
+echo 'You may ignore “Warning: keyslot operation could fail …”.'
+echo 'See <https://gitlab.com/cryptsetup/cryptsetup/-/issues/896>.'
+#cryptsetup reencrypt --encrypt --type luks2 --pbkdf pbkdf2 --pbkdf-force-iterations 500000 --reduce-device-size "$keyslot_size" /dev/$root_dev
+echo "${PASSPHRASE}" | cryptsetup reencrypt --encrypt --type luks2 --pbkdf argon2id --iter-time 2000 --reduce-device-size "$keyslot_size" /dev/$root_dev
+#--pbkdf argon2id --iter-time 2000 
+if [[ $enlarge = "yes" ]]; then
+	echo "Enlarge $root_dev"
+	parted --script /dev/"$disk" resizepart "$partition_number" "100%"
+fi
+
+echo "${PASSPHRASE}" | cryptsetup open /dev/$root_dev root
+mount /dev/mapper/root -o subvol=$root_sub_vol/@ $mp
+btrfs filesystem resize max $mp
+
+echo -e "\e[32mINFO:\e[0mPatch /etc/crypttab"
+
+echo "root $root_uuid none luks,discard" > /etc/crypttab 
+apt-get install -y cryptsetup-initramfs

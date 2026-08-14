@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-source /etc/uki/tpm.conf
+source /etc/tpm.conf
 
 if [[ "${1:-}" != "--wipe-all-tpm2" ]]; then
     cat >&2 <<'EOF'

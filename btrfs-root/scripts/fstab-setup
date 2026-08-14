@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+[[ $EUID -eq 0 ]] || {
+    echo "Run fstab-setup as root." >&2
+    exit 1
+}
+
+repository_root="$(
+    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
+        pwd
+)"
+
+source $repository_root/setup.conf
+
+
+echo -e "\e[32mINFO:\e[0mPatch /etc/fstab"
+
+
+sed -i \
+"s|^.* / btrfs defaults 0 1\$|/dev/mapper/root / btrfs ${btrfs_options},subvol=${root_sub_vol}/@ 0 1|" \
+/etc/fstab  
+
+
+cat >> /etc/fstab <<- EOF
+	/dev/mapper/root /home              btrfs $btrfs_options,subvol=$root_sub_vol/@home 0 2
+	/dev/mapper/root /var/log           btrfs $btrfs_options,subvol=$root_sub_vol/@log 0 0 
+	/dev/mapper/root /var/cache         btrfs $btrfs_options,subvol=$root_sub_vol/@cache 0 0
+	/dev/mapper/root /tmp               btrfs $btrfs_options,subvol=$root_sub_vol/@tmp 0 0
+	/dev/mapper/root /var/lib/libvirt/  btrfs defaults,ssd,discard=async,noatime,space_cache=v2,subvol=$root_sub_vol/@libvirt 0 0
+	/dev/mapper/root /var/lib/docker	btrfs	defaults,ssd,discard=async,noatime,compress=zstd:1,subvol=$root_sub_vol/@docker  0 0
+	/dev/mapper/root /swap              btrfs defaults,noatime,subvol=$root_sub_vol/@swap 0 0
+	/swap/swapfile   none               swap  defaults,pri=10 0 0
+EOF

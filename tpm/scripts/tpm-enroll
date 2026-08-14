@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-source /etc/uki/tpm.conf
+source /etc/tpm.conf
 
 log() {
     printf '[tpm] %s\n' "$*"
@@ -50,6 +50,7 @@ enroll_arguments=(
     "--tpm2-pcrs=${TPM_LITERAL_PCRS}"
     "--tpm2-public-key=${PCR_PUBLIC_KEY}"
     "--tpm2-public-key-pcrs=${TPM_SIGNED_PCRS}"
+    "--tpm2-with-pin=${TPM_USE_PIN}"
 )
 
 case "$TPM_WIPE_EXISTING" in
