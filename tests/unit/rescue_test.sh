@@ -14,9 +14,9 @@ rescue-test.assert_equal() {
 	}
 }
 
-rescue-test.persistence_size() {
-	rescue-test.assert_equal 768 "$(install-rescue-live.calculate_persistence_mib 1024)"
-	rescue-test.assert_equal 4095 "$(install-rescue-live.calculate_persistence_mib 8192)"
+rescue-test.rescue_size() {
+	rescue-test.assert_equal 7168 "$(install-rescue-live.calculate_rescue_mib 4096)"
+	rescue-test.assert_equal 8256 "$(install-rescue-live.calculate_rescue_mib 8000)"
 }
 
 rescue-test.grub_persistence() {
@@ -46,13 +46,25 @@ rescue-test.setup_integration() {
 	rg -q 'TARGET_DEV="/dev/\$rescue_dev"' "$repository_root/setup.sh"
 	rescue_line="$(rg -n $'^\tsetup\.install_rescue_system$' "$repository_root/setup.sh" | cut -d: -f1)"
 	storage_line="$(rg -n $'^\t"\$repository_root/btrfs-root/scripts/btrfs-root-setup"$' "$repository_root/setup.sh" | cut -d: -f1)"
-	((rescue_line < storage_line))
+	((rescue_line > storage_line))
+}
+
+rescue-test.partition_backed_persistence_contract() {
+	local installer="$repository_root/rescue/script/install-rescue-live"
+
+	rg -q 'resizepart' "$installer"
+	rg -q 'mkpart writable ext4' "$installer"
+	rg -q 'mkfs\.ext4 -F -L writable "\$writable_dev"' "$installer"
+	if rg -q 'of=.*writable|mkfs\.ext4.*rescue_mount_dir/writable' "$installer"; then
+		return 1
+	fi
 }
 
 rescue-test.run() {
-	rescue-test.persistence_size
+	rescue-test.rescue_size
 	rescue-test.grub_persistence
 	rescue-test.setup_integration
+	rescue-test.partition_backed_persistence_contract
 	printf 'rescue_test: PASS\n'
 }
 

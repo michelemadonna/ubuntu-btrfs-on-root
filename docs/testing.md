@@ -64,6 +64,7 @@ Prefer tests of deterministic transformations and decisions:
 - setup configuration validation and device-name construction;
 - `log.*` output channels, formatting and fatal-exit behavior;
 - rescue source/destination sizing and FAT32/persistence limits;
+- rescue GPT split calculations and the partition-backed `writable` contract;
 - Btrfs subvolume and fstab/crypttab model generation;
 - Secure Boot mode detection and enrollment ordering;
 - rEFInd path and configuration selection for direct and shim modes;

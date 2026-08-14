@@ -54,6 +54,7 @@ test_summary() {
 	local output
 
 	root_dev="vda3"
+	efi_dev="vda2"
 	mp="/mnt/target"
 	root_sub_vol="@ubuntu"
 	swap_size="4G"
@@ -64,6 +65,7 @@ test_summary() {
 	output="$(btrfs-root-setup.print_summary)"
 
 	[[ $output == *"/dev/vda3"* ]] || fail "source partition is missing from summary"
+	[[ $output == *"/dev/vda2 (label ESP)"* ]] || fail "EFI label is missing from summary"
 	[[ $output == *"/dev/mapper/root"* ]] || fail "mapper is missing from summary"
 	[[ $output == *"3000 ms"* ]] || fail "Argon2id time target is missing from summary"
 	[[ $output == *"/mnt/target/etc/crypttab"* ]] || fail "crypttab path is missing from summary"
@@ -72,6 +74,7 @@ test_summary() {
 
 test_configuration_validation() {
 	root_dev="vda3"
+	efi_dev="vda2"
 	mp="/mnt/target"
 	root_sub_vol="@ubuntu"
 	swap_size="4G"

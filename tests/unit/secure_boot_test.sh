@@ -44,6 +44,19 @@ secure-boot-test.test_refind_loader_path() {
 		"$(refind-setup.repository_signed_loader_path 0)"
 }
 
+secure-boot-test.test_remove_grubefi_directories() {
+	local test_root
+
+	test_root="$(mktemp -d "${TMPDIR:-/tmp}/refind-cleanup-test.XXXXXX")"
+	mkdir -p "$test_root/EFI/remove/nested" "$test_root/EFI/keep"
+	: >"$test_root/EFI/remove/nested/grubefi_x64.efi"
+	: >"$test_root/EFI/keep/grubx64.efi"
+	refind-setup.remove_grubefi_directories "$test_root/EFI" >/dev/null
+	[[ ! -e $test_root/EFI/remove ]] || secure-boot-test.fail "directory containing grubefi_x64.efi was retained"
+	[[ -d $test_root/EFI/keep ]] || secure-boot-test.fail "unrelated EFI directory was removed"
+	rm -rf -- "$test_root"
+}
+
 secure-boot-test.test_fwupd_trust_mode() {
 	secure-boot-test.assert_equal true "$(fwupd-setup.disable_shim_for_mode 1)"
 	secure-boot-test.assert_equal false "$(fwupd-setup.disable_shim_for_mode 0)"
@@ -55,11 +68,18 @@ secure-boot-test.test_fwupd_trust_mode() {
 secure-boot-test.test_summary_has_no_secret() {
 	local output
 
+	# Values are consumed dynamically by the sourced summary function.
+	# shellcheck disable=SC2034
 	SETUP_MODE=0
+	# shellcheck disable=SC2034
 	SECURE_BOOT=1
+	# shellcheck disable=SC2034
 	SBCTL_KEYROOT=/keys
+	# shellcheck disable=SC2034
 	ESP=/esp
+	# shellcheck disable=SC2034
 	SHIM_DIR=/shim
+	# shellcheck disable=SC2034
 	mok_pin=must-not-appear
 	output="$(secure-boot-setup.print_summary 2>&1)"
 	[[ $output == *"shim-mok"* ]] || secure-boot-test.fail "trust path missing from summary"
@@ -68,6 +88,7 @@ secure-boot-test.test_summary_has_no_secret() {
 
 secure-boot-test.test_trust_path
 secure-boot-test.test_refind_loader_path
+secure-boot-test.test_remove_grubefi_directories
 secure-boot-test.test_fwupd_trust_mode
 secure-boot-test.test_summary_has_no_secret
 printf 'Secure Boot helper tests passed.\n'

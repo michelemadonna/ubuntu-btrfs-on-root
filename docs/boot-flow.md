@@ -9,8 +9,9 @@ partitioning and install Ubuntu with this layout:
 2. `/dev/sda2` as the FAT32 EFI System Partition mounted at `/boot/efi`;
 3. `/dev/sda3` as the unencrypted Btrfs root mounted at `/`.
 
-The rescue partition must be at least 4096 MiB and large enough for the live
-medium plus persistence. Complete the Ubiquity installation but remain in the
+The initial rescue partition must be large enough for at least 7168 MiB of FAT
+rescue data plus a separate writable partition of at least 512 MiB. Complete the
+Ubiquity installation but remain in the
 same live session. The scripts expect `/target`, `/target/boot/efi` and `/cdrom`
 to remain available.
 
@@ -22,15 +23,13 @@ root. The configured defaults target `/dev/sda1`, `/dev/sda2` and `/dev/sda3`.
 The outer live-session phase performs these operations in order:
 
 1. Validate root execution and configuration.
-2. Reformat `/dev/sda1`, copy the current Ubuntu live environment and create its
-   persistence filesystem.
-3. Convert the Ubiquity Btrfs layout into the `@ubuntu/@` hierarchy and create
+2. Convert the Ubiquity Btrfs layout into the configured suite hierarchy and create
    the dedicated data subvolumes and swap file.
-4. Shrink Btrfs, encrypt `/dev/sda3` in place as LUKS2, open it as
+3. Shrink Btrfs, encrypt `/dev/sda3` in place as LUKS2, open it as
    `/dev/mapper/root`, remount the target and expand Btrfs.
-5. Rewrite the target's crypttab and fstab.
-6. Prepare target bind mounts and copy the repository into the installed system.
-7. Enter a mount-isolated chroot and run `setup.sh //inner`.
+4. Rewrite the target's crypttab and fstab.
+5. Prepare target bind mounts and copy the repository into the installed system.
+6. Enter a mount-isolated chroot and run `setup.sh //inner`.
 
 The inner phase then:
 
@@ -45,13 +44,16 @@ The inner phase then:
 7. optionally installs TPM integration without enrolling it.
 
 On return, the outer phase recursively unmounts the target and closes the
-`root` mapping.
+`root` mapping. Only then, as the final phase, it splits the reserved rescue
+range, creates the ext4 `writable` partition, formats the resized rescue range
+as FAT and copies `/cdrom` into it.
 
 ## Rescue boot
 
-The rescue partition contains a copy of `/cdrom/casper` on FAT32. Its GRUB
-Casper entries include `persistent`, and the file `/writable` contains an ext4
-filesystem used for persistence.
+The resized rescue partition contains a copy of `/cdrom/casper` on FAT32. Its
+GRUB Casper entries include `persistent`. A second partition created from the
+released trailing range is formatted ext4 with label `writable` and supplies
+persistence.
 
 The rescue system is independent from the installed root and remains usable
 when LUKS unlocking or the installed boot chain needs repair. Its persistent

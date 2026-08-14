@@ -114,8 +114,16 @@ tpm-enroll.create_header_backup() {
 	chmod 0600 "$backup_file"
 }
 
+tpm-enroll.has_tpm2_token() {
+	local luks_dump=$1
+
+	grep -qi systemd-tpm2 <<<"$luks_dump"
+}
+
 tpm-enroll.run() {
 	local wipe_existing=""
+	local command_status
+	local luks_dump
 	local -a enroll_arguments=()
 	tpm-enroll.require_root
 	tpm-enroll.require_commands basename cryptsetup date grep install mktemp systemd-cryptenroll
@@ -139,8 +147,12 @@ tpm-enroll.run() {
 		log.info "Preserve all existing password, recovery and TPM2 enrollments."
 	fi
 	log.info "Enroll literal PCR policy $TPM_LITERAL_PCRS and signed PCR policy $TPM_SIGNED_PCRS"
-	systemd-cryptenroll "${enroll_arguments[@]}"
-	cryptsetup luksDump "$LUKS_DEVICE" | grep -qi systemd-tpm2 || log.die "No systemd-tpm2 token found after enrollment."
+	systemd-cryptenroll "${enroll_arguments[@]}" || log.die "TPM enrollment command failed."
+	luks_dump="$(cryptsetup luksDump "$LUKS_DEVICE" 2>&1)" || {
+		command_status=$?
+		log.die "Unable to inspect the LUKS header after TPM enrollment." "$luks_dump" "$command_status"
+	}
+	tpm-enroll.has_tpm2_token "$luks_dump" || log.die "No systemd-tpm2 token found after enrollment."
 	log.success "TPM enrollment completed and verified"
 	log.section_end
 }

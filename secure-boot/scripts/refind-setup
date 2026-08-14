@@ -57,6 +57,35 @@ refind-setup.cleanup() {
 		rm -rf "$TMPROOT"
 }
 
+refind-setup.remove_grubefi_directories() {
+	local requested_root=${1:-$ESP/EFI}
+	local efi_root
+	local directory
+	local marker
+	local -a directories=()
+
+	efi_root="$(readlink -f -- "$requested_root")"
+	[[ -d $efi_root && ${efi_root##*/} == EFI && $efi_root != /EFI ]] ||
+		log.die "Refusing GRUB EFI cleanup outside a validated EFI directory: $requested_root"
+
+	while IFS= read -r -d '' directory; do
+		directories+=("$directory")
+	done < <(find "$efi_root" -mindepth 1 -maxdepth 1 -type d -print0)
+
+	log.section "Obsolete grubefi_x64.efi directory cleanup"
+	for directory in "${directories[@]}"; do
+		marker="$(find "$directory" -type f -name grubefi_x64.efi -print -quit)"
+		[[ -n $marker ]] || continue
+		[[ $directory == "$efi_root/"* && $directory != "$efi_root" ]] ||
+			log.die "Resolved cleanup target escaped the EFI directory: $directory"
+		log.warn "Remove EFI directory $directory because it contains $marker"
+		rm -rf -- "$directory"
+		[[ ! -e $directory ]] || log.die "Unable to remove obsolete EFI directory: $directory"
+		log.success "Removed obsolete EFI directory: $directory"
+	done
+	log.section_end
+}
+
 # ============================================================
 # Dependencies
 # ============================================================
@@ -82,7 +111,7 @@ refind-setup.install_dependencies() {
 
 		log.info "Try to install rEFInd from the distribution repository"
 
-		if apt-cache search refind | grep -q refind; then
+		if apt-cache show refind >/dev/null 2>&1; then
 			apt-get install -y refind || true
 
 		else
@@ -228,7 +257,7 @@ refind-setup.install_direct() {
 
 	cat >>"$REFIND_EFI/refind.conf" <<-'EOF'
 		#scanfor external,optical,manual
-		dont_scan_dirs EFI/systemd,EFI/Linux,EFI/BOOT
+		dont_scan_dirs EFI/systemd,EFI/Linux,ESP:EFI/BOOT
 		dont_scan_files shimx64.efi,grubx64.efi,mmx64.efi,fbx64.efi
 		linux_prefixes ubuntu,kali
 		enable_touch
@@ -277,7 +306,8 @@ refind-setup.install_with_shim() {
 
 	cat >>"$REFIND_EFI/refind.conf" <<-'EOF'
 		#scanfor external,optical,manual
-		dont_scan_dirs EFI/systemd,EFI/Linux,EFI/BOOT
+		dont_scan_dirs EFI/systemd,EFI/Linux,ESP:EFI/BOOT
+		dont_scan_files grubx64.efi,mmx64.efi,fbx64.efi
 		linux_prefixes ubuntu,kali
 		enable_touch
 		enable_mouse
@@ -386,7 +416,8 @@ refind-setup.run() {
 	common.require_commands apt-get debconf-set-selections
 	printf '%s\n' "refind refind/install_to_esp boolean false" | debconf-set-selections
 	refind-setup.install_dependencies
-	common.require_commands apt-cache apt-mark find grep install mktemp sbctl sbverify unzip
+	common.require_commands apt-cache apt-mark find grep install mktemp readlink rm sbctl sbverify unzip
+	refind-setup.remove_grubefi_directories
 
 	if [[ -f /etc/securebootmode.conf ]]; then
 		SETUP_MODE="$(</etc/securebootmode.conf)"

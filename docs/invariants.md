@@ -12,6 +12,8 @@ boot and maintenance commands.
 - The default rescue, ESP and root devices are `/dev/sda1`, `/dev/sda2` and
   `/dev/sda3` respectively.
 - `/dev/sda2` is the FAT32 ESP mounted at `/target/boot/efi`.
+- Before target-side installation, the unmounted ESP receives the FAT filesystem
+  label `ESP`; label application must not reformat it.
 - `/dev/sda3` initially contains the unencrypted Ubiquity Btrfs root mounted at
   `/target`; the repository encrypts it in place.
 - `/cdrom` is the source for the rescue live environment.
@@ -25,10 +27,12 @@ boot and maintenance commands.
 
 - Rescue creation requires exact target-device confirmation before formatting.
 - The rescue target and source cannot be the same device.
-- The rescue partition is at least 4096 MiB and has room for the live source,
-  256 MiB reserve and at least 512 MiB persistence.
+- The input rescue partition is on GPT and has room for a FAT rescue range of at
+  least 7168 MiB, a 256 MiB source reserve when required, and at least 512 MiB
+  for a separate writable partition.
 - FAT32 cannot receive an individual source file larger than 4095 MiB.
-- The persistence file is ext4, at least 512 MiB and no larger than 4095 MiB.
+- Persistence is a separate ext4 GPT partition labelled `writable`, occupying
+  the trailing range released from the original rescue partition.
 - Casper boot entries contain `persistent` without duplicate insertion.
 - Rescue persistence is outside LUKS and must not be described as encrypted.
 

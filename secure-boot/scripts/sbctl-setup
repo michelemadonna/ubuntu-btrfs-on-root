@@ -81,7 +81,7 @@ sbctl-setup.install_dependencies() {
 	if ! command -v sbctl >/dev/null 2>&1; then
 
 		log.info "Try to install sbctl from the distribution repository"
-		if apt-cache search sbctl | grep -q sbctl; then
+		if apt-cache show sbctl >/dev/null 2>&1; then
 			log.info "sbctl package available in distribution repository"
 			apt-get install -y sbctl || true
 		else

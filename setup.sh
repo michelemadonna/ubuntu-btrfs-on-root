@@ -245,7 +245,6 @@ setup.main() {
 	setup.parse_arguments "$@"
 	[[ -n ${PASSPHRASE:-} ]] || log.die "PASSPHRASE must be configured for the root volume."
 
-	setup.install_rescue_system
 	setup.prepare_target
 	cleanup_required=true
 	trap setup.cleanup_on_exit EXIT
@@ -257,6 +256,7 @@ setup.main() {
 	setup.unmount_everything
 	cleanup_required=false
 	trap - EXIT
+	setup.install_rescue_system
 	log.info "Finished"
 }
 

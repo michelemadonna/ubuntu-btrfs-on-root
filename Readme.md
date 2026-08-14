@@ -30,11 +30,15 @@ partitioning. Create this default layout:
 | Device | Ubiquity configuration | Purpose after setup |
 | --- | --- | --- |
 | `/dev/sda1` | reserve for the rescue system | FAT32 live Ubuntu rescue system with persistence |
-| `/dev/sda2` | FAT32 EFI System Partition mounted at `/boot/efi` | rEFInd, shim when needed, fwupd and signed UKIs |
+| `/dev/sda2` | FAT32 EFI System Partition mounted at `/boot/efi` | label `ESP`; rEFInd, shim when needed, fwupd and signed UKIs |
 | `/dev/sda3` | unencrypted Btrfs mounted at `/` | LUKS2-encrypted Ubuntu Btrfs root |
 
-The rescue partition must be at least 4096 MiB and large enough to hold the live
-medium, at least 512 MiB of persistence and 256 MiB of reserved free space.
+The partition initially assigned to `/dev/sda1` must be large enough for a rescue
+FAT filesystem of at least 7168 MiB plus at least 512 MiB of persistence. Setup
+shrinks `/dev/sda1` to the larger of 7168 MiB or the live-medium size plus a
+256 MiB reserve. It creates a new GPT partition in the released trailing range,
+formats it ext4 and labels it `writable`. With the documented three-partition
+input layout, that new partition normally receives number 4.
 
 All persistent data belonging to the installed operating system—including
 root, home, logs, caches, containers and swap—lives inside the LUKS2 container.
@@ -124,18 +128,20 @@ last reported state. These checks do not replace a real reboot test.
 
 The main flow performs these operations:
 
-1. creates the persistent rescue system on `/dev/sda1` from `/cdrom`;
-2. creates `@$suite/@` and the dedicated Btrfs data subvolumes;
-3. creates a Btrfs swap file;
-4. encrypts `/dev/sda3` in place as LUKS2 and mounts it as
+1. creates `@$suite/@` and the dedicated Btrfs data subvolumes;
+2. creates a Btrfs swap file;
+3. encrypts `/dev/sda3` in place as LUKS2 and mounts it as
    `/dev/mapper/root`;
-5. generates the target fstab and crypttab configuration;
-6. enters the installed system in a mount-isolated chroot;
-7. configures Secure Boot, rEFInd and fwupd;
-8. installs Snapper and the optional early-boot snapshot selector;
-9. configures kernel-install, dracut and ukify, then generates and verifies UKIs;
-10. installs TPM support when enabled, without enrolling LUKS automatically;
-11. unmounts the target and closes the temporary LUKS mapping.
+4. generates the target fstab and crypttab configuration;
+5. enters the installed system in a mount-isolated chroot;
+6. configures Secure Boot, rEFInd and fwupd;
+7. installs Snapper and the optional early-boot snapshot selector;
+8. configures kernel-install, dracut and ukify, then generates and verifies UKIs;
+9. installs TPM support when enabled, without enrolling LUKS automatically;
+10. unmounts the target and closes the temporary LUKS mapping;
+11. as the final phase, splits the reserved rescue range, creates the ext4
+    `writable` partition and copies the live system to the resized FAT rescue
+    partition.
 
 Detailed installation and runtime flows are documented in
 [docs/architecture.md](docs/architecture.md) and
@@ -370,9 +376,10 @@ The rescue partition is a persistent copy of the Ubuntu live environment. It is
 intended for recovery when the installed boot chain or encrypted root needs
 repair.
 
-Its `writable` persistence filesystem is stored as a file on FAT32 and is not
-inside the root LUKS container. Do not store confidential recovery material
-there without separate protection.
+Its persistence filesystem is a separate ext4 partition labelled `writable`,
+created from the space released when the original rescue partition is shrunk.
+It is not inside the root LUKS container. Do not store confidential recovery
+material there without separate protection.
 
 ## Safety and validation
 

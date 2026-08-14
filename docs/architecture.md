@@ -10,8 +10,8 @@ The supported default disk layout is:
 
 | Partition | Ubiquity/setup role | Result |
 | --- | --- | --- |
-| `/dev/sda1` | reserved rescue partition | FAT32 Ubuntu live copy with an ext4 persistence file |
-| `/dev/sda2` | `/boot/efi` | EFI System Partition containing rEFInd, shim when required, fwupd and UKIs |
+| `/dev/sda1` | oversized partition reserved for rescue | FAT32 Ubuntu live copy, at least 7168 MiB |
+| `/dev/sda2` | `/boot/efi` | FAT filesystem labelled `ESP`, containing rEFInd, shim when required, fwupd and UKIs |
 | `/dev/sda3` | `/` formatted as Btrfs | in-place LUKS2 container with the Btrfs subvolume layout |
 
 All persistent data of the installed system—including root, home, logs,
@@ -22,20 +22,25 @@ outside that FDE boundary.
 Ubiquity must use manual partitioning. `/dev/sda3` must initially be Btrfs and
 must not already be encrypted by Ubiquity, because this repository performs the
 in-place LUKS2 conversion. `/dev/sda2` must be the FAT32 ESP. `/dev/sda1` must be
-at least 4096 MiB and also large enough for the current live medium, a persistence
-file and the script's free-space reserve.
+large enough for a FAT rescue area of at least 7168 MiB and a separate ext4
+persistence partition of at least 512 MiB.
 
 The live environment is expected at `/cdrom`, Ubiquity's installed root at
 `/target`, and its ESP at `/target/boot/efi`. The defaults are defined in
 `setup.conf`.
 
+During the `btrfs-root` phase, setup verifies that `/dev/$efi_dev` is an
+unmounted FAT filesystem, assigns it the filesystem label `ESP` with `fatlabel`
+and confirms the result through `blkid`. It does not reformat the ESP.
+
 ## Orchestration boundary
 
 `setup.sh` has two execution phases:
 
-1. The outer phase runs in the live system. It creates the rescue system,
-   converts and encrypts the installed Btrfs root, prepares bind mounts, copies
-   the repository into the target and enters a mount-isolated chroot.
+1. The outer phase runs in the live system. It converts and encrypts the
+   installed Btrfs root, prepares bind mounts, copies the repository into the
+   target and enters a mount-isolated chroot. After target cleanup it creates
+   the rescue system as the final installation phase.
 2. The `//inner` phase runs inside the installed system. It configures Secure
    Boot, snapshots, UKIs and optional TPM integration, then returns to the outer
    phase for cleanup.
@@ -73,16 +78,19 @@ validation sections are closed explicitly.
 then:
 
 1. validates source and destination sizes;
-2. formats the partition FAT32 with label `UBUNTU_LIVE`;
-3. copies the live medium without copying symbolic links and excludes an
-   existing `writable` file;
-4. adds the `persistent` kernel option to Casper entries in `grub.cfg` and
-   `loopback.cfg`;
-5. creates an ext4 filesystem inside the FAT32 file named `writable`.
+2. shrinks its leading partition range to the larger of 7168 MiB or the live
+   source size plus 256 MiB;
+3. creates a new GPT partition in the released trailing range, formats it ext4
+   and labels it `writable`;
+4. formats the resized rescue partition FAT32 with label `UBUNTU_LIVE`;
+5. copies the live medium without copying symbolic links and excludes an
+   existing `writable` path;
+6. adds the `persistent` kernel option to Casper entries in `grub.cfg` and
+   `loopback.cfg`.
 
-The persistence file uses available capacity minus a 256 MiB reserve, must be at
-least 512 MiB and is capped at 4095 MiB because of FAT32 file-size limits. A
-single live source file above 4095 MiB is rejected.
+The writable partition consumes the remaining original rescue range and must be
+at least 512 MiB. A single live source file above 4095 MiB is still rejected
+because the live files themselves are copied to FAT32.
 
 This rescue environment is outside the root LUKS container. Its persistence is
 therefore not protected by root-disk encryption.
@@ -168,6 +176,11 @@ the first-stage location and the rEFInd payload is placed at the filename used b
 the shim installer, with MokManager available beside it. Selected rEFInd drivers
 and fwupd EFI binaries are signed with the repository-created db key and
 verified.
+
+Before installing rEFInd, setup inspects only the immediate child directories
+of the ESP's `EFI` directory. Any such directory containing a regular file named
+exactly `grubefi_x64.efi` anywhere below it is treated as obsolete and removed
+in full. Unrelated EFI directories and similarly named files are retained.
 
 When Ubuntu packages are unsuitable for the selected path, shim and rEFInd are
 obtained from the pinned Debian snapshot dated 2026-08-12 and authenticated with

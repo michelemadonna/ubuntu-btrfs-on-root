@@ -19,8 +19,9 @@ into the installed system first.
 
 Ubiquity must use manual partitioning with this default layout:
 
-- `/dev/sda1`: rescue partition, at least 4096 MiB and large enough for the live
-  medium plus persistence;
+- `/dev/sda1`: oversized GPT partition reserved for rescue; setup shrinks its
+  leading FAT portion to at least 7168 MiB and converts the remaining range into
+  a separate ext4 partition labelled `writable`;
 - `/dev/sda2`: FAT32 EFI System Partition mounted by Ubiquity at `/boot/efi`;
 - `/dev/sda3`: unencrypted Btrfs filesystem mounted by Ubiquity at `/`.
 
@@ -187,6 +188,12 @@ real devices.
   `@$suite/@home/.snapshots`; only root snapshots participate in snapshot boot.
 - Keep the rescue partition outside LUKS; document that its persistence is not
   encrypted.
+- Rescue creation is the final setup phase, after target unmount and LUKS mapper
+  closure. It shrinks the oversized GPT rescue partition to at least 7168 MiB
+  and creates a separate ext4 partition named and labelled `writable` in the
+  released range; it must never recreate file-backed persistence.
+- Preserve the EFI FAT filesystem label `ESP`. Relabelling must validate the
+  exact device and filesystem type and must never reformat the ESP.
 
 ### Secure Boot
 
@@ -195,6 +202,9 @@ real devices.
 - Preserve the distinction between firmware Setup Mode enrollment and the
   shim/MOK path.
 - When enrolling firmware variables, the Platform Key remains last.
+- rEFInd setup may remove an immediate child directory of `$ESP/EFI` only when
+  that directory contains a regular file named exactly `grubefi_x64.efi`; keep
+  the canonical-path and containment checks intact.
 - UKIs, rEFInd, its selected drivers and fwupd executables in the trusted path
   must retain the signatures verified by the scripts.
 

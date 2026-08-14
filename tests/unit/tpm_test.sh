@@ -46,6 +46,16 @@ tpm-test.enrollment_arguments() {
 	[[ $output == *'--tpm2-public-key-pcrs=11'* ]]
 }
 
+tpm-test.token_detection_does_not_use_a_short_circuit_pipe() {
+	tpm-enroll.has_tpm2_token $'Tokens:\n  0: systemd-tpm2' || return 1
+	if tpm-enroll.has_tpm2_token $'Tokens:\n  0: systemd-recovery'; then
+		return 1
+	fi
+	if rg -q 'cryptsetup luksDump .*\| grep -q' "$repository_root/tpm/scripts/tpm-enroll"; then
+		return 1
+	fi
+}
+
 tpm-test.configuration_paths() {
 	rg -q 'INSTALL_TPM_CONFIG=/etc/tpm.conf' "$repository_root/tpm/scripts/install-tpm"
 	if rg -q '/etc/uki/tpm\.conf' "$repository_root/tpm"; then
@@ -71,6 +81,7 @@ tpm-test.runtime_commands_are_standalone() {
 tpm-test.run() {
 	tpm-test.kernel_options
 	tpm-test.enrollment_arguments
+	tpm-test.token_detection_does_not_use_a_short_circuit_pipe
 	tpm-test.configuration_paths
 	tpm-test.runtime_commands_are_standalone
 	printf 'tpm_test: PASS\n'
