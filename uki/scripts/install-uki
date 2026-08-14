@@ -77,12 +77,22 @@ chmod 0644 /etc/kernel/install.conf
 echo $suite > /etc/kernel/entry-token
 chmod 0644 /etc/kernel/entry-token
 
+python3 - <<'PY'
+from PIL import Image
+
+source = "/usr/share/plymouth/themes/spinner/bgrt-fallback.png"
+destination = "/etc/kernel/uki-splash.bmp"
+
+image = Image.open(source).convert("RGB")
+image.save(destination, format="BMP")
+PY
+
 cat > /etc/kernel/uki.conf << 'EOF'
     [UKI]
     PCRBanks=sha256
     OSRelease=@/etc/os-release
     Cmdline=@/etc/kernel/cmdline
-    Splash=/usr/share/plymouth/themes/spinner/bgrt-fallback.png
+    Splash=/etc/kernel/uki-splash.bmp
 
     SecureBootSigningTool=sbsign
     SecureBootPrivateKey=/var/lib/sbctl/keys/db/db.key
@@ -91,7 +101,7 @@ cat > /etc/kernel/uki.conf << 'EOF'
     SignKernel=false
 
     PCRPKey=/etc/uki/keys/pcr-public.pem
-    
+
     [PCRSignature:initrd]
     PCRPrivateKey=/etc/uki/keys/pcr-private.pem
     PCRPublicKey=/etc/uki/keys/pcr-public.pem
