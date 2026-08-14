@@ -82,6 +82,7 @@ cat > /etc/kernel/uki.conf << 'EOF'
     PCRBanks=sha256
     OSRelease=@/etc/os-release
     Cmdline=@/etc/kernel/cmdline
+    Splash=/usr/share/plymouth/themes/spinner/bgrt-fallback.png
 
     SecureBootSigningTool=sbsign
     SecureBootPrivateKey=/var/lib/sbctl/keys/db/db.key
@@ -89,6 +90,8 @@ cat > /etc/kernel/uki.conf << 'EOF'
 
     SignKernel=false
 
+    PCRPKey=/etc/uki/keys/pcr-public.pem
+    
     [PCRSignature:initrd]
     PCRPrivateKey=/etc/uki/keys/pcr-private.pem
     PCRPublicKey=/etc/uki/keys/pcr-public.pem
