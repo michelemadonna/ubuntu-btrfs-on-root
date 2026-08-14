@@ -65,6 +65,8 @@ setup.generate_configuration() {
 	done
 	rescue_path="$(tui.select_one "Select the oversized partition reserved for rescue" "/dev/$rescue_dev" "${rescue_items[@]}")" ||
 		log.die "Invalid rescue partition selection."
+	swap_size="$(tui.input "Btrfs swapfile size" "$swap_size")"
+	[[ $swap_size =~ ^[1-9][0-9]*[KMGTP]$ ]] || log.die "Swap size must use a value such as 4G."
 
 	root_dev=${root_path#/dev/}
 	efi_dev=${efi_path#/dev/}
@@ -75,16 +77,14 @@ setup.generate_configuration() {
 		log.die "Invalid suite selection."
 	suite_type="$(tui.select_one "Select the distribution type used for the rEFInd icon" "$suite_type" 'ubuntu|Ubuntu')" ||
 		log.die "Invalid distribution type selection."
-	swap_size="$(tui.input "Btrfs swapfile size" "$swap_size")"
+	[[ $suite =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Suite must be a safe lowercase identifier."
+	[[ $suite_type =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Distribution icon identifier is invalid."
 
 	log.section "Encryption and boot security"
 	iter_time="$(tui.input "Argon2id time target in milliseconds" "$iter_time")"
 	PASSPHRASE="$(tui.password "Initial LUKS passphrase" "$PASSPHRASE")"
 	mok_pin="$(tui.password "MOK enrollment PIN" "$mok_pin")"
-	[[ $suite =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Suite must be a safe lowercase identifier."
-	[[ $suite_type =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Distribution icon identifier is invalid."
 	[[ $iter_time =~ ^[1-9][0-9]*$ ]] || log.die "Argon2id time target must be a positive integer."
-	[[ $swap_size =~ ^[1-9][0-9]*[KMGTP]$ ]] || log.die "Swap size must use a value such as 4G."
 	[[ -n $PASSPHRASE ]] || log.die "LUKS passphrase cannot be empty."
 	[[ -n $mok_pin ]] || log.die "MOK PIN cannot be empty."
 
