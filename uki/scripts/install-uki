@@ -126,13 +126,25 @@ chmod 0644 /etc/uki/keys/pcr-public.pem
 echo "root=UUID=${btrfs_uuid} rootfstype=btrfs rootflags=${btrfs_options},subvol=${root_subvolume} rd.luks.uuid=luks-${luks_uuid} rd.shell=0 rd.emergency=halt quiet splash" > /etc/kernel/cmdline
 chmod 0644 /etc/kernel/cmdline
 
+install -m 0755 \
+    "$repository_root/uki/hooks/kernel/postinst.d/debian-kernel-install-bridge" \
+    /usr/local/libexec/debian-kernel-install-bridge
+
+ln -sfn \
+    /usr/local/libexec/debian-kernel-install-bridge \
+    /etc/kernel/postinst.d/zz-kernel-install
+
+ln -sfn \
+    /usr/local/libexec/debian-kernel-install-bridge \
+    /etc/kernel/postrm.d/zz-kernel-install
+
 if [[ $enable_tpm == "yes" ]]; then
     . $repository_root/tpm/scripts/install-tpm
 fi
 
 echo "Installing rEFInd boot manager hook..."
 install -m 755 \
-	"$repository_root/uki/hooks/99-refind-menu.install" \
+	"$repository_root/uki/hooks/kernel/install.d/99-refind-menu.install" \
 	/usr/lib/kernel/install.d/99-refind-menu.install
 echo "include refind-linux-$suite.conf" >> "/boot/efi/EFI/refind/refind.conf"
 
