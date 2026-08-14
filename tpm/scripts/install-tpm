@@ -68,7 +68,7 @@ install \
     "$repository_root/tpm/scripts/tpm-status" \
     /usr/local/sbin/tpm-status
 
-echo 'add_dracutmodules+=" tpm2-tss systemd-pcrphase crypt "' > /etc/dracut.conf.d/99_tpm2.conf
+echo 'add_dracutmodules+=" tpm2-tss crypt "' > /etc/dracut.conf.d/99_tpm2.conf
 if grep -qE 'rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes' /etc/kernel/cmdline; then
     echo "The kernel command line already contains the TPM2 options."
 else

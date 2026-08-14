@@ -67,7 +67,6 @@ git checkout one-subvol-per-distro
 chmod a+x ubuntu-btrfs-root
 sudo ./ubuntu-btrfs-root
 ```
-
 ## UKI installation
 
 ```bash
