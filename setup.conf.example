@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+
 export root_dev="sda3"
 export efi_dev="sda2"
 export mp="/mnt/root"

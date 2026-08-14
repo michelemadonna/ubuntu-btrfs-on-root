@@ -15,8 +15,10 @@ Ubiquity installation but remain in the
 same live session. The scripts expect `/target`, `/target/boot/efi` and `/cdrom`
 to remain available.
 
-Review `setup.conf`, replace credential placeholders, and then run `setup.sh` as
-root. The configured defaults target `/dev/sda1`, `/dev/sda2` and `/dev/sda3`.
+Run `setup.sh` as root. When `setup.conf` is absent, the grouped wizard uses its
+built-in defaults, generates and validates the protected local
+configuration, displays its non-secret values and asks whether installation
+should proceed. The defaults target `/dev/sda1`, `/dev/sda2` and `/dev/sda3`.
 
 ## Installation sequence
 

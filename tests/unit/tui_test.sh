@@ -52,11 +52,22 @@ tui-test.toggles() {
 
 tui-test.generated_config_contract() {
 	rg -q 'setup\.generate_configuration' "$repository_root/setup.sh"
-	rg -q 'setup\.write_config_value "\$temporary_config" mp /mnt/root' "$repository_root/setup.sh"
-	rg -q 'setup\.write_config_value "\$temporary_config" keyslot_size 32m' "$repository_root/setup.sh"
-	rg -q "setup\.write_config_value .* btrfs_options 'defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1'" "$repository_root/setup.sh"
-	rg -q "'resolute|Ubuntu Resolute' 'focal|Ubuntu Focal'" "$repository_root/setup.sh"
+	if rg -q 'source .*setup\.conf\.example' "$repository_root/setup.sh"; then
+		printf 'setup.sh must not depend on setup.conf.example\n' >&2
+		return 1
+	fi
+	rg -q 'local root_dev=sda3 efi_dev=sda2 rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu' "$repository_root/setup.sh"
+	rg -q 'setup\.write_config_value "\$temporary_config" mp "\$mp"' "$repository_root/setup.sh"
+	rg -q 'setup\.write_config_value "\$temporary_config" keyslot_size "\$keyslot_size"' "$repository_root/setup.sh"
+	rg -q 'setup\.write_config_value "\$temporary_config" btrfs_options "\$btrfs_options"' "$repository_root/setup.sh"
+	rg -q "'resolute|Ubuntu Resolute' 'noble|Ubuntu Noble'" "$repository_root/setup.sh"
+	rg -q 'not suitable for converting an existing production system' "$repository_root/setup.sh"
 	rg -q "'ubuntu|Ubuntu'" "$repository_root/setup.sh"
+	rg -q 'log\.section "Storage configuration"' "$repository_root/setup.sh"
+	rg -q 'log\.section "Distribution configuration"' "$repository_root/setup.sh"
+	rg -q 'log\.section "Encryption and boot security"' "$repository_root/setup.sh"
+	rg -q 'log\.section "Optional features"' "$repository_root/setup.sh"
+	rg -q 'Proceed with the installation using these values' "$repository_root/setup.sh"
 }
 
 tui-test.input_and_password_defaults

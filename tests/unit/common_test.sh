@@ -58,7 +58,7 @@ test_log_section_boundaries_and_color_rotation() {
 }
 
 test_require_readable_file() {
-	common.require_readable_file "$repository_root/setup.conf" "Configuration file"
+	common.require_readable_file "$repository_root/setup.conf.example" "Example configuration file"
 }
 
 test_require_nonempty() {

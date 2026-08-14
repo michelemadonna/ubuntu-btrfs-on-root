@@ -164,12 +164,20 @@ boot and maintenance commands.
 ## Configuration truth
 
 - `setup.conf` is sourced shell input and may contain secrets.
+- `setup.conf.example` is a versioned reference only. Wizard defaults are
+  built into `setup.sh`, while `setup.conf` is generated locally and excluded
+  from Git; configuration generation must not depend on the example file.
 - When absent, it is generated only through the interactive TUI and installed
   atomically with mode 0600. `mp`, `keyslot_size` and `btrfs_options` retain
   their repository defaults and are not prompted.
-- The guided flow restricts `suite` to `resolute` or `focal` and `suite_type`
+- The guided flow restricts `suite` to `resolute` or `noble` and `suite_type`
   to the currently supported `ubuntu` value. All `yes`/`no` questions use
   toggles and persist only those literal values.
+- Wizard prompts remain grouped by storage, distribution, security and optional
+  features. Installation begins only after the generated summary, its
+  validation and an explicit affirmative toggle.
+- The wizard must warn before input collection that the conversion targets a
+  freshly installed system and is unsuitable for an existing production host.
 - Placeholder credentials are replaced before real execution and real
   credentials are never committed.
 - Feature flags `pre_download` and `enable_tpm` activate only for literal `yes`.

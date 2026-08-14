@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 
 repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+export SETUP_CONFIG_FILE="$repository_root/setup.conf.example"
 # shellcheck source=/dev/null
 source "$repository_root/btrfs-snapshots-mng/scripts/btrfs-snapshots-mng-setup"
 

@@ -14,7 +14,7 @@ menu_config=/etc/snapshot-menu.conf
 # shellcheck disable=SC1090,SC1091
 source "$repository_root/lib/common.sh"
 # shellcheck disable=SC1090,SC1091
-source "$repository_root/setup.conf"
+source "${SETUP_CONFIG_FILE:-$repository_root/setup.conf}"
 
 btrfs-snapshots-mng-setup.validate_configuration() {
 	common.require_nonempty "root_sub_vol" "${root_sub_vol:-}"

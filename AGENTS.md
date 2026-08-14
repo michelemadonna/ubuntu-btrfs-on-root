@@ -52,7 +52,9 @@ explicit, documented reason.
 ## Repository structure
 
 - `setup.sh`: live-session and target-chroot orchestrator;
-- `setup.conf`: installation devices, credentials and feature switches;
+- `setup.conf.example`: versioned defaults for installation configuration;
+- generated `setup.conf`: ignored secret-bearing devices, credentials and
+  feature switches;
 - `lib/`: framework functions genuinely shared by multiple repository scripts;
 - `rescue/`: construction of the persistent Ubuntu live rescue filesystem;
 - `btrfs-root/`: Btrfs subvolume conversion and in-place LUKS2 encryption;
@@ -272,15 +274,23 @@ for example, `ubuntu` selects `os_ubuntu.png` when the theme provides it.
 activate only when their value is exactly `yes`. Do not document unused
 variables as functional.
 
-If `setup.conf` is missing, `setup.sh` must use `lib/tui.sh` to generate it
-interactively. Prompts retain visible current defaults; password entry remains
-hidden. Root selection is disk-first and then limited to that disk's partitions.
+If `setup.conf` is missing, `setup.sh` must use `lib/tui.sh` and built-in
+defaults to generate it without depending on `setup.conf.example`. Prompts are
+grouped by theme and retain visible current defaults; password entry remains
+hidden. Root selection is
+disk-first and then limited to that disk's partitions.
 Keep `mp`, `keyslot_size` and `btrfs_options` fixed and non-interactive unless a
 task explicitly changes this contract. Generated configuration remains
 shell-quoted, mode 0600 and atomically installed. Present `suite` as a closed
-single selection (`resolute`, `focal`) and `suite_type` as a closed single
+single selection (`resolute`, `noble`) and `suite_type` as a closed single
 selection (currently `ubuntu`). Every `yes`/`no` question must use a toggle and
 persist only the literal values `yes` or `no`.
+After displaying and validating the generated configuration summary, require an
+explicit toggle before installation begins. A negative answer must retain the
+generated file and exit without destructive installation work.
+Before collecting values, warn that setup is only for a system freshly
+installed from the Ubuntu live environment and must not be presented as a
+production-system migration tool.
 
 Secure Boot setup expects `refind_themes.zip` at the repository root. Preserve
 that installation artifact or change its consumer and documentation together.

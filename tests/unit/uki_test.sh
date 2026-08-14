@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 
 repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+export SETUP_CONFIG_FILE="$repository_root/setup.conf.example"
 # shellcheck source=/dev/null
 source "$repository_root/uki/scripts/install-uki"
 # shellcheck source=/dev/null

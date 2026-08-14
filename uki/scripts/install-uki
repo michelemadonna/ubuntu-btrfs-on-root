@@ -10,7 +10,7 @@ repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
 # shellcheck disable=SC1090,SC1091
 source "$repository_root/lib/common.sh"
 # shellcheck disable=SC1090,SC1091
-source "$repository_root/setup.conf"
+source "${SETUP_CONFIG_FILE:-$repository_root/setup.conf}"
 
 INSTALL_UKI_ESP=/boot/efi
 INSTALL_UKI_KERNEL_CONFIG=/etc/kernel/install.conf

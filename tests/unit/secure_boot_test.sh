@@ -4,6 +4,7 @@ set -euo pipefail
 
 test_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "$test_dir/../.." && pwd)"
+export SETUP_CONFIG_FILE="$repository_root/setup.conf.example"
 
 # Runtime-derived sources let tests run from any current directory.
 # shellcheck disable=SC1090,SC1091
@@ -35,7 +36,7 @@ secure-boot-test.test_trust_path() {
 }
 
 secure-boot-test.test_refind_loader_path() {
-	REFIND_EFI=/boot/efi/EFI/refind
+	export REFIND_EFI=/boot/efi/EFI/refind
 	secure-boot-test.assert_equal \
 		/boot/efi/EFI/refind/refind_x64.efi \
 		"$(refind-setup.repository_signed_loader_path 1)"

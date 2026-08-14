@@ -51,13 +51,18 @@ unmounts the target and closes the `root` LUKS mapping.
 
 Before either phase, a missing `setup.conf` activates the guided configuration
 flow implemented with `lib/tui.sh`. Disk and partition choices come from
-`lsblk`; root selection is scoped to the previously selected disk. The wizard
+`lsblk`; root selection is scoped to the previously selected disk. Defaults are
+built into `setup.sh` so configuration generation does not depend on the
+example file, and inputs are grouped by storage,
+distribution, security and optional features. The wizard
 writes shell-quoted values atomically with mode 0600 and validates the resulting
 syntax, permissions and required assignments. `suite` is selected from
-`resolute` and `focal`; `suite_type` currently exposes only `ubuntu`. Boolean
+`resolute` and `noble`; `suite_type` currently exposes only `ubuntu`. Boolean
 configuration uses `yes`/`no` toggles. Mount point, LUKS header reservation and
 Btrfs options remain fixed implementation defaults rather than interactive
-choices.
+choices. After the generated values and post-summary validation are shown, an
+explicit toggle controls whether installation starts; declining retains
+`setup.conf` and exits without entering the destructive installation flow.
 
 The target-side repository copy is an installation input, not a permanent
 runtime dependency. Four commands are deliberately installed as autonomous
@@ -281,9 +286,9 @@ path; it does not remove password or recovery keyslots.
 
 ## Configuration reality
 
-`setup.conf` is executable shell configuration and presently contains default
-passphrase/PIN placeholders. It must be protected as secret-bearing input and
-updated before real use. `pre_download` and `enable_tpm` are enabled only by the
-literal value `yes`. `suite_type` selects the distribution icon used by rEFInd;
-the default `ubuntu` selects `os_ubuntu.png`. `sb_key_dir` currently has no
-script consumer.
+`setup.conf.example` is executable shell configuration containing the versioned
+defaults and placeholder credentials. `setup.conf` is the generated,
+secret-bearing runtime configuration and must remain protected. `pre_download`
+and `enable_tpm` are enabled only by the literal value `yes`. `suite_type`
+selects the distribution icon used by rEFInd; the default `ubuntu` selects
+`os_ubuntu.png`. `sb_key_dir` currently has no script consumer.

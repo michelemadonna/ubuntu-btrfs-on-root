@@ -4,6 +4,7 @@ set -euo pipefail
 
 test_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "$test_dir/../.." && pwd)"
+export SETUP_CONFIG_FILE="$repository_root/setup.conf.example"
 
 # Paths are runtime-derived so tests work from any current directory.
 # shellcheck disable=SC1090,SC1091

@@ -12,7 +12,7 @@ repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
 # shellcheck disable=SC1090,SC1091
 source "$repository_root/lib/common.sh"
 # shellcheck disable=SC1090,SC1091
-source "$repository_root/setup.conf"
+source "${SETUP_CONFIG_FILE:-$repository_root/setup.conf}"
 # shellcheck disable=SC1090,SC1091
 source "$script_dir/btrfs-subvol-setup"
 # shellcheck disable=SC1090,SC1091
