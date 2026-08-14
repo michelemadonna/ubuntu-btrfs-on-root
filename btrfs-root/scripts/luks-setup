@@ -19,6 +19,7 @@ luks-setup.validate_configuration() {
 	common.require_nonempty "mp" "${mp:-}"
 	common.require_nonempty "root_sub_vol" "${root_sub_vol:-}"
 	common.require_nonempty "keyslot_size" "${keyslot_size:-}"
+	common.require_nonempty "iter_time" "${iter_time:-}"
 	common.require_nonempty "enlarge" "${enlarge:-}"
 	common.require_nonempty "PASSPHRASE" "${PASSPHRASE:-}"
 
@@ -28,6 +29,8 @@ luks-setup.validate_configuration() {
 		log.die "mp must be an absolute path other than /."
 	[[ $root_sub_vol != /* && $root_sub_vol != *..* ]] ||
 		log.die "root_sub_vol must be a safe relative Btrfs path."
+	[[ $iter_time =~ ^[1-9][0-9]*$ ]] ||
+		log.die "iter_time must be a positive integer expressed in milliseconds."
 	case $enlarge in
 	yes | no) ;;
 	*) log.die "enlarge must be either 'yes' or 'no'." ;;
@@ -80,13 +83,13 @@ luks-setup.run() {
 	luks-setup.read_partition_identity "$source_device" disk_name partition_number
 	log.info "Resolved $source_device as partition $partition_number on /dev/$disk_name"
 	log.warn "cryptsetup may report that a keyslot operation could fail during in-place encryption"
-	log.info "Encrypt $source_device in place as LUKS2 using Argon2id; passphrase is supplied through standard input and is never logged"
+	log.info "Encrypt $source_device in place as LUKS2 using Argon2id with a ${iter_time} ms PBKDF target; passphrase is supplied through standard input and is never logged"
 	printf '%s\n' "$PASSPHRASE" |
 		cryptsetup reencrypt \
 			--encrypt \
 			--type luks2 \
 			--pbkdf argon2id \
-			--iter-time 2000 \
+			--iter-time "$iter_time" \
 			--reduce-device-size "$keyslot_size" \
 			"$source_device"
 

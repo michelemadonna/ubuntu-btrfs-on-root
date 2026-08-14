@@ -7,18 +7,26 @@ umask 077
 # Standalone logging helpers
 # ---------------------------------------------------------------------------
 
-log.info() { printf 'INFO: %s\n' "$*"; }
-log.warn() { printf 'WARN: %s\n' "$*" >&2; }
-log.error() { printf 'ERROR: %s\n' "$*" >&2; }
-log.success() { printf 'SUCCESS: %s\n' "$*"; }
-log.section() { printf '\n==> %s\n' "$*"; }
+log.info() { printf '\033[1;36mℹ [INFO]\033[0m %s\n' "$*"; }
+log.warn() { printf '\033[1;33m⚠ [WARN]\033[0m %s\n' "$*" >&2; }
+log.error() { printf '\033[1;31m✖ [ERROR]\033[0m %s\n' "$*" >&2; }
+log.success() { printf '\033[1;32m✔ [SUCCESS]\033[0m %s\n' "$*"; }
+log.section() { printf '\n\033[1;35m◆ ========== %s ==========\033[0m\n' "$*"; }
 log.summary_item() {
 	local label=$1 value=$2
-	printf '  %-24s %s\n' "$label:" "$value"
+	printf '  \033[1;36m• %-22s\033[0m %s\n' "$label:" "$value"
 }
 log.die() {
-	log.error "$*"
-	exit 1
+	local previous_status=$?
+	local message=${1:-Fatal error}
+	local command_error=${2:-}
+	local status=${3:-$previous_status}
+	[[ $status =~ ^[0-9]+$ ]] || status=1
+	log.error "$message"
+	((status == 0)) || log.error "Command exit status: $status"
+	[[ -z $command_error ]] || log.error "Command error: $command_error"
+	((status != 0)) || status=1
+	exit "$status"
 }
 
 # ---------------------------------------------------------------------------
@@ -389,6 +397,13 @@ generate-uki.run() {
 		log.success "All UKIs were generated and validated successfully."
 	else
 		log.warn "${#uki_failed[@]} UKI(s) reported validation errors."
+	fi
+
+	log.section "Post-summary validation"
+	if ((${#uki_failed[@]} == 0 && ${#uki_success[@]} > 0)); then
+		log.success "Validated the final UKI report: every processed kernel succeeded"
+	else
+		log.error "Final UKI report validation failed: successful=${#uki_success[@]}, failed=${#uki_failed[@]}"
 	fi
 
 	((${#uki_failed[@]} == 0))

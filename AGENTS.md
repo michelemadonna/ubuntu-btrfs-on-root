@@ -119,6 +119,12 @@ failed and, when safe, the recovery action. The main subsystem setup scripts
 must finish with a truthful operation summary; do not report skipped or failed
 steps as completed.
 
+Immediately after every operational summary, run a clearly labelled
+`Post-summary validation` for everything that can be checked safely at that
+point. Validate produced files, mounts, configuration, executable hooks and
+signatures as applicable. A required failed check must terminate the script;
+never substitute validation that mutates firmware, LUKS tokens or TPM state.
+
 Modified Bash files must pass `bash -n`, ShellCheck and the repository shfmt
 style. Do not silence ShellCheck without a nearby explanation.
 
@@ -135,8 +141,16 @@ Logging is isolated in `lib/log.sh` and uses the `log.*` namespace:
     log.warn "Retrying operation"
     log.die "Target validation failed"
 
+`log.die` preserves and reports the preceding nonzero status. When a caller has
+intentionally captured safe, non-secret stderr, it may use
+`log.die "message" "$command_error" "$command_status"`. Never pass captured
+output blindly because commands may include credentials or private material.
+
 Do not add logging functions back to `common.sh`. Standalone installed commands
 must provide compatible local `log.*` primitives instead of sourcing `lib/`.
+Keep the established color/icon semantics and leave summary values unstyled so
+they remain easy to copy: `ℹ` info, `⚠` warning, `✖` error, `✔` success, `◆`
+section and `•` summary item.
 
 Do not move domain logic into `lib/`. Btrfs layout decisions belong under
 `btrfs-root/`; signing policy under `secure-boot/`; snapshot selection under
@@ -157,6 +171,9 @@ real devices.
   operation says otherwise.
 - Never pass secrets through command-line arguments when a safer input channel
   is available.
+- Treat `iter_time` as an Argon2id calibration target in milliseconds, not a
+  fixed iteration count; assess both password-guessing cost and unlock latency
+  before changing its default.
 - Keep the installed root at `@ubuntu/@` and check every consumer before
   changing any subvolume path.
 - Treat each suite as a top-level sibling container, such as `@noble` or

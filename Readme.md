@@ -84,6 +84,7 @@ Important current options are:
 | `suite_type` | `ubuntu` | distribution icon name used by rEFInd, such as `os_ubuntu.png` |
 | `btrfs_options` | repository default | mount options embedded in fstab and the UKI command line |
 | `swap_size` | `4G` | Btrfs swap-file size |
+| `iter_time` | `3000` | Argon2id PBKDF calibration target in milliseconds |
 | `enlarge` | `no` | enlarge the root partition before conversion only when set to `yes` |
 | `pre_download` | `yes` | pre-download target packages only for literal `yes` |
 | `snapshot_menu` | `yes` | install the dracut snapshot selector |
@@ -92,6 +93,16 @@ Important current options are:
 
 `PASSPHRASE`, `snapshot_menu_pin_value` and `mok_pin` must not be logged or
 committed with real values.
+
+`iter_time` is passed to `cryptsetup reencrypt --iter-time`. Despite its name,
+it is not a fixed iteration count: cryptsetup benchmarks Argon2id and chooses
+parameters intended to make passphrase derivation take approximately that many
+milliseconds on the installation machine. The default `3000` targets about
+three seconds. Raising it makes offline password guesses more expensive but
+also slows legitimate password unlock and keyslot operations; lowering it
+improves responsiveness but weakens resistance to offline guessing. TPM unlock
+does not incur the passphrase derivation in the same way, while the retained
+password path continues to use the PBKDF parameters stored in the LUKS header.
 
 ## Run setup
 
@@ -105,10 +116,16 @@ The installation is intentionally interactive where a destructive target or
 security action needs confirmation. Keep the terminal open and read every
 device name before confirming.
 
+Each operational summary is followed by a `Post-summary validation`. Depending
+on the subsystem, it checks mounts, subvolumes, generated configuration,
+standalone commands, initramfs/UKI artifacts or EFI signatures. A failed
+mandatory check terminates setup instead of leaving a successful summary as the
+last reported state. These checks do not replace a real reboot test.
+
 The main flow performs these operations:
 
 1. creates the persistent rescue system on `/dev/sda1` from `/cdrom`;
-2. creates `@ubuntu/@` and the dedicated Btrfs data subvolumes;
+2. creates `@$suite/@` and the dedicated Btrfs data subvolumes;
 3. creates a Btrfs swap file;
 4. encrypts `/dev/sda3` in place as LUKS2 and mounts it as
    `/dev/mapper/root`;

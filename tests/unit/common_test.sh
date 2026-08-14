@@ -26,21 +26,21 @@ test_log_info() {
 	local output
 
 	output="$(log.info "installation ready")"
-	assert_equal $'\033[32mINFO:\033[0m installation ready' "$output"
+	assert_equal $'\033[1;36mℹ [INFO]\033[0m installation ready' "$output"
 }
 
 test_log_summary_item() {
 	local output
 
 	output="$(log.summary_item "Root mapper" "/dev/mapper/root")"
-	assert_equal "  Root mapper:             /dev/mapper/root" "$output"
+	assert_equal $'  \033[1;36m• Root mapper:          \033[0m /dev/mapper/root' "$output"
 }
 
 test_log_error() {
 	local output
 
 	output="$(log.error "installation failed" 2>&1)"
-	assert_equal $'\033[31mERROR:\033[0m installation failed' "$output"
+	assert_equal $'\033[1;31m✖ [ERROR]\033[0m installation failed' "$output"
 }
 
 test_require_readable_file() {
@@ -54,7 +54,22 @@ test_require_nonempty() {
 	if output="$(common.require_nonempty "suite" "" 2>&1)"; then
 		fail "require_nonempty accepted an empty value"
 	fi
-	assert_equal $'\033[31mERROR:\033[0m suite must be configured.' "$output"
+	assert_equal \
+		$'\033[1;31m✖ [ERROR]\033[0m suite must be configured.\n\033[1;31m✖ [ERROR]\033[0m Command exit status: 1' \
+		"$output"
+}
+
+test_log_die_preserves_status_and_detail() {
+	local output status
+
+	set +e
+	output="$(bash -c 'source "$1"; log.die "command failed" "captured stderr" 42' _ "$repository_root/lib/log.sh" 2>&1)"
+	status=$?
+	set -e
+
+	assert_equal "42" "$status"
+	[[ $output == *"Command exit status: 42"* ]] || fail "log.die omitted command exit status"
+	[[ $output == *"Command error: captured stderr"* ]] || fail "log.die omitted explicit command error"
 }
 
 test_require_commands() {
@@ -67,6 +82,7 @@ test_require_commands() {
 test_log_info
 test_log_summary_item
 test_log_error
+test_log_die_preserves_status_and_detail
 test_require_readable_file
 test_require_nonempty
 test_require_commands

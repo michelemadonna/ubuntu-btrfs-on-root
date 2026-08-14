@@ -60,6 +60,8 @@ Shared repository logging is implemented by `lib/log.sh` through the `log.*`
 namespace. `lib/common.sh` sources that module and contains validation and other
 non-logging helpers. Standalone installed commands embed compatible `log.*`
 primitives so this separation does not create a runtime repository dependency.
+Colored icons distinguish repository logs from raw command output; summary
+labels are styled while their values remain plain text.
 
 ## Rescue subsystem
 
@@ -115,8 +117,11 @@ After the subvolume copy has succeeded, the original top-level installation
 content is removed while `@`-prefixed subvolumes are retained.
 
 Encryption is performed in place. The Btrfs filesystem is shrunk by 32 MiB,
-unmounted and passed to `cryptsetup reencrypt` as LUKS2 with Argon2id, a 2000 ms
-iteration target and a 32 MiB reduced device size. The resulting device is
+unmounted and passed to `cryptsetup reencrypt` as LUKS2 with Argon2id, the
+configured `iter_time` target (3000 ms by default) and a 32 MiB reduced device
+size. `--iter-time` is a calibration target in milliseconds, not a literal
+iteration count: cryptsetup selects Argon2id parameters intended to consume
+approximately that duration on the setup machine. The resulting device is
 opened as `/dev/mapper/root`, the filesystem is mounted through that mapping and
 resized to its maximum.
 

@@ -103,6 +103,24 @@ secure-boot-setup.print_summary() {
 	fi
 }
 
+secure-boot-setup.validate_result() {
+	local loader
+
+	log.section "Post-summary validation"
+	common.require_readable_file "$SBCTL_KEYROOT/db/db.pem" "Secure Boot db certificate"
+	common.require_readable_file "$SBCTL_KEYROOT/db/db.key" "Secure Boot db private key"
+	if [[ $SETUP_MODE == 0 ]]; then
+		loader="$ESP/EFI/refind/grubx64.efi"
+		common.require_readable_file "$ESP/EFI/refind/shimx64.efi" "Shim loader"
+		common.require_readable_file "$ESP/EFI/refind/mmx64.efi" "MokManager"
+	else
+		loader="$ESP/EFI/refind/refind_x64.efi"
+	fi
+	common.require_readable_file "$loader" "Repository-signed rEFInd loader"
+	sbverify --cert "$SBCTL_KEYROOT/db/db.pem" "$loader" >/dev/null || log.die "rEFInd post-summary signature validation failed: $loader"
+	log.success "Validated Secure Boot keys, selected trust-path loaders and rEFInd signature"
+}
+
 secure-boot-setup.run() {
 	common.require_root
 	common.require_commands apt-get find od tr uname
@@ -135,6 +153,7 @@ secure-boot-setup.run() {
 	secure-boot-setup.run_phase \
 		"fwupd configuration and signing" "$script_dir/fwupd-setup"
 	secure-boot-setup.print_summary
+	secure-boot-setup.validate_result
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

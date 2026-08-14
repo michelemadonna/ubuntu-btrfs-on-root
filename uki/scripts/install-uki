@@ -135,11 +135,29 @@ install-uki.print_summary() {
 	log.success "UKI support installed and all installed kernels validated"
 }
 
+install-uki.validate_result() {
+	local uki
+	local validated=0
+
+	log.section "Post-summary validation"
+	for uki in "$INSTALL_UKI_KERNEL_CONFIG" "$INSTALL_UKI_UKIFY_CONFIG" "$INSTALL_UKI_CMDLINE" "$INSTALL_UKI_ENTRY_TOKEN" "$INSTALL_UKI_REFIND_ICON"; do
+		common.require_readable_file "$uki" "UKI configuration artifact"
+	done
+	[[ -x /usr/local/sbin/generate-uki ]] || log.die "Standalone generate-uki command is missing or not executable."
+	[[ -x /usr/lib/kernel/install.d/99-refind-menu.install ]] || log.die "rEFInd kernel-install hook is missing or not executable."
+	while IFS= read -r -d '' uki; do
+		sbverify --cert /var/lib/sbctl/keys/db/db.pem "$uki" >/dev/null || log.die "UKI signature validation failed after summary: $uki"
+		validated=$((validated + 1))
+	done < <(find "$INSTALL_UKI_ESP/EFI/Linux" -maxdepth 1 -type f -name "$suite-*.efi" -print0)
+	((validated > 0)) || log.die "No generated UKI was found for entry token $suite."
+	log.success "Validated UKI configuration, installed hooks and signatures for $validated artifact(s)"
+}
+
 install-uki.run() {
 	local btrfs_uuid luks_uuid root_subvolume
 	common.require_root
 	install-uki.validate_configuration
-	common.require_commands apt-get blkid cryptsetup env grep install ln openssl python3
+	common.require_commands apt-get blkid cryptsetup env find grep install ln openssl python3
 
 	log.section "Unified Kernel Image setup"
 	log.info "Install dracut, ukify and UKI inspection dependencies"
@@ -178,6 +196,7 @@ install-uki.run() {
 	log.info "Generate and validate UKIs for every installed kernel"
 	/usr/local/sbin/generate-uki --all
 	install-uki.print_summary
+	install-uki.validate_result
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

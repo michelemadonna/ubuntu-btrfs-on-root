@@ -5,8 +5,16 @@ set -Eeuo pipefail
 TPM_CONFIG="${TPM_CONFIG:-/etc/tpm.conf}"
 
 log.die() {
-	printf 'ERROR: %s\n' "$*" >&2
-	exit 1
+	local previous_status=$?
+	local message=${1:-Fatal error}
+	local command_error=${2:-}
+	local status=${3:-$previous_status}
+	[[ $status =~ ^[0-9]+$ ]] || status=1
+	printf '\033[1;31m✖ [ERROR]\033[0m %s\n' "$message" >&2
+	((status == 0)) || printf '\033[1;31m✖ [ERROR]\033[0m Command exit status: %s\n' "$status" >&2
+	[[ -z $command_error ]] || printf '\033[1;31m✖ [ERROR]\033[0m Command error: %s\n' "$command_error" >&2
+	((status != 0)) || status=1
+	exit "$status"
 }
 
 tpm-status.require_root() {
@@ -15,11 +23,11 @@ tpm-status.require_root() {
 
 log.summary_item() {
 	local label=$1 value=$2
-	printf '  %-24s %s\n' "$label:" "$value"
+	printf '  \033[1;36m• %-22s\033[0m %s\n' "$label:" "$value"
 }
 
 log.section() {
-	printf '\n==> %s\n' "$*"
+	printf '\n\033[1;35m◆ ========== %s ==========\033[0m\n' "$*"
 }
 
 tpm-status.run() {
@@ -38,10 +46,11 @@ tpm-status.run() {
 	log.summary_item "Signed PCRs" "$TPM_SIGNED_PCRS"
 	log.summary_item "TPM PIN" "$TPM_USE_PIN"
 	log.summary_item "PCR public key" "$PCR_PUBLIC_KEY"
-	printf '\n'
+	log.section "Post-summary validation"
 	systemd-cryptenroll "$LUKS_DEVICE"
 	printf '\n'
 	cryptsetup luksDump "$LUKS_DEVICE"
+	log.success "Validated access to systemd enrollment metadata and the LUKS header"
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

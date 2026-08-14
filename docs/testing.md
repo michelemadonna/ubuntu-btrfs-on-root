@@ -103,6 +103,11 @@ Artifact tests may inspect or extract a prebuilt sample. They must not install
 it into the workstation ESP, sign with production private keys, enroll a key or
 modify EFI variables.
 
+Every operational setup summary is followed by a safe post-summary validation
+of artifacts that exist at that point. These checks validate items such as
+mounts, generated configuration, executable hooks and signatures; they do not
+prove a successful reboot or authorize destructive enrollment tests.
+
 ## Required destructive integration environment
 
 End-to-end testing needs a dedicated UEFI-capable target that mirrors the real

@@ -58,12 +58,14 @@ test_summary() {
 	root_sub_vol="@ubuntu"
 	swap_size="4G"
 	keyslot_size="32m"
+	iter_time="3000"
 	enlarge="no"
 	PASSPHRASE="must-not-appear"
 	output="$(btrfs-root-setup.print_summary)"
 
 	[[ $output == *"/dev/vda3"* ]] || fail "source partition is missing from summary"
 	[[ $output == *"/dev/mapper/root"* ]] || fail "mapper is missing from summary"
+	[[ $output == *"3000 ms"* ]] || fail "Argon2id time target is missing from summary"
 	[[ $output == *"/mnt/target/etc/crypttab"* ]] || fail "crypttab path is missing from summary"
 	[[ $output != *"$PASSPHRASE"* ]] || fail "passphrase leaked into summary"
 }
@@ -74,12 +76,19 @@ test_configuration_validation() {
 	root_sub_vol="@ubuntu"
 	swap_size="4G"
 	keyslot_size="32m"
+	iter_time="3000"
 	export btrfs_options="defaults,noatime"
 	enlarge="no"
 	PASSPHRASE="configured"
 	btrfs-subvol-setup.validate_configuration
 	luks-setup.validate_configuration
 	fstab-setup.validate_configuration
+
+	iter_time="0"
+	if (luks-setup.validate_configuration) 2>/dev/null; then
+		fail "zero iter_time was accepted"
+	fi
+	iter_time="3000"
 
 	mp="/"
 	if (btrfs-subvol-setup.validate_configuration) 2>/dev/null; then

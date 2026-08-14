@@ -213,7 +213,7 @@ setup.unmount_everything() {
 			continue
 		fi
 
-		printf 'ERROR: unable to unmount %s\n' "$target" >&2
+		log.error "Unable to unmount $target"
 		failed=1
 	done
 

@@ -92,7 +92,7 @@ install-rescue-live.run() {
 
 	common.require_root
 	install-rescue-live.validate_configuration
-	common.require_commands blockdev dd df du find findmnt grep lsblk mkfs.ext4 mkfs.vfat mount mountpoint rm rsync sed sync tail tr umount xargs
+	common.require_commands blkid blockdev dd df du find findmnt grep lsblk mkfs.ext4 mkfs.vfat mount mountpoint rm rsync sed sync tail tr umount xargs
 	[[ -d $SOURCE_DIR/casper ]] || log.die "$SOURCE_DIR is not an Ubuntu live medium: casper/ is missing."
 	[[ -b $TARGET_DEV ]] || log.die "$TARGET_DEV is not a block device."
 	[[ $(lsblk -ndo TYPE "$TARGET_DEV") == part ]] || log.die "$TARGET_DEV must be a partition, not a whole disk."
@@ -154,6 +154,15 @@ install-rescue-live.run() {
 	log.summary_item "Persistence" "$persistence_mib MiB"
 	log.summary_item "Modified GRUB files" "${grub_files[*]}"
 	log.success "Persistent Ubuntu rescue system created"
+
+	log.section "Post-summary validation"
+	[[ $(blkid -s TYPE -o value "$TARGET_DEV") == vfat ]] || log.die "Rescue target is not FAT after creation."
+	[[ $(blkid -s LABEL -o value "$TARGET_DEV") == "$TARGET_LABEL" ]] || log.die "Rescue filesystem label does not match $TARGET_LABEL."
+	[[ -s $rescue_mount_dir/writable ]] || log.die "Rescue persistence file is missing or empty."
+	[[ $(blkid -s TYPE -o value "$rescue_mount_dir/writable") == ext4 ]] || log.die "Rescue persistence file is not ext4."
+	grep -Eqs '^[[:space:]]*linux(efi)?[[:space:]].*/casper/vmlinuz.*[[:space:]]persistent([[:space:]]|$)' \
+		"${grub_paths[@]}" || log.die "Rescue GRUB persistence validation failed."
+	log.success "Validated rescue FAT filesystem, label, ext4 persistence and GRUB configuration"
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

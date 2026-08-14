@@ -140,6 +140,19 @@ btrfs-snapshots-mng-setup.print_summary() {
 	log.success "Btrfs snapshot management setup completed"
 }
 
+btrfs-snapshots-mng-setup.validate_result() {
+	log.section "Post-summary validation"
+	[[ -r /etc/snapper/configs/root ]] || log.die "Snapper root profile is missing."
+	[[ -r /etc/snapper/configs/home ]] || log.die "Snapper home profile is missing."
+	if [[ $snapshot_menu == yes ]]; then
+		[[ -r $menu_config ]] || log.die "Snapshot-menu configuration is missing."
+		[[ -x $module_target/snapshot-menu.sh ]] || log.die "Snapshot-menu executable is missing."
+		[[ -x $module_target/listener/snapshot-key-listener ]] || log.die "Compiled snapshot key listener is missing."
+		grep -Fqx "ROOT_SUBVOL=\"$root_sub_vol/@\"" "$menu_config" || log.die "Snapshot-menu root subvolume is incorrect."
+	fi
+	log.success "Validated Snapper profiles and configured snapshot-menu artifacts"
+}
+
 btrfs-snapshots-mng-setup.run() {
 	common.require_root
 	btrfs-snapshots-mng-setup.validate_configuration
@@ -157,6 +170,7 @@ btrfs-snapshots-mng-setup.run() {
 		log.info "Snapshot menu disabled; skip dracut module installation"
 	fi
 	btrfs-snapshots-mng-setup.print_summary
+	btrfs-snapshots-mng-setup.validate_result
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

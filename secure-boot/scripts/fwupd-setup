@@ -301,6 +301,7 @@ fwupd-setup.print_summary() {
 		'^\[uefi_capsule\]' \
 		"$FWUPD_CONF" || true
 
+	log.section "Post-summary validation"
 	log.info "Verify fwupd EFI signature with $DB_CERT"
 
 	sbverify --cert "$DB_CERT" "$FWUPD_EFI" ||

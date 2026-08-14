@@ -59,6 +59,9 @@ boot and maintenance commands.
 - Root encryption uses LUKS2 on the physical root partition and exposes the
   mapping as `root`.
 - In-place encryption reserves 32 MiB by shrinking Btrfs before reencryption.
+- `iter_time` is a positive Argon2id calibration target in milliseconds and
+  defaults to 3000; it is not a literal iteration count. Increasing it raises
+  both offline-guessing cost and legitimate password-operation latency.
 - The generated crypttab identity is the LUKS UUID, not a volatile mapper path.
 - A usable password or recovery mechanism remains available after TPM
   enrollment and resealing.

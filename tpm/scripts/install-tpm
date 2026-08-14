@@ -73,6 +73,22 @@ install-tpm.print_summary() {
 	log.success "TPM integration installed without changing LUKS tokens"
 }
 
+install-tpm.validate_result() {
+	local option
+	local TPM_DEVICE
+
+	log.section "Post-summary validation"
+	common.require_readable_file "$INSTALL_TPM_CONFIG" "Installed TPM configuration"
+	# shellcheck source=/dev/null
+	source "$INSTALL_TPM_CONFIG"
+	common.require_readable_file /etc/uki/keys/pcr-public.pem "Installed PCR public key"
+	[[ -x /usr/local/sbin/tpm-enroll && -x /usr/local/sbin/tpm-reseal && -x /usr/local/sbin/tpm-status ]] ||
+		log.die "One or more standalone TPM commands are missing or not executable."
+	option="$(install-tpm.build_kernel_option "$TPM_DEVICE")"
+	grep -Fq "$option" "$INSTALL_TPM_CMDLINE" || log.die "Kernel command line does not contain the required TPM option."
+	log.success "Validated TPM configuration, PCR key, standalone commands and kernel option"
+}
+
 install-tpm.run() {
 	local luks_device
 	common.require_root
@@ -93,6 +109,7 @@ install-tpm.run() {
 	install-tpm.install_runtime
 	install-tpm.write_boot_configuration
 	install-tpm.print_summary
+	install-tpm.validate_result
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
