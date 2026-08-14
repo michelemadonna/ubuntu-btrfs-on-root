@@ -25,25 +25,41 @@ assert_equal() {
 test_log_info() {
 	local output
 
-	output="$(log_info "installation ready")"
+	output="$(common.log_info "installation ready")"
 	assert_equal $'\033[32mINFO:\033[0m installation ready' "$output"
 }
 
+test_log_summary_item() {
+	local output
+
+	output="$(common.log_summary_item "Root mapper" "/dev/mapper/root")"
+	assert_equal "  Root mapper:             /dev/mapper/root" "$output"
+}
+
 test_require_readable_file() {
-	require_readable_file "$repository_root/setup.conf" "Configuration file"
+	common.require_readable_file "$repository_root/setup.conf" "Configuration file"
 }
 
 test_require_nonempty() {
 	local output
 
-	require_nonempty "suite" "ubuntu"
-	if output="$(require_nonempty "suite" "" 2>&1)"; then
+	common.require_nonempty "suite" "ubuntu"
+	if output="$(common.require_nonempty "suite" "" 2>&1)"; then
 		fail "require_nonempty accepted an empty value"
 	fi
 	assert_equal "ERROR: suite must be configured." "$output"
 }
 
+test_require_commands() {
+	common.require_commands printf
+	if (common.require_commands codex-command-that-does-not-exist) 2>/dev/null; then
+		fail "require_commands accepted a missing command"
+	fi
+}
+
 test_log_info
+test_log_summary_item
 test_require_readable_file
 test_require_nonempty
+test_require_commands
 printf 'Common framework tests passed.\n'

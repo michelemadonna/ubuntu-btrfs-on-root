@@ -14,23 +14,23 @@ cleanup_required=false
 # shellcheck disable=SC1090,SC1091
 source "$repository_root/lib/common.sh"
 
-load_configuration() {
+setup.load_configuration() {
 	local config_file="$repository_root/setup.conf"
 
-	require_readable_file "$config_file" "Configuration file"
+	common.require_readable_file "$config_file" "Configuration file"
 	# The configuration path is runtime-derived so the script works from any cwd.
 	# shellcheck disable=SC1090,SC1091
 	source "$config_file"
 
-	require_nonempty "root_dev" "${root_dev:-}"
-	require_nonempty "efi_dev" "${efi_dev:-}"
-	require_nonempty "mp" "${mp:-}"
-	require_nonempty "root_sub_vol" "${root_sub_vol:-}"
-	require_nonempty "suite" "${suite:-}"
-	require_nonempty "pre_download" "${pre_download:-}"
+	common.require_nonempty "root_dev" "${root_dev:-}"
+	common.require_nonempty "efi_dev" "${efi_dev:-}"
+	common.require_nonempty "mp" "${mp:-}"
+	common.require_nonempty "root_sub_vol" "${root_sub_vol:-}"
+	common.require_nonempty "suite" "${suite:-}"
+	common.require_nonempty "pre_download" "${pre_download:-}"
 }
 
-show_help() {
+setup.show_help() {
 	cat <<-'EOF'
 		Configure an Ubuntu installation with a LUKS-encrypted Btrfs root,
 		Secure Boot, UKIs, TPM2 unlock, and Snapper snapshot support.
@@ -44,13 +44,13 @@ show_help() {
 	EOF
 }
 
-parse_arguments() {
+setup.parse_arguments() {
 	case ${1:-} in
 	'')
 		return
 		;;
 	-h | -\? | --help)
-		show_help
+		setup.show_help
 		exit 0
 		;;
 	--setup-tpm-luks-auto_ulock)
@@ -62,24 +62,24 @@ parse_arguments() {
 		exit 0
 		;;
 	--*)
-		die "Invalid option $1. Use --help for more information."
+		common.die "Invalid option $1. Use --help for more information."
 		;;
 	*)
-		die "Unexpected argument: $1"
+		common.die "Unexpected argument: $1"
 		;;
 	esac
 }
 
-preparation() {
-	log_info "Prepare installation target"
+setup.prepare_target() {
+	common.log_info "Prepare installation target"
 	umount /target/boot/efi
 	umount /target/cdrom
 	umount /target
 	mkdir "$mp"
 }
 
-prepare_chroot() {
-	log_info "Prepare $mp for chroot"
+setup.prepare_chroot() {
+	common.log_info "Prepare $mp for chroot"
 	mount --rbind /dev "$mp/dev"
 	mount --make-rslave "$mp/dev"
 	mount -t proc proc "$mp/proc"
@@ -109,16 +109,16 @@ prepare_chroot() {
 	chmod 0755 "$mp/usr/sbin/policy-rc.d"
 }
 
-run_inner_installation() {
+setup.run_inner_installation() {
 	local inner_repository="/root/$repository_name"
 
 	cp -Rf "$repository_root" "$mp/root/"
 	chmod a+x "$mp$inner_repository/$script_name"
-	log_info "Run installation phases in the target chroot"
+	common.log_info "Run installation phases in the target chroot"
 	unshare --mount --fork chroot "$mp" "$inner_repository/$script_name" "$INNER_MODE"
 }
 
-pre_download_all() {
+setup.pre_download_all() {
 	local -a packages=(
 		asciidoc-base binutils build-essential ca-certificates coreutils cryptsetup-bin
 		cryptsetup-initramfs curl dialog dosfstools dracut efibootmgr findutils fwupd
@@ -135,19 +135,21 @@ pre_download_all() {
 	apt install -y openssh-server open-vm-tools-desktop
 }
 
-inner_installation() {
+setup.inner_installation() {
 	cd "$repository_root"
 	dbus-daemon --system --fork
 	rm -rf -- "/boot/efi/EFI/$suite"
 	apt-get update
 
 	if [[ $pre_download == yes ]]; then
-		pre_download_all
+		setup.pre_download_all
 	fi
 
-	# These phase scripts intentionally execute in this shell and share config.
-	# shellcheck source=/dev/null
-	source "$repository_root/btrfs-root/scripts/btrfs-root-setup"
+	common.log_info "Install target initramfs integration for the configured LUKS root"
+	apt-get install -y cryptsetup-initramfs
+
+	# The Btrfs/LUKS storage phase has already completed outside the chroot.
+	# The remaining phase scripts intentionally execute in this shell.
 	# shellcheck source=/dev/null
 	source "$repository_root/secure-boot/scripts/secure-boot-setup"
 	# shellcheck source=/dev/null
@@ -156,14 +158,14 @@ inner_installation() {
 	source "$repository_root/uki/scripts/install-uki"
 }
 
-restore_chroot_files() {
+setup.restore_chroot_files() {
 	rm -f -- "$mp/usr/sbin/policy-rc.d" "$mp/etc/resolv.conf"
 	if [[ -e $mp/etc/resolv.conf.chroot-save || -L $mp/etc/resolv.conf.chroot-save ]]; then
 		mv "$mp/etc/resolv.conf.chroot-save" "$mp/etc/resolv.conf"
 	fi
 }
 
-unmount_everything() {
+setup.unmount_everything() {
 	local lazy_fallback="${1:-false}"
 	local target
 	local index
@@ -171,19 +173,19 @@ unmount_everything() {
 	local -a mounts=()
 
 	[[ -e $mp ]] || return 0
-	restore_chroot_files
+	setup.restore_chroot_files
 	mapfile -t mounts < <(findmnt -Rrn -o TARGET "$mp" 2>/dev/null)
 
 	for ((index = ${#mounts[@]} - 1; index >= 0; index--)); do
 		target="${mounts[index]}"
 		mountpoint -q "$target" || continue
-		log_info "Unmounting $target"
+		common.log_info "Unmounting $target"
 
 		if umount "$target"; then
 			continue
 		fi
 
-		log_warn "Retrying unmount: $target"
+		common.log_warn "Retrying unmount: $target"
 		sync
 		sleep 0.2
 		if umount "$target"; then
@@ -203,41 +205,40 @@ unmount_everything() {
 	return "$failed"
 }
 
-cleanup_on_exit() {
+setup.cleanup_on_exit() {
 	local status=$?
 
 	if [[ $cleanup_required == true ]]; then
-		unmount_everything true || status=1
+		setup.unmount_everything true || status=1
 	fi
 	exit "$status"
 }
 
-main() {
-	require_root
-	load_configuration
-	log_info "Script path: $script_path"
+setup.main() {
+	common.require_root
+	setup.load_configuration
+	common.log_info "Script path: $script_path"
 
 	if [[ ${1:-} == "$INNER_MODE" ]]; then
-		inner_installation
+		setup.inner_installation
 		return
 	fi
 
-	parse_arguments "$@"
-	[[ -n ${PASSPHRASE:-} ]] || die "PASSPHRASE must be configured for the root volume."
+	setup.parse_arguments "$@"
+	[[ -n ${PASSPHRASE:-} ]] || common.die "PASSPHRASE must be configured for the root volume."
 
-	preparation
+	setup.prepare_target
 	cleanup_required=true
-	trap cleanup_on_exit EXIT
+	trap setup.cleanup_on_exit EXIT
 
 	cd "$repository_root"
-	# shellcheck source=/dev/null
-	source "$repository_root/btrfs-root/scripts/btrfs-root-setup"
-	prepare_chroot
-	run_inner_installation
-	unmount_everything
+	"$repository_root/btrfs-root/scripts/btrfs-root-setup"
+	setup.prepare_chroot
+	setup.run_inner_installation
+	setup.unmount_everything
 	cleanup_required=false
 	trap - EXIT
-	log_info "Finished"
+	common.log_info "Finished"
 }
 
-main "$@"
+setup.main "$@"

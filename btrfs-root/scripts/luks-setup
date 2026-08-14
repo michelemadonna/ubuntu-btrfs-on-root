@@ -1,39 +1,116 @@
 #!/usr/bin/env bash
+# Configuration variables are loaded from the runtime-selected setup.conf.
+# shellcheck disable=SC2154
+
 set -Eeuo pipefail
 umask 077
 
-[[ $EUID -eq 0 ]] || {
-    echo "Run luks-setup as root." >&2
-    exit 1
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
+
+# Runtime-derived paths allow direct execution and sourcing from setup.sh.
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/setup.conf"
+
+luks-setup.validate_configuration() {
+	common.require_nonempty "root_dev" "${root_dev:-}"
+	common.require_nonempty "mp" "${mp:-}"
+	common.require_nonempty "root_sub_vol" "${root_sub_vol:-}"
+	common.require_nonempty "keyslot_size" "${keyslot_size:-}"
+	common.require_nonempty "enlarge" "${enlarge:-}"
+	common.require_nonempty "PASSPHRASE" "${PASSPHRASE:-}"
+
+	[[ $root_dev != /dev/* ]] ||
+		common.die "root_dev must be configured without the /dev/ prefix."
+	[[ $mp == /* && $mp != / ]] ||
+		common.die "mp must be an absolute path other than /."
+	[[ $root_sub_vol != /* && $root_sub_vol != *..* ]] ||
+		common.die "root_sub_vol must be a safe relative Btrfs path."
+	case $enlarge in
+	yes | no) ;;
+	*) common.die "enlarge must be either 'yes' or 'no'." ;;
+	esac
 }
 
-source $repository_root/setup.conf
+luks-setup.build_crypttab_entry() {
+	local luks_uuid=$1
 
-echo -e "\e[32mINFO:\e[0mEncrypt $root_dev..."
+	common.require_nonempty "LUKS UUID" "$luks_uuid"
+	printf 'root UUID=%s none luks,discard\n' "$luks_uuid"
+}
 
-btrfs filesystem resize -"${keyslot_size}" $mp
+luks-setup.read_partition_identity() {
+	local device=$1
+	local -n disk_name_ref=$2
+	local -n partition_number_ref=$3
 
-cd /
-umount $mp
+	disk_name_ref="$(lsblk --noheadings --output pkname "$device" | tr -d '[:space:]')"
+	partition_number_ref="$(lsblk --noheadings --output partn "$device" | tr -d '[:space:]')"
+	common.require_nonempty "Parent disk" "$disk_name_ref"
+	common.require_nonempty "Partition number" "$partition_number_ref"
+}
 
-disk="$(lsblk --noheadings --output pkname /dev/$root_dev)"
-partition_number="$(lsblk --noheadings --output partn /dev/$root_dev | tr -d "[:space:]")"
+luks-setup.write_crypttab() {
+	local luks_device=$1
+	local crypttab_file=$2
+	local luks_uuid
 
-echo 'You may ignore “Warning: keyslot operation could fail …”.'
-echo 'See <https://gitlab.com/cryptsetup/cryptsetup/-/issues/896>.'
-#cryptsetup reencrypt --encrypt --type luks2 --pbkdf pbkdf2 --pbkdf-force-iterations 500000 --reduce-device-size "$keyslot_size" /dev/$root_dev
-echo "${PASSPHRASE}" | cryptsetup reencrypt --encrypt --type luks2 --pbkdf argon2id --iter-time 2000 --reduce-device-size "$keyslot_size" /dev/$root_dev
-#--pbkdf argon2id --iter-time 2000 
-if [[ $enlarge = "yes" ]]; then
-	echo "Enlarge $root_dev"
-	parted --script /dev/"$disk" resizepart "$partition_number" "100%"
+	luks_uuid="$(blkid --match-tag UUID --output value "$luks_device")"
+	common.require_nonempty "LUKS UUID" "$luks_uuid"
+	common.log_info "Write root LUKS mapping to $crypttab_file using UUID $luks_uuid"
+	luks-setup.build_crypttab_entry "$luks_uuid" >"$crypttab_file"
+}
+
+luks-setup.run() {
+	local source_device="/dev/$root_dev"
+	local mapper_device="/dev/mapper/root"
+	local disk_name
+	local partition_number
+
+	common.log_section "LUKS2 encryption"
+	common.log_info "Reserve $keyslot_size at the end of the Btrfs filesystem for the LUKS2 header"
+	btrfs filesystem resize "-$keyslot_size" "$mp"
+
+	cd /
+	common.log_info "Unmount plaintext Btrfs filesystem from $mp before in-place encryption"
+	umount "$mp"
+
+	luks-setup.read_partition_identity "$source_device" disk_name partition_number
+	common.log_info "Resolved $source_device as partition $partition_number on /dev/$disk_name"
+	common.log_warn "cryptsetup may report that a keyslot operation could fail during in-place encryption"
+	common.log_info "Encrypt $source_device in place as LUKS2 using Argon2id; passphrase is supplied through standard input and is never logged"
+	printf '%s\n' "$PASSPHRASE" |
+		cryptsetup reencrypt \
+			--encrypt \
+			--type luks2 \
+			--pbkdf argon2id \
+			--iter-time 2000 \
+			--reduce-device-size "$keyslot_size" \
+			"$source_device"
+
+	if [[ $enlarge == yes ]]; then
+		common.log_info "Extend partition $partition_number on /dev/$disk_name to all available space"
+		parted --script "/dev/$disk_name" resizepart "$partition_number" '100%'
+	else
+		common.log_info "Partition enlargement disabled by configuration"
+	fi
+
+	common.log_info "Open $source_device as LUKS mapper $mapper_device"
+	printf '%s\n' "$PASSPHRASE" |
+		cryptsetup open "$source_device" root
+	common.log_info "Mount normal root subvolume $root_sub_vol/@ from $mapper_device at $mp"
+	mount "$mapper_device" -o "subvol=$root_sub_vol/@" "$mp"
+	common.log_info "Grow the Btrfs filesystem to the maximum size exposed by the mapper"
+	btrfs filesystem resize max "$mp"
+
+	luks-setup.write_crypttab "$source_device" "$mp/etc/crypttab"
+	common.log_success "LUKS2 encryption and root mapping configured"
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	common.require_root
+	luks-setup.validate_configuration
+	luks-setup.run
 fi
-
-echo "${PASSPHRASE}" | cryptsetup open /dev/$root_dev root
-mount /dev/mapper/root -o subvol=$root_sub_vol/@ $mp
-btrfs filesystem resize max $mp
-
-echo -e "\e[32mINFO:\e[0mPatch /etc/crypttab"
-
-echo "root $root_uuid none luks,discard" > /etc/crypttab 
-apt-get install -y cryptsetup-initramfs

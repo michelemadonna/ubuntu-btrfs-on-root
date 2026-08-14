@@ -154,7 +154,7 @@ executing privileged commands directly.
 Example:
 
 ```bash
-build_pcr_argument() {
+tpm-enroll.build_pcr_argument() {
     local -a pcrs=("$@")
     local IFS=+
     printf '%s\n' "${pcrs[*]}"
@@ -165,7 +165,7 @@ Test:
 
 ```bash
 @test "PCR values are joined with plus signs" {
-    run build_pcr_argument 7 11 14
+    run tpm-enroll.build_pcr_argument 7 11 14
 
     [ "$status" -eq 0 ]
     [ "$output" = "7+11+14" ]
@@ -512,6 +512,14 @@ invalid transition.
 
 Btrfs-related pure logic should be tested using fixtures.
 
+These tests may source non-executing phase scripts from `btrfs-root/`, but
+testability alone must not cause helpers to be moved into the top-level common
+framework or an otherwise unnecessary feature-level common file.
+
+Tests call production functions through their qualified names, such as
+`fstab-setup.build_entries` and `luks-setup.build_crypttab_entry`. This also
+checks that ownership remains explicit at the call site.
+
 Examples include:
 
 - subvolume path construction;
@@ -520,6 +528,11 @@ Examples include:
 - mount-option preservation;
 - overlay lowerdir selection;
 - detection of current root state.
+- construction of the complete configured subvolume path list;
+- generated target `fstab` root and data-subvolume entries;
+- rejection of `/` or non-absolute target mount points.
+- preservation of visible and hidden entries when directory contents move to
+  dedicated data subvolumes.
 
 Tests must include both:
 
@@ -543,6 +556,14 @@ Examples:
 - preserve recovery mechanisms;
 - construct enrollment arguments;
 - reject invalid device configuration.
+- construct the target `crypttab` entry from a post-encryption LUKS UUID;
+- mock `blkid` when validating UUID discovery;
+- verify that summaries and logs never contain the configured passphrase.
+
+The Btrfs-root coordinator summary should be artifact-tested for the resolved
+source partition, mapper, normal root subvolume, swapfile, target `fstab` and
+target `crypttab`. Summary tests must call pure formatting helpers or mocks;
+they must not source an entry point that starts the destructive storage phase.
 
 Normal validation must not execute:
 

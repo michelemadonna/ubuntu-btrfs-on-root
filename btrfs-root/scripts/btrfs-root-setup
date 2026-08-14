@@ -1,14 +1,77 @@
 #!/usr/bin/env bash
+# Configuration variables are loaded from the runtime-selected setup.conf.
+# shellcheck disable=SC2154
+
 set -Eeuo pipefail
 umask 077
 
-[[ $EUID -eq 0 ]] || {
-    echo "Run btrfs-root-setup as root." >&2
-    exit 1
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
+
+# Runtime-derived paths allow direct execution and sourcing from setup.sh.
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/setup.conf"
+# shellcheck disable=SC1090,SC1091
+source "$script_dir/btrfs-subvol-setup"
+# shellcheck disable=SC1090,SC1091
+source "$script_dir/luks-setup"
+# shellcheck disable=SC1090,SC1091
+source "$script_dir/fstab-setup"
+
+btrfs-root-setup.configured_subvolume_paths() {
+	local name
+
+	for name in @ @home @cache @log @tmp @libvirt @docker @swap; do
+		printf '%s/%s\n' "$root_sub_vol" "$name"
+	done
 }
 
-source $repository_root/setup.conf
+btrfs-root-setup.print_summary() {
+	local enlargement_status="disabled"
+	local subvolume_paths
 
-. "$repository_root/btrfs-root/scripts/btrfs-subvol-setup"
-. "$repository_root/btrfs-root/scripts/luks-setup"
-. "$repository_root/btrfs-root/scripts/fstab-setup"
+	if [[ $enlarge == yes ]]; then
+		enlargement_status="extended to available disk space"
+	fi
+	subvolume_paths="$(btrfs-root-setup.configured_subvolume_paths | paste -sd, -)"
+
+	common.log_section "Btrfs root setup summary"
+	common.log_summary_item "Status" "completed successfully"
+	common.log_summary_item "Source partition" "/dev/$root_dev"
+	common.log_summary_item "LUKS format" "LUKS2 with Argon2id"
+	common.log_summary_item "LUKS mapper" "/dev/mapper/root"
+	common.log_summary_item "Keyslot reservation" "$keyslot_size"
+	common.log_summary_item "Partition enlargement" "$enlargement_status"
+	common.log_summary_item "Btrfs mount point" "$mp"
+	common.log_summary_item "Normal root" "$root_sub_vol/@"
+	common.log_summary_item "Subvolumes" "$subvolume_paths"
+	common.log_summary_item "Swapfile" "$root_sub_vol/@swap/swapfile ($swap_size)"
+	common.log_summary_item "crypttab" "$mp/etc/crypttab"
+	common.log_summary_item "fstab" "$mp/etc/fstab"
+	common.log_success "Btrfs root storage phase completed"
+}
+
+btrfs-root-setup.run() {
+	common.require_root
+	btrfs-subvol-setup.validate_configuration
+	luks-setup.validate_configuration
+	fstab-setup.validate_configuration
+	common.require_commands btrfs mount umount mv rm find cryptsetup lsblk tr blkid grep sed paste
+	if [[ $enlarge == yes ]]; then
+		common.require_commands parted
+	fi
+
+	common.log_section "Btrfs root storage setup"
+	common.log_info "Configuration and required commands validated for /dev/$root_dev"
+	common.log_info "The storage phase will create subvolumes, encrypt the partition in place, and write target mount configuration"
+	btrfs-subvol-setup.run
+	luks-setup.run
+	fstab-setup.run
+	btrfs-root-setup.print_summary
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	btrfs-root-setup.run
+fi

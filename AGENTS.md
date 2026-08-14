@@ -106,6 +106,10 @@ New or modified scripts must:
 - use `local` for function-local variables
 - use meaningful function and variable names
 - keep functions focused on one responsibility
+- namespace every production function as `<owner>.<function>`, where `<owner>`
+  identifies the defining script or framework module (for example,
+  `common.require_root` or
+  `btrfs-subvol-setup.validate_configuration`)
 - indent `cat` heredoc bodies and terminators with the surrounding code;
   use `<<-` with tab indentation so the generated content does not contain
   the source indentation
@@ -133,6 +137,22 @@ Use the common framework for:
 Do not implement duplicate logging or error-handling frameworks inside
 individual scripts.
 
+Logs for destructive or long-running installation phases must be exhaustive
+enough to identify:
+
+- the phase being executed;
+- the resolved target device, mapper, mount point or configuration file;
+- the operation about to run;
+- whether optional behavior was executed or skipped;
+- successful completion of the phase.
+
+Required commands and configuration must be validated before the first
+destructive operation whenever practical.
+
+Never include passphrases, PINs, recovery keys or private-key material in
+those logs. High-level orchestrators must finish with a concise summary of
+completed operations and resulting paths when all phases succeed.
+
 When appropriate, use:
 
     set -euo pipefail
@@ -149,6 +169,13 @@ Explicitly handle expected command failures rather than relying on
 
 Reusable functionality belongs under `lib/`.
 
+Only cross-cutting infrastructure shared by unrelated repository components
+belongs in the top-level `lib/` directory. Domain-specific helpers must stay
+in the individual script that owns the behavior so the complete flow can be
+followed locally. A feature-level common file may be introduced only when the
+same function is genuinely used by multiple scripts in that feature; it must
+not be used merely to split up a long script or make functions easier to test.
+
 Before adding a helper function, search for an existing implementation.
 
 Scripts should source the common framework rather than reimplement:
@@ -163,18 +190,24 @@ Scripts should source the common framework rather than reimplement:
 - confirmation prompts
 
 Core logic should be separated from destructive execution whenever
-practical.
+practical, but this separation must not move feature-specific logic into the
+top-level common framework or into an unnecessary feature-level common file.
 
 Prefer:
 
-    validate_luks_configuration
-    build_cryptenroll_arguments
-    enroll_tpm_key
+    tpm-enroll.validate_configuration
+    tpm-enroll.build_cryptenroll_arguments
+    tpm-enroll.enroll_key
 
 over one large function performing all operations.
 
 This separation is required to make logic testable without modifying a
 real system.
+
+Call sites must use the fully qualified function name. Do not add unqualified
+aliases, because they hide ownership and reintroduce collision risk. The
+namespace is an ownership marker, not permission to move a function away from
+the script that owns its behavior.
 
 ---
 

@@ -25,7 +25,24 @@ This document describes runtime behavior.
 System architecture is documented in `docs/architecture.md`.
 Security and boot invariants are documented in `docs/invariants.md`.
 
-# 2. Complete boot flow
+## 2. Complete boot flow
+
+### 2.1 Installation-established state
+
+Before the runtime boot flow can succeed, the live installer establishes the
+following persistent state exactly once:
+
+- the configured Btrfs root and data subvolumes;
+- a LUKS2 container opened at `/dev/mapper/root`;
+- target `/etc/crypttab` using the post-encryption LUKS UUID;
+- target `/etc/fstab` using `/dev/mapper/root` and the configured subvolumes;
+- a swapfile inside the configured `@swap` subvolume.
+
+The package and boot-artifact phases then run inside the target chroot. They
+must not repeat the destructive storage phase. At runtime, dracut consumes
+the resulting LUKS mapping and Btrfs root configuration described below.
+
+### 2.2 Runtime sequence
 
 The complete boot process is:
 

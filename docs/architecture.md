@@ -523,29 +523,33 @@ The normal root subvolume remains unchanged.
 
 ## 14. Installation architecture
 
-The installer is divided logically into phases.
+`setup.sh` runs the storage phase once from the live environment, before the
+target chroot is prepared:
 
-Example:
+    setup.sh preflight
+           |
+           v
+    btrfs-root/scripts/btrfs-root-setup
+           |
+           +-- create the configured Btrfs subvolume layout
+           |
+           +-- encrypt the root partition in place as LUKS2
+           |
+           +-- open /dev/mapper/root and grow Btrfs
+           |
+           +-- write <target>/etc/crypttab and <target>/etc/fstab
+           |
+           `-- print the completed-operation summary
 
-    preflight (inside ./setup.sh executed from live environment)
-       |
-       v
-	subvolume creation  (inside ./btrfs-root-setup/scripts/btrfs-subvol-setup script)
-       |
-       v
-    LUKS configuration (inside ./btrfs-root-setup/scripts/btrfs-root-setup script)
-       |
-       v
-    Secure Boot configuration & signing + Bootloader installation (inside ./secure-boot-setup/scripts/secure-boot-setup script)
-       |
-       v
-    Snapper configuration + Snapshot Menu dracut module configuration (inside ./btrfs-snapshot-mng/scripts/btrfs-snapshot-mng-setup script)
-       |
-       v
-    UKI generation  (inside ./uki/scripts/install-uki script)
-       |
-       v
-    TPM configuration  (inside ./tpm/scripts/install-tpm script)
+The storage coordinator delegates privileged execution to the scripts under
+`btrfs-root/scripts/`. Each phase script owns its validation, artifact builders
+and execution functions. The final summary belongs to the
+`btrfs-root-setup` orchestrator. This keeps each phase's control flow visible
+in one file.
+
+After storage setup, `setup.sh` prepares the target chroot. Package,
+Secure Boot, Snapper/dracut, UKI and TPM-related phases execute inside that
+chroot. The destructive Btrfs/LUKS phase must not be repeated there.
 
 Installation scripts should preserve clear phase boundaries.
 Reusable functionality belongs in the common library rather than being
@@ -567,10 +571,21 @@ The common framework is responsible for cross-cutting behavior such as:
 - configuration
 - dry-run behavior	
 
-The initial framework module is `lib/common.sh`. It provides logging, fatal
-error handling, privilege checks, and reusable configuration preconditions.
+The common module `lib/common.sh` provides logging, summaries, fatal error
+handling, privilege checks, and reusable configuration preconditions.
 It deliberately does not change shell options, so sourcing it cannot alter a
 caller's error-handling semantics.
+
+Feature-specific helpers remain in the script that owns their behavior and may
+depend on the common module. A feature-level common file is justified only for
+functions genuinely shared by multiple scripts, not as a general separation
+layer.
+
+Sourced Bash functions expose their owner in the function name using
+`<owner>.<function>`. Examples include `common.require_root`,
+`luks-setup.build_crypttab_entry` and `btrfs-root-setup.print_summary`.
+Callers always use the qualified name, making cross-file control flow visible
+without relocating the implementation.
 
 Domain-specific logic should not be placed in the generic logging or command
 execution layers.
@@ -581,6 +596,8 @@ installation scripts
         |
         `------> common framework
 The common framework must not depend on individual installer stages.
+The top-level framework must also not become a collection of unrelated domain
+helpers; keeping feature logic local is required for traceable control flow.
 
 ## 16. Configuration architecture
 The main configuration file is:

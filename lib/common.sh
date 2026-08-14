@@ -3,33 +3,57 @@
 # Shared, side-effect-free helpers for repository scripts. This library does
 # not change shell options because doing so would alter the behavior of callers.
 
-log_info() {
+common.log_info() {
 	printf '\033[32mINFO:\033[0m %s\n' "$*"
 }
 
-log_warn() {
+common.log_warn() {
 	printf 'WARN: %s\n' "$*" >&2
 }
 
-die() {
+common.log_success() {
+	printf '\033[32mSUCCESS:\033[0m %s\n' "$*"
+}
+
+common.log_section() {
+	printf '\n\033[1m==> %s\033[0m\n' "$*"
+}
+
+common.log_summary_item() {
+	local label=$1
+	local value=$2
+
+	printf '  %-24s %s\n' "$label:" "$value"
+}
+
+common.die() {
 	printf 'ERROR: %s\n' "$*" >&2
 	exit 1
 }
 
-require_root() {
-	((EUID == 0)) || die "Must be run as root."
+common.require_root() {
+	((EUID == 0)) || common.die "Must be run as root."
 }
 
-require_readable_file() {
+common.require_readable_file() {
 	local path=$1
 	local description=${2:-File}
 
-	[[ -r $path ]] || die "$description not found or not readable: $path"
+	[[ -r $path ]] || common.die "$description not found or not readable: $path"
 }
 
-require_nonempty() {
+common.require_commands() {
+	local command_name
+
+	for command_name in "$@"; do
+		command -v "$command_name" >/dev/null 2>&1 ||
+			common.die "Required command not found: $command_name"
+	done
+}
+
+common.require_nonempty() {
 	local name=$1
 	local value=${2:-}
 
-	[[ -n $value ]] || die "$name must be configured."
+	[[ -n $value ]] || common.die "$name must be configured."
 }

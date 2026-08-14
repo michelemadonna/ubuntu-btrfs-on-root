@@ -90,11 +90,28 @@ When persistent identity is required, prefer stable identifiers such as:
 - PARTUUID;
 - configured mapper names.
 
+The LUKS UUID written to the target `crypttab` must be read from the completed
+LUKS container after in-place encryption. A UUID read from the plaintext
+Btrfs filesystem before encryption is not a valid LUKS identity.
+
+### 3.4 Target configuration boundary
+
+Storage setup runs from a live environment. Persistent `fstab` and `crypttab`
+changes must therefore target the mounted installation root, not the live
+environment's `/etc`.
+
+The destructive Btrfs/LUKS storage phase must execute exactly once. Entering
+the target chroot must not repeat subvolume creation or in-place encryption.
+
 ---
 
 ## 4. Btrfs invariants
 
 The configured Btrfs root layout must remain internally consistent.
+
+When existing directories are moved into dedicated data subvolumes, both
+visible and hidden entries must be preserved. Mounting the new subvolume must
+not make dotfiles from the installed system disappear.
 
 Subvolume paths used by:
 
@@ -500,6 +517,12 @@ The framework may provide:
 Domain logic must not become hidden inside generic logging or execution
 wrappers.
 
+The top-level `lib/` directory is reserved for cross-cutting infrastructure
+used by unrelated features. Domain helpers must remain in the individual
+script that owns the behavior. A feature-level common file is permitted only
+for functions genuinely consumed by multiple scripts; testability or file
+length alone is not sufficient justification for creating one.
+
 Common libraries must not depend on high-level installation stages.
 
 Dependency direction must remain:
@@ -513,6 +536,15 @@ Dependency direction must remain:
         common framework
 
 Circular sourcing relationships must not be introduced.
+
+Production functions in new or modified Bash code must use the
+`<owner>.<function>` namespace. The owner must identify the file or framework
+module that defines the function. Callers must not rely on unqualified aliases
+or redefine another owner's namespace.
+
+Logs and final summaries may contain resolved device paths, mapper names,
+subvolume paths, mount points and non-secret configuration. They must never
+contain passphrases, PINs, recovery keys or private-key material.
 
 ---
 
