@@ -350,23 +350,21 @@ verify_shim()
 # ============================================================
 
 mok_is_enrolled()
-{
-    mokutil \
-        --test-key \
-        "$DB_CERT_DER" \
-        >/dev/null 2>&1
+{   
+
+    mokutil --test-key "$DB_CERT_DER" 2>&1 | grep -q "is already in the enrollment request"
 }
 
 enroll_mok()
 {
     if mok_is_enrolled; then
-        log "sbctl db certificate already enrolled as MOK."
+        echo "sbctl db certificate already enrolled as MOK."
         return
     fi
 
-    log "Requesting MOK enrollment..."
+    echo "Requesting MOK enrollment..."
 
-    mokutil \
+    echo "${mok_pin}" | mokutil \
         --import \
         "$DB_CERT_DER"
 

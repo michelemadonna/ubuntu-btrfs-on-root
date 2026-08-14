@@ -264,7 +264,7 @@ install_direct()
 
 	cat >> "$REFIND_EFI/refind.conf" <<- EOF
 		#scanfor external,optical,manual
-		dont_scan_dirs EFI/systemd,EFI/Linux
+		dont_scan_dirs EFI/systemd,EFI/Linux,EFI/BOOT
 		dont_scan_files shimx64.efi,grubx64.efi,mmx64.efi,fbx64.efi
 		linux_prefixes ubuntu,kali
 		enable_touch
@@ -315,7 +315,7 @@ install_with_shim()
 	
 	cat >> /boot/efi/EFI/refind/refind.conf <<- EOF
 		#scanfor external,optical,manual
-		dont_scan_dirs EFI/systemd,EFI/Linux
+		dont_scan_dirs EFI/systemd,EFI/Linux,EFI/BOOT
 		linux_prefixes ubuntu,kali
 		enable_touch
 		enable_mouse
@@ -390,7 +390,7 @@ sign_refind()
     local refind=""
 
     if [[ "$SETUP_MODE" == "0" ]]; then
-        refind="$REFIND_EFI/shimx64.efi"
+        refind="$REFIND_EFI/grubx64.efi"
     else
         refind="$REFIND_EFI/refind_x64.efi"
     fi
