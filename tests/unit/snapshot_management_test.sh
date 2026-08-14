@@ -38,7 +38,7 @@ snapshot-management-test.pin_config() {
 snapshot-management-test.kernel_guard() {
 	local menu="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/snapshot-menu.sh"
 
-	rg -q 'KERNEL_STATUS\[\$selected\].*Present' "$menu"
+	rg -q 'KERNEL_STATUS\[(\$)?selected\].*Present' "$menu"
 	rg -q 'Cannot boot snapshot.*kernel modules' "$menu"
 }
 

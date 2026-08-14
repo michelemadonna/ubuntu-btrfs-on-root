@@ -682,6 +682,18 @@ Possible checks include:
 - expected kernel version;
 - expected initramfs inclusion.
 
+Require `.linux`, `.initrd`, `.cmdline`, `.uname`, `.pcrpkey`, `.pcrsig` and
+`.sbat`; compare `.uname` with the requested kernel and verify the PE signature
+against the configured db certificate. When snapshot-menu configuration is
+present, inspect the initrd for its executable, configuration, pre-mount hook,
+listener, listener controller and systemd cryptsetup drop-in.
+
+Multi-kernel tests must verify that any failed kernel makes the final command
+return nonzero after printing the complete report. Temporary UKI copies and
+extracted initrds must be cleaned on every path.
+Mocked failure tests should also verify that the invalid ESP artifact is
+rejected and that rEFInd menu regeneration is requested.
+
 Tools may include:
 
 ```text
@@ -756,6 +768,11 @@ Tests should cover:
 - icon path generation;
 - kernel removal behavior;
 - empty kernel list.
+- `<entry-token>-<kernel-version>.efi` parsing;
+- version-aware rather than lexical ordering;
+- atomic generated-config replacement;
+- OS-specific icon fallback to the generic Linux icon;
+- idempotent inclusion of the generated file from `refind.conf`.
 
 Validation must not modify firmware boot variables.
 

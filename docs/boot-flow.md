@@ -217,6 +217,15 @@ Execution transfers from EFI to the Linux kernel.
 At this point the UKI contents participate in the measured boot process
 according to the configured measurement policy.
 
+The selected artifact is named `<entry-token>-<kernel-version>.efi`. rEFInd
+uses the newest version-aware filename as its main entry and retains older
+kernels as submenus. The embedded `.uname` must match both that filename and
+the module tree later required for snapshot boot.
+
+The embedded command line selects the normal Btrfs root and LUKS mapping.
+Snapshot selection does not replace the running UKI; dracut adds only the
+runtime overlay fragment after a compatible snapshot is selected.
+
 ## 6. Kernel initialization
 The Linux kernel:
 1. initializes the architecture;

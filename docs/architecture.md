@@ -284,9 +284,30 @@ The UKI is generated using the systemd UKI toolchain.
 
 The EFI executable is signed using the configured Secure Boot key.
 
+The concrete pipeline is Debian kernel postinst/postrm -> `kernel-install
+add/remove` -> dracut initrd generation -> ukify assembly and PCR signatures
+-> Secure Boot signing -> rEFInd menu regeneration. `/etc/kernel/install.conf`
+selects the `uki` layout, dracut and ukify. `/etc/kernel/entry-token` supplies
+the artifact prefix, producing
+`/boot/efi/EFI/Linux/<entry-token>-<kernel-version>.efi`.
+
+The ukify policy signs PCR 11 phase paths using a persistent RSA key pair
+below `/etc/uki/keys`. The complete UKI is signed with the sbctl db key;
+`SignKernel=false` means the embedded kernel is not separately signed by this
+policy.
+
 The kernel command line embedded in the UKI represents the default boot path.
 Snapshot boot may modify selected runtime parameters during initramfs
 processing.
+
+The normal command line comes from `/etc/kernel/cmdline`; dracut host-only
+cmdline embedding is disabled so ukify remains its single owner. It identifies
+the Btrfs UUID, normal root subvolume, LUKS UUID and failure policy.
+
+The rEFInd hook groups UKIs by entry token, sorts versions newest-first with
+version-aware ordering, uses the newest UKI as the main entry and exposes
+older UKIs as submenus. Replacement is atomic; an empty generated file remains
+when the final UKI is removed.
 
 ---
 

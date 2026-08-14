@@ -347,6 +347,21 @@ Depending on system configuration this may include:
 A UKI that fails required signature or structural validation must not be
 treated as valid merely because the file exists.
 
+When multiple kernels are requested, any failed kernel makes the overall
+operation fail after the complete report is printed. An older artifact at the
+expected path must not turn a failed `kernel-install add` into success.
+An artifact that fails mandatory validation must be removed from the ESP and
+the generated rEFInd menu refreshed so it cannot become the default entry.
+
+UKIs must retain the path contract
+`/boot/efi/EFI/Linux/<entry-token>-<kernel-version>.efi`. The rEFInd menu,
+kernel removal and validators depend on it. Menu replacement must be atomic
+and kernel versions must use version-aware rather than lexical ordering.
+
+PCR and Secure Boot private keys must retain restrictive permissions, must
+not be regenerated when persistent keys already exist and must never appear
+in logs or fixtures.
+
 ### 8.1 Kernel command line
 
 Changes to the embedded or runtime kernel command line must preserve unrelated
@@ -356,6 +371,10 @@ Snapshot boot logic must change only the parameters necessary for snapshot
 root selection and overlay behavior.
 
 Normal boot must not retain snapshot-only parameters.
+
+`/etc/kernel/cmdline` is the authoritative normal-boot cmdline embedded by
+ukify. Dracut host-only cmdline embedding must remain disabled unless ownership
+and duplication of all embedded options are re-evaluated.
 
 ---
 

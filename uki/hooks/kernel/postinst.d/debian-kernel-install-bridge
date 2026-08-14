@@ -6,45 +6,45 @@ version="${1:-}"
 kernel_image="${2:-}"
 
 if [[ -z "$version" ]]; then
-    echo "kernel-install bridge: missing kernel version" >&2
-    exit 1
+	echo "kernel-install bridge: missing kernel version" >&2
+	exit 1
 fi
 
 if [[ -z "$kernel_image" ]]; then
-    kernel_image="/boot/vmlinuz-${version}"
+	kernel_image="/boot/vmlinuz-${version}"
 fi
 
 hook_directory="${0%/*}"
 hook_type="${hook_directory##*/}"
 
 case "$hook_type" in
-    postinst.d)
-        if [[ ! -f "$kernel_image" ]]; then
-            echo \
-                "kernel-install bridge: kernel image not found: $kernel_image" \
-                >&2
-            exit 1
-        fi
+postinst.d)
+	if [[ ! -f "$kernel_image" ]]; then
+		echo \
+			"kernel-install bridge: kernel image not found: $kernel_image" \
+			>&2
+		exit 1
+	fi
 
-        echo \
-            "kernel-install bridge: adding kernel $version" \
-            >&2
+	echo \
+		"kernel-install bridge: adding kernel $version" \
+		>&2
 
-        exec kernel-install add "$version" "$kernel_image"
-        ;;
+	exec kernel-install add "$version" "$kernel_image"
+	;;
 
-    postrm.d)
-        echo \
-            "kernel-install bridge: removing kernel $version" \
-            >&2
+postrm.d)
+	echo \
+		"kernel-install bridge: removing kernel $version" \
+		>&2
 
-        exec kernel-install remove "$version"
-        ;;
+	exec kernel-install remove "$version"
+	;;
 
-    *)
-        echo \
-            "kernel-install bridge: unsupported hook directory: $hook_directory" \
-            >&2
-        exit 1
-        ;;
+*)
+	echo \
+		"kernel-install bridge: unsupported hook directory: $hook_directory" \
+		>&2
+	exit 1
+	;;
 esac

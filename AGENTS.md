@@ -240,6 +240,16 @@ Never weaken these properties unless explicitly requested.
   Never use `trusted=yes` for shim, rEFInd or other boot-chain packages.
 - Verify the repository-signed loader that follows the selected trust anchor:
   `refind_x64.efi` for direct trust and `grubx64.efi` for shim/MOK trust.
+- UKI generation must fail overall when any requested kernel fails generation,
+  signature verification or structural validation; a summary containing
+  failures must not return success.
+- Preserve the UKI filename contract `<entry-token>-<kernel-version>.efi` in
+  `/boot/efi/EFI/Linux`, because the rEFInd hook derives ownership and menu
+  versions from it.
+- `/etc/kernel/cmdline` and ukify own the embedded normal-boot command line.
+  Keep dracut `hostonly_cmdline="no"` to avoid embedding a second cmdline.
+- PCR signing keys under `/etc/uki/keys` and Secure Boot db private keys are
+  long-lived secrets. Reuse existing keys and never print their contents.
 
 ### TPM
 

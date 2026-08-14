@@ -1,168 +1,178 @@
 #!/usr/bin/env bash
+# Configuration variables are loaded from setup.conf.
+# shellcheck disable=SC2154
+
 set -Eeuo pipefail
 umask 077
 
-[[ $EUID -eq 0 ]] || {
-    echo "Run install-uki as root." >&2
-    exit 1
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/setup.conf"
+
+INSTALL_UKI_ESP=/boot/efi
+INSTALL_UKI_KERNEL_CONFIG=/etc/kernel/install.conf
+INSTALL_UKI_UKIFY_CONFIG=/etc/kernel/uki.conf
+INSTALL_UKI_CMDLINE=/etc/kernel/cmdline
+INSTALL_UKI_ENTRY_TOKEN=/etc/kernel/entry-token
+
+install-uki.validate_configuration() {
+	common.require_nonempty suite "${suite:-}"
+	common.require_nonempty root_dev "${root_dev:-}"
+	common.require_nonempty root_sub_vol "${root_sub_vol:-}"
+	common.require_nonempty btrfs_options "${btrfs_options:-}"
+	[[ $suite =~ ^[a-z0-9][a-z0-9._-]*$ ]] || common.die "suite is not a safe UKI entry token: $suite"
+	[[ $root_dev != */* && $root_dev != *..* ]] || common.die "root_dev must be relative to /dev."
 }
 
-source $repository_root/setup.conf
+install-uki.build_cmdline() {
+	local btrfs_uuid=$1 luks_uuid=$2 root_options=$3 root_subvolume=$4
+	printf '%s\n' "root=UUID=${btrfs_uuid} rootfstype=btrfs rootflags=${root_options},subvol=${root_subvolume} rd.luks.uuid=luks-${luks_uuid} rd.shell=0 rd.emergency=halt quiet splash"
+}
 
-apt-get install -y \
-    dracut \
-    dialog \
-    systemd-ukify \
-    binutils \
-    rsync \
-    openssl
+install-uki.write_kernel_install_config() {
+	common.log_info "Write kernel-install UKI layout to $INSTALL_UKI_KERNEL_CONFIG"
+	cat >"$INSTALL_UKI_KERNEL_CONFIG" <<-'EOF'
+		layout=uki
+		initrd_generator=dracut
+		uki_generator=ukify
+	EOF
+	chmod 0644 "$INSTALL_UKI_KERNEL_CONFIG"
+}
 
+install-uki.write_ukify_config() {
+	common.log_info "Write signed and measured UKI policy to $INSTALL_UKI_UKIFY_CONFIG"
+	cat >"$INSTALL_UKI_UKIFY_CONFIG" <<-'EOF'
+		[UKI]
+		PCRBanks=sha256
+		OSRelease=@/etc/os-release
+		Cmdline=@/etc/kernel/cmdline
+		Splash=/etc/kernel/uki-splash.bmp
 
+		SecureBootSigningTool=sbsign
+		SecureBootPrivateKey=/var/lib/sbctl/keys/db/db.key
+		SecureBootCertificate=/var/lib/sbctl/keys/db/db.pem
+		SignKernel=false
+		PCRPKey=/etc/uki/keys/pcr-public.pem
 
-#read -r -p "Distribution identifier [ubuntu]: " distro_id
-#distro_id="${distro_id:-ubuntu}"
-#
-#[[ "$distro_id" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || {
-#    echo "Invalid distribution identifier: $distro_id" >&2
-#    exit 1
-#}
-#
-#read -r -p "ESP mount point [/boot/efi]: " esp_directory
-#esp_directory="${esp_directory:-/boot/efi}"
-#
-#mountpoint -q "$esp_directory" || {
-#    echo "ESP is not mounted: $esp_directory" >&2
-#    exit 1
-#}
-#
-#read -r -p "Btrfs root filesystem UUID: " btrfs_uuid
-#
-#[[ -n "$btrfs_uuid" ]] || {
-#    echo "The Btrfs UUID is required." >&2
-#    exit 1
-#}
-#
-#read -r -p "Root LUKS UUID: " luks_uuid
-#
-#[[ -n "$luks_uuid" ]] || {
-#    echo "The LUKS UUID is required." >&2
-#    exit 1
-#}
-#
-#read -r -p "Normal root subvolume [@ubuntu]: " root_subvolume
-#root_subvolume="${root_subvolume:-@ubuntu}"
+		[PCRSignature:initrd]
+		PCRPrivateKey=/etc/uki/keys/pcr-private.pem
+		PCRPublicKey=/etc/uki/keys/pcr-public.pem
+		Phases=enter-initrd
 
-distro_id=$suite
-esp_directory=/boot/efi
-btrfs_uuid="$(blkid --output export /dev/mapper/root | grep ^UUID= | cut -c 6-)"
-luks_uuid=$(cryptsetup luksUUID /dev/$root_dev)
-root_subvolume=$root_sub_vol/@
+		[PCRSignature:system]
+		Phases=enter-initrd:leave-initrd enter-initrd:leave-initrd:sysinit enter-initrd:leave-initrd:sysinit:ready
+		PCRPrivateKey=/etc/uki/keys/pcr-private.pem
+		PCRPublicKey=/etc/uki/keys/pcr-public.pem
+	EOF
+	chmod 0600 "$INSTALL_UKI_UKIFY_CONFIG"
+	ln -sfn "$INSTALL_UKI_UKIFY_CONFIG" /etc/systemd/ukify.conf
+}
 
+install-uki.write_dracut_config() {
+	common.log_info "Disable dracut host-only cmdline embedding; ukify owns the embedded cmdline"
+	cat >/etc/dracut.conf.d/53-uki-cmdline.conf <<-'EOF'
+		hostonly_cmdline="no"
+	EOF
+}
 
-install -d -m 0700 /etc/uki/keys
+install-uki.create_splash() {
+	common.log_info "Convert the Plymouth fallback image into the UKI BMP splash"
+	python3 - <<-'PY'
+		from PIL import Image
 
+		source = "/usr/share/plymouth/themes/spinner/bgrt-fallback.png"
+		destination = "/etc/kernel/uki-splash.bmp"
+		Image.open(source).convert("RGB").save(destination, format="BMP")
+	PY
+}
 
-cat >/etc/kernel/install.conf <<-'EOF'
-    layout=uki
-    initrd_generator=dracut
-    uki_generator=ukify
-EOF
-chmod 0644 /etc/kernel/install.conf
+install-uki.ensure_pcr_keys() {
+	install -d -m 0700 /etc/uki/keys
+	if [[ ! -s /etc/uki/keys/pcr-private.pem ]]; then
+		common.log_info "Generate the RSA key pair used for UKI PCR signatures"
+		openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /etc/uki/keys/pcr-private.pem
+		openssl pkey -pubout -in /etc/uki/keys/pcr-private.pem -out /etc/uki/keys/pcr-public.pem
+	else
+		common.log_info "Reuse the existing UKI PCR signing key"
+	fi
+	chmod 0600 /etc/uki/keys/pcr-private.pem
+	chmod 0644 /etc/uki/keys/pcr-public.pem
+}
 
-echo $suite > /etc/kernel/entry-token
-chmod 0644 /etc/kernel/entry-token
+install-uki.install_hooks() {
+	common.log_info "Install Debian postinst/postrm bridge to kernel-install"
+	install -m 0755 "$repository_root/uki/hooks/kernel/postinst.d/debian-kernel-install-bridge" /usr/local/libexec/debian-kernel-install-bridge
+	ln -sfn /usr/local/libexec/debian-kernel-install-bridge /etc/kernel/postinst.d/zz-kernel-install
+	ln -sfn /usr/local/libexec/debian-kernel-install-bridge /etc/kernel/postrm.d/zz-kernel-install
 
-python3 - <<'PY'
-from PIL import Image
+	common.log_info "Install the rEFInd kernel-install hook"
+	install -m 0755 "$repository_root/uki/hooks/kernel/install.d/99-refind-menu.install" /usr/lib/kernel/install.d/99-refind-menu.install
+	if ! grep -Fqx "include refind-linux-$suite.conf" "$INSTALL_UKI_ESP/EFI/refind/refind.conf"; then
+		printf 'include refind-linux-%s.conf\n' "$suite" >>"$INSTALL_UKI_ESP/EFI/refind/refind.conf"
+	fi
 
-source = "/usr/share/plymouth/themes/spinner/bgrt-fallback.png"
-destination = "/etc/kernel/uki-splash.bmp"
+	common.log_info "Install the UKI generation and validation command"
+	install -m 0755 "$repository_root/uki/scripts/generate-uki" /usr/local/sbin/generate-uki
+}
 
-image = Image.open(source).convert("RGB")
-image.save(destination, format="BMP")
-PY
+install-uki.print_summary() {
+	common.log_section "UKI setup summary"
+	common.log_summary_item "Status" "completed successfully"
+	common.log_summary_item "Entry token" "$suite"
+	common.log_summary_item "UKI directory" "$INSTALL_UKI_ESP/EFI/Linux"
+	common.log_summary_item "Normal root" "$root_sub_vol/@"
+	common.log_summary_item "Kernel install" "$INSTALL_UKI_KERNEL_CONFIG"
+	common.log_summary_item "ukify policy" "$INSTALL_UKI_UKIFY_CONFIG"
+	common.log_summary_item "Embedded cmdline" "$INSTALL_UKI_CMDLINE"
+	common.log_summary_item "rEFInd menu" "$INSTALL_UKI_ESP/EFI/refind/refind-linux-$suite.conf"
+	common.log_success "UKI support installed and all installed kernels validated"
+}
 
-cat > /etc/kernel/uki.conf << 'EOF'
-    [UKI]
-    PCRBanks=sha256
-    OSRelease=@/etc/os-release
-    Cmdline=@/etc/kernel/cmdline
-    Splash=/etc/kernel/uki-splash.bmp
+install-uki.run() {
+	local btrfs_uuid luks_uuid root_subvolume
+	common.require_root
+	install-uki.validate_configuration
+	common.require_commands apt-get blkid cryptsetup env grep install ln openssl python3
 
-    SecureBootSigningTool=sbsign
-    SecureBootPrivateKey=/var/lib/sbctl/keys/db/db.key
-    SecureBootCertificate=/var/lib/sbctl/keys/db/db.pem
+	common.log_section "Unified Kernel Image setup"
+	common.log_info "Install dracut, ukify and UKI inspection dependencies"
+	apt-get install -y dracut dialog systemd-ukify binutils rsync openssl python3-pil
+	common.require_commands kernel-install lsinitrd objcopy objdump sbverify
 
-    SignKernel=false
+	btrfs_uuid="$(blkid --output value --match-tag UUID /dev/mapper/root)"
+	luks_uuid="$(cryptsetup luksUUID "/dev/$root_dev")"
+	root_subvolume="$root_sub_vol/@"
+	common.require_nonempty "Btrfs UUID" "$btrfs_uuid"
+	common.require_nonempty "LUKS UUID" "$luks_uuid"
+	common.log_info "Resolved Btrfs UUID $btrfs_uuid and LUKS UUID $luks_uuid"
 
-    PCRPKey=/etc/uki/keys/pcr-public.pem
+	install-uki.write_kernel_install_config
+	printf '%s\n' "$suite" >"$INSTALL_UKI_ENTRY_TOKEN"
+	chmod 0644 "$INSTALL_UKI_ENTRY_TOKEN"
+	install-uki.create_splash
+	install-uki.write_ukify_config
+	install-uki.write_dracut_config
+	install-uki.ensure_pcr_keys
+	install-uki.build_cmdline "$btrfs_uuid" "$luks_uuid" "$btrfs_options" "$root_subvolume" >"$INSTALL_UKI_CMDLINE"
+	chmod 0644 "$INSTALL_UKI_CMDLINE"
+	common.log_info "Embedded normal-boot cmdline written for subvolume $root_subvolume"
 
-    [PCRSignature:initrd]
-    PCRPrivateKey=/etc/uki/keys/pcr-private.pem
-    PCRPublicKey=/etc/uki/keys/pcr-public.pem
-    Phases=enter-initrd
+	if [[ $enable_tpm == yes ]]; then
+		common.log_info "TPM support enabled; install TPM integration before generating UKIs"
+		env repository_root="$repository_root" "$repository_root/tpm/scripts/install-tpm"
+	else
+		common.log_info "TPM support disabled; skip TPM integration"
+	fi
 
-    [PCRSignature:system]
-    Phases=enter-initrd:leave-initrd enter-initrd:leave-initrd:sysinit enter-initrd:leave-initrd:sysinit:ready
-    PCRPrivateKey=/etc/uki/keys/pcr-private.pem
-    PCRPublicKey=/etc/uki/keys/pcr-public.pem
-EOF
-chmod 600 /etc/kernel/uki.conf
-ln -sf \
-    /etc/kernel/uki.conf \
-    /etc/systemd/ukify.conf
+	install-uki.install_hooks
+	common.log_info "Generate and validate UKIs for every installed kernel"
+	/usr/local/sbin/generate-uki --all
+	install-uki.print_summary
+}
 
-cat > /etc/dracut.conf.d/53-uki-cmdline.conf <<-'EOF'
-    hostonly_cmdline="no"
-EOF
-
-if [[ ! -s /etc/uki/keys/pcr-private.pem ]]; then
-    openssl genpkey \
-        -algorithm RSA \
-        -pkeyopt rsa_keygen_bits:2048 \
-        -out /etc/uki/keys/pcr-private.pem
-
-    openssl pkey \
-        -pubout \
-        -in /etc/uki/keys/pcr-private.pem \
-        -out /etc/uki/keys/pcr-public.pem
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	install-uki.run
 fi
-
-chmod 0600 /etc/uki/keys/pcr-private.pem
-chmod 0644 /etc/uki/keys/pcr-public.pem
-
-echo "root=UUID=${btrfs_uuid} rootfstype=btrfs rootflags=${btrfs_options},subvol=${root_subvolume} rd.luks.uuid=luks-${luks_uuid} rd.shell=0 rd.emergency=halt quiet splash" > /etc/kernel/cmdline
-chmod 0644 /etc/kernel/cmdline
-
-install -m 0755 \
-    "$repository_root/uki/hooks/kernel/postinst.d/debian-kernel-install-bridge" \
-    /usr/local/libexec/debian-kernel-install-bridge
-
-ln -sfn \
-    /usr/local/libexec/debian-kernel-install-bridge \
-    /etc/kernel/postinst.d/zz-kernel-install
-
-ln -sfn \
-    /usr/local/libexec/debian-kernel-install-bridge \
-    /etc/kernel/postrm.d/zz-kernel-install
-
-if [[ $enable_tpm == "yes" ]]; then
-    . $repository_root/tpm/scripts/install-tpm
-fi
-
-echo "Installing rEFInd boot manager hook..."
-install -m 755 \
-	"$repository_root/uki/hooks/kernel/install.d/99-refind-menu.install" \
-	/usr/lib/kernel/install.d/99-refind-menu.install
-echo "include refind-linux-$suite.conf" >> "/boot/efi/EFI/refind/refind.conf"
-
-install \
-    -m 0755 \
-    "$repository_root/uki/scripts/generate-uki" \
-    /usr/local/sbin/generate-uki
-
-echo
-echo "UKI support installed."
-echo "UKI destination: ${esp_directory}/EFI/Linux/${distro_id}"
-
-. "$repository_root/uki/scripts/generate-uki" --all

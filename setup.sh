@@ -152,8 +152,7 @@ setup.inner_installation() {
 	# Security-sensitive phase coordinators execute as isolated entry points.
 	"$repository_root/secure-boot/scripts/secure-boot-setup"
 	"$repository_root/btrfs-snapshots-mng/scripts/btrfs-snapshots-mng-setup"
-	# shellcheck source=/dev/null
-	source "$repository_root/uki/scripts/install-uki"
+	"$repository_root/uki/scripts/install-uki"
 }
 
 setup.restore_chroot_files() {
