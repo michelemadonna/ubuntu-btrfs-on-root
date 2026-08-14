@@ -311,7 +311,7 @@ install_with_shim()
 
     refind-install \
         --shim "$work/shimx64.efi" \
-        --keepname --yes | die "rEFInd installation failed."
+        --keepname --yes #| die "rEFInd installation failed."
 	
 	cat >> /boot/efi/EFI/refind/refind.conf <<- EOF
 		#scanfor external,optical,manual

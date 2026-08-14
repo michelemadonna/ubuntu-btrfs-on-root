@@ -364,9 +364,9 @@ enroll_mok()
 
     echo "Requesting MOK enrollment..."
 
-    echo "${mok_pin}" | mokutil \
+    mokutil \
         --import \
-        "$DB_CERT_DER"
+        "$DB_CERT_DER" -p "${mok_pin}"
 
     echo
     echo "Complete the MOK enrollment at the next reboot."
