@@ -23,8 +23,9 @@ script="$(readlink -f "$0")"
 scriptname="$(basename "$script")"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 script_dir_name="$(basename "$script_dir")"
+repository_root="$script_dir"
 
-
+echo -e "\e[32mINFO:\e[0mScript path: $repository_root/$scriptname"
 
 # shellcheck source=./setup.conf
 . "$script_dir/setup.conf"
