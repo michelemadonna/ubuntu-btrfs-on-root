@@ -47,6 +47,9 @@ rescue-test.setup_integration() {
 	rescue_line="$(rg -n $'^\tsetup\.install_rescue_system$' "$repository_root/setup.sh" | cut -d: -f1)"
 	storage_line="$(rg -n $'^\t"\$repository_root/btrfs-root/scripts/btrfs-root-setup"$' "$repository_root/setup.sh" | cut -d: -f1)"
 	((rescue_line > storage_line))
+	rg -q -- '--install-rescue-live' "$repository_root/setup.sh"
+	rg -q 'setup_action=install-rescue-live' "$repository_root/setup.sh"
+	rg -q 'RESCUE_SOURCE_DIR:-/cdrom' "$repository_root/setup.sh"
 }
 
 rescue-test.partition_backed_persistence_contract() {

@@ -72,9 +72,9 @@ refind-setup.remove_grubefi_directories() {
 		directories+=("$directory")
 	done < <(find "$efi_root" -mindepth 1 -maxdepth 1 -type d -print0)
 
-	log.section "Obsolete grubefi_x64.efi directory cleanup"
+	log.section "Obsolete grubx64.efi directory cleanup"
 	for directory in "${directories[@]}"; do
-		marker="$(find "$directory" -type f -name grubefi_x64.efi -print -quit)"
+		marker="$(find "$directory" -type f -name grubx64.efi -print -quit)"
 		[[ -n $marker ]] || continue
 		[[ $directory == "$efi_root/"* && $directory != "$efi_root" ]] ||
 			log.die "Resolved cleanup target escaped the EFI directory: $directory"

@@ -50,10 +50,10 @@ secure-boot-test.test_remove_grubefi_directories() {
 
 	test_root="$(mktemp -d "${TMPDIR:-/tmp}/refind-cleanup-test.XXXXXX")"
 	mkdir -p "$test_root/EFI/remove/nested" "$test_root/EFI/keep"
-	: >"$test_root/EFI/remove/nested/grubefi_x64.efi"
-	: >"$test_root/EFI/keep/grubx64.efi"
+	: >"$test_root/EFI/remove/nested/grubx64.efi"
+	: >"$test_root/EFI/keep/other-loader.efi"
 	refind-setup.remove_grubefi_directories "$test_root/EFI" >/dev/null
-	[[ ! -e $test_root/EFI/remove ]] || secure-boot-test.fail "directory containing grubefi_x64.efi was retained"
+	[[ ! -e $test_root/EFI/remove ]] || secure-boot-test.fail "directory containing grubx64.efi was retained"
 	[[ -d $test_root/EFI/keep ]] || secure-boot-test.fail "unrelated EFI directory was removed"
 	rm -rf -- "$test_root"
 }

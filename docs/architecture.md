@@ -39,8 +39,8 @@ and confirms the result through `blkid`. It does not reformat the ESP.
 
 1. The outer phase runs in the live system. It converts and encrypts the
    installed Btrfs root, prepares bind mounts, copies the repository into the
-   target and enters a mount-isolated chroot. After target cleanup it creates
-   the rescue system as the final installation phase.
+   target and enters a mount-isolated chroot. After the chroot returns it creates
+   the rescue system, then performs target unmount and LUKS mapper cleanup.
 2. The `//inner` phase runs inside the installed system. It configures Secure
    Boot, snapshots, UKIs and optional TPM integration, then returns to the outer
    phase for cleanup.
@@ -109,6 +109,12 @@ because the live files themselves are copied to FAT32.
 
 This rescue environment is outside the root LUKS container. Its persistence is
 therefore not protected by root-disk encryption.
+
+`setup.sh --install-rescue-live` exposes the rescue subsystem as an independent
+post-boot operation. It loads `rescue_dev` from the normal configuration,
+accepts `RESCUE_SOURCE_DIR` as an optional live-source override (default
+`/cdrom`) and delegates directly to the rescue installer without running Btrfs
+conversion or entering the target chroot.
 
 ## Btrfs and LUKS subsystem
 

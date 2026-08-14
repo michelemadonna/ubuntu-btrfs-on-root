@@ -45,10 +45,10 @@ The inner phase then:
 6. configures kernel-install, dracut and ukify, generates and validates UKIs;
 7. optionally installs TPM integration without enrolling it.
 
-On return, the outer phase recursively unmounts the target and closes the
-`root` mapping. Only then, as the final phase, it splits the reserved rescue
-range, creates the ext4 `writable` partition, formats the resized rescue range
-as FAT and copies `/cdrom` into it.
+On return, the outer phase splits the reserved rescue range, creates the ext4
+`writable` partition, formats the resized rescue range as FAT and copies
+`/cdrom` into it. It then recursively unmounts the target and closes the `root`
+mapping as the final cleanup phase.
 
 ## Rescue boot
 
@@ -64,6 +64,12 @@ data is not encrypted by the root LUKS container.
 Root, home, logs, containers and swap of the installed operating system are
 encrypted. Its ESP is the only unencrypted partition in the normal boot chain;
 the separate rescue system is intentionally outside this FDE boundary.
+
+After the installed system has booted, `setup.sh --install-rescue-live` runs
+only the rescue phase using `rescue_dev` from `setup.conf`. Its live source
+defaults to `/cdrom` and can be overridden with `RESCUE_SOURCE_DIR`. It does not
+enter root conversion or the target chroot, but retains the exact-device
+confirmation because the operation is destructive.
 
 ## Installed Secure Boot chain
 

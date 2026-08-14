@@ -167,10 +167,9 @@ The main flow performs these operations:
 7. installs Snapper and the optional early-boot snapshot selector;
 8. configures kernel-install, dracut and ukify, then generates and verifies UKIs;
 9. installs TPM support when enabled, without enrolling LUKS automatically;
-10. unmounts the target and closes the temporary LUKS mapping;
-11. as the final phase, splits the reserved rescue range, creates the ext4
-    `writable` partition and copies the live system to the resized FAT rescue
-    partition.
+10. splits the reserved rescue range, creates the ext4 `writable` partition and
+    copies the live system to the resized FAT rescue partition;
+11. unmounts the target and closes the temporary LUKS mapping.
 
 Detailed installation and runtime flows are documented in
 [docs/architecture.md](docs/architecture.md) and
@@ -409,6 +408,24 @@ Its persistence filesystem is a separate ext4 partition labelled `writable`,
 created from the space released when the original rescue partition is shrunk.
 It is not inside the root LUKS container. Do not store confidential recovery
 material there without separate protection.
+
+The rescue phase can also be run independently after booting the installed
+system:
+
+```bash
+sudo ./setup.sh --install-rescue-live
+```
+
+This command reads `rescue_dev` from `setup.conf` and does not run Btrfs
+conversion, the target chroot or Secure Boot setup. The Ubuntu live source
+defaults to `/cdrom`; a medium mounted elsewhere can be selected with:
+
+```bash
+sudo RESCUE_SOURCE_DIR=/mnt/ubuntu-live ./setup.sh --install-rescue-live
+```
+
+The operation repartitions and reformats the configured rescue range, so the
+installer still requires typing the exact target device before making changes.
 
 ## Safety and validation
 

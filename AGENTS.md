@@ -190,10 +190,14 @@ real devices.
   `@$suite/@home/.snapshots`; only root snapshots participate in snapshot boot.
 - Keep the rescue partition outside LUKS; document that its persistence is not
   encrypted.
-- Rescue creation is the final setup phase, after target unmount and LUKS mapper
-  closure. It shrinks the oversized GPT rescue partition to at least 7168 MiB
+- Rescue creation runs after the target chroot phase and immediately before
+  target unmount and LUKS mapper closure. It shrinks the oversized GPT rescue
+  partition to at least 7168 MiB
   and creates a separate ext4 partition named and labelled `writable` in the
   released range; it must never recreate file-backed persistence.
+- `setup.sh --install-rescue-live` is the standalone post-boot rescue entry
+  point. It must not enter Btrfs conversion or the target chroot and may take
+  its live source from `RESCUE_SOURCE_DIR`, defaulting to `/cdrom`.
 - Preserve the EFI FAT filesystem label `ESP`. Relabelling must validate the
   exact device and filesystem type and must never reformat the ESP.
 

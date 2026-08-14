@@ -9,6 +9,7 @@ script_name="$(basename -- "$script_path")"
 repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_name="$(basename -- "$repository_root")"
 cleanup_required=false
+setup_action=install
 
 # The path is runtime-derived so setup.sh works from any current directory.
 # shellcheck disable=SC1090,SC1091
@@ -201,6 +202,7 @@ setup.show_help() {
 
 		Options:
 		  -h, --help                    show this help
+		  --install-rescue-live         install only the persistent rescue system
 		  --setup-tpm-luks-auto-unlock  enroll TPM-based LUKS unlock
 		  --seal-luks-disk-tpm          replace all TPM2 tokens and reseal
 	EOF
@@ -214,6 +216,10 @@ setup.parse_arguments() {
 	-h | -\? | --help)
 		setup.show_help
 		exit 0
+		;;
+	--install-rescue-live)
+		setup_action=install-rescue-live
+		return
 		;;
 	--setup-tpm-luks-auto-unlock)
 		common.require_commands tpm-enroll
@@ -243,14 +249,16 @@ setup.prepare_target() {
 }
 
 setup.install_rescue_system() {
+	local rescue_source_dir=${RESCUE_SOURCE_DIR:-/cdrom}
+
 	common.require_commands apt-get env
 	log.section "Persistent rescue system"
-	log.info "Install rescue-system filesystem and synchronization tools in the live environment"
+	log.info "Install rescue-system filesystem and synchronization tools"
 	apt-get install -y dosfstools e2fsprogs rsync
-	log.info "Create the rescue system from /cdrom on /dev/$rescue_dev"
+	log.info "Create the rescue system from $rescue_source_dir on /dev/$rescue_dev"
 	env \
 		repository_root="$repository_root" \
-		SOURCE_DIR=/cdrom \
+		SOURCE_DIR="$rescue_source_dir" \
 		TARGET_DEV="/dev/$rescue_dev" \
 		"$repository_root/rescue/script/install-rescue-live"
 	log.section_end
@@ -397,6 +405,10 @@ setup.main() {
 	fi
 	setup.load_configuration
 	log.info "Script path: $script_path"
+	if [[ $setup_action == install-rescue-live ]]; then
+		setup.install_rescue_system
+		return
+	fi
 
 	if [[ ${1:-} == "$INNER_MODE" ]]; then
 		setup.inner_installation
@@ -413,10 +425,10 @@ setup.main() {
 	"$repository_root/btrfs-root/scripts/btrfs-root-setup"
 	setup.prepare_chroot
 	setup.run_inner_installation
+	setup.install_rescue_system
 	setup.unmount_everything
 	cleanup_required=false
 	trap - EXIT
-	setup.install_rescue_system
 	log.info "Finished"
 }
 
