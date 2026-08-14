@@ -272,6 +272,16 @@ for example, `ubuntu` selects `os_ubuntu.png` when the theme provides it.
 activate only when their value is exactly `yes`. Do not document unused
 variables as functional.
 
+If `setup.conf` is missing, `setup.sh` must use `lib/tui.sh` to generate it
+interactively. Prompts retain visible current defaults; password entry remains
+hidden. Root selection is disk-first and then limited to that disk's partitions.
+Keep `mp`, `keyslot_size` and `btrfs_options` fixed and non-interactive unless a
+task explicitly changes this contract. Generated configuration remains
+shell-quoted, mode 0600 and atomically installed. Present `suite` as a closed
+single selection (`resolute`, `focal`) and `suite_type` as a closed single
+selection (currently `ubuntu`). Every `yes`/`no` question must use a toggle and
+persist only the literal values `yes` or `no`.
+
 Secure Boot setup expects `refind_themes.zip` at the repository root. Preserve
 that installation artifact or change its consumer and documentation together.
 

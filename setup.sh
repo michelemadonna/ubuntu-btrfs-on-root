@@ -13,10 +13,145 @@ cleanup_required=false
 # The path is runtime-derived so setup.sh works from any current directory.
 # shellcheck disable=SC1090,SC1091
 source "$repository_root/lib/common.sh"
+# shellcheck source=lib/tui.sh
+source "$repository_root/lib/tui.sh"
+
+setup.write_config_value() {
+	local file=$1 name=$2 value=$3
+	printf 'export %s=%q\n' "$name" "$value" >>"$file"
+}
+
+setup.generate_configuration() {
+	local config_file=$1
+	local disk root_path efi_path rescue_path name type size detail confirmation config_mode config_name
+	local root_dev efi_dev rescue_dev iter_time swap_size suite suite_type PASSPHRASE mok_pin
+	local pre_download=no enable_tpm=no snapshot_menu=no enlarge=no snapshot_menu_pin=no snapshot_menu_pin_value=123456
+	local -a disk_items=() partition_items=() efi_items=() rescue_items=()
+
+	common.require_commands bash grep lsblk mktemp mv stat
+	[[ -r $TUI_INPUT_DEVICE ]] || log.die "Interactive terminal is unavailable: $TUI_INPUT_DEVICE"
+	log.section "Guided setup.conf creation"
+	while read -r name type size detail; do
+		[[ $type == disk ]] || continue
+		disk_items+=("$name|$name $size ${detail:-unknown model}")
+	done < <(lsblk -dnpo NAME,TYPE,SIZE,MODEL)
+	((${#disk_items[@]} > 0)) || log.die "No installation disks were discovered."
+	disk="$(tui.select_one "Select the disk containing the installed Ubuntu system" /dev/sda "${disk_items[@]}")" ||
+		log.die "Invalid disk selection."
+
+	while read -r name type size detail; do
+		[[ $type == part ]] || continue
+		partition_items+=("$name|$name $size ${detail:-unknown filesystem}")
+	done < <(lsblk -nrpo NAME,TYPE,SIZE,FSTYPE "$disk")
+	((${#partition_items[@]} >= 3)) || log.die "Selected disk must expose at least three partitions."
+	root_path="$(tui.select_one "Select the Btrfs root partition" /dev/sda3 "${partition_items[@]}")" ||
+		log.die "Invalid root partition selection."
+	for detail in "${partition_items[@]}"; do
+		[[ ${detail%%|*} == "$root_path" ]] || efi_items+=("$detail")
+	done
+	efi_path="$(tui.select_one "Select the EFI System Partition" /dev/sda2 "${efi_items[@]}")" ||
+		log.die "Invalid EFI partition selection."
+	for detail in "${partition_items[@]}"; do
+		[[ ${detail%%|*} == "$root_path" || ${detail%%|*} == "$efi_path" ]] || rescue_items+=("$detail")
+	done
+	rescue_path="$(tui.select_one "Select the oversized partition reserved for rescue" /dev/sda1 "${rescue_items[@]}")" ||
+		log.die "Invalid rescue partition selection."
+
+	root_dev=${root_path#/dev/}
+	efi_dev=${efi_path#/dev/}
+	rescue_dev=${rescue_path#/dev/}
+	suite="$(tui.select_one "Select the Ubuntu suite/release" resolute 'resolute|Ubuntu Resolute' 'focal|Ubuntu Focal')" ||
+		log.die "Invalid suite selection."
+	suite_type="$(tui.select_one "Select the distribution type used for the rEFInd icon" ubuntu 'ubuntu|Ubuntu')" ||
+		log.die "Invalid distribution type selection."
+	iter_time="$(tui.input "Argon2id time target in milliseconds" 3000)"
+	swap_size="$(tui.input "Btrfs swapfile size" 4G)"
+	PASSPHRASE="$(tui.password "Initial LUKS passphrase" password)"
+	mok_pin="$(tui.password "MOK enrollment PIN" 123456)"
+	[[ $suite =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Suite must be a safe lowercase identifier."
+	[[ $suite_type =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Distribution icon identifier is invalid."
+	[[ $iter_time =~ ^[1-9][0-9]*$ ]] || log.die "Argon2id time target must be a positive integer."
+	[[ $swap_size =~ ^[1-9][0-9]*[KMGTP]$ ]] || log.die "Swap size must use a value such as 4G."
+	[[ -n $PASSPHRASE ]] || log.die "LUKS passphrase cannot be empty."
+	[[ -n $mok_pin ]] || log.die "MOK PIN cannot be empty."
+
+	pre_download="$(tui.toggle "Pre-download target packages" yes)" || log.die "Invalid pre-download toggle."
+	enable_tpm="$(tui.toggle "Install TPM integration" yes)" || log.die "Invalid TPM toggle."
+	snapshot_menu="$(tui.toggle "Install the early-boot snapshot selector" yes)" || log.die "Invalid snapshot-menu toggle."
+	enlarge="$(tui.toggle "Extend the root partition to available space" no)" || log.die "Invalid enlargement toggle."
+
+	if [[ $snapshot_menu == yes ]]; then
+		snapshot_menu_pin="$(tui.toggle "Protect snapshot selection with a PIN" yes)" ||
+			log.die "Invalid snapshot PIN selection."
+		if [[ $snapshot_menu_pin == yes ]]; then
+			snapshot_menu_pin_value="$(tui.password "Snapshot selector PIN" 123456)"
+		fi
+	fi
+
+	log.section "setup.conf summary"
+	log.summary_item "Disk" "$disk"
+	log.summary_item "Root" "$root_path"
+	log.summary_item "ESP" "$efi_path"
+	log.summary_item "Rescue" "$rescue_path"
+	log.summary_item "Suite" "$suite"
+	log.summary_item "Distribution icon" "$suite_type"
+	log.summary_item "Argon2id target" "${iter_time} ms"
+	log.summary_item "Swap size" "$swap_size"
+	log.summary_item "Enlarge root" "$enlarge"
+	log.summary_item "Pre-download packages" "$pre_download"
+	log.summary_item "TPM integration" "$enable_tpm"
+	log.summary_item "Snapshot menu" "$snapshot_menu"
+	log.summary_item "Snapshot menu PIN" "$snapshot_menu_pin"
+	log.summary_item "Secrets" "configured; values hidden from summary"
+	confirmation="$(tui.toggle "Write the generated configuration" yes)" || log.die "Invalid confirmation."
+	[[ $confirmation == yes ]] || log.die "Configuration creation cancelled."
+
+	local temporary_config
+	temporary_config="$(mktemp "$repository_root/.setup.conf.XXXXXX")"
+	chmod 0600 "$temporary_config"
+	setup.write_config_value "$temporary_config" root_dev "$root_dev"
+	setup.write_config_value "$temporary_config" efi_dev "$efi_dev"
+	setup.write_config_value "$temporary_config" mp /mnt/root
+	setup.write_config_value "$temporary_config" rescue_dev "$rescue_dev"
+	setup.write_config_value "$temporary_config" keyslot_size 32m
+	setup.write_config_value "$temporary_config" iter_time "$iter_time"
+	setup.write_config_value "$temporary_config" enlarge "$enlarge"
+	setup.write_config_value "$temporary_config" swap_size "$swap_size"
+	setup.write_config_value "$temporary_config" btrfs_options 'defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1'
+	setup.write_config_value "$temporary_config" suite "$suite"
+	setup.write_config_value "$temporary_config" suite_type "$suite_type"
+	setup.write_config_value "$temporary_config" PASSPHRASE "$PASSPHRASE"
+	setup.write_config_value "$temporary_config" pre_download "$pre_download"
+	setup.write_config_value "$temporary_config" root_sub_vol "@$suite"
+	setup.write_config_value "$temporary_config" enable_tpm "$enable_tpm"
+	setup.write_config_value "$temporary_config" snapshot_menu "$snapshot_menu"
+	setup.write_config_value "$temporary_config" snapshot_menu_pin "$snapshot_menu_pin"
+	setup.write_config_value "$temporary_config" snapshot_menu_pin_value "$snapshot_menu_pin_value"
+	setup.write_config_value "$temporary_config" mok_pin "$mok_pin"
+	mv "$temporary_config" "$config_file"
+	log.success "Generated protected configuration: $config_file"
+	log.section_end
+
+	log.section "Post-summary validation"
+	[[ -r $config_file ]] || log.die "Generated configuration is not readable: $config_file"
+	bash -n "$config_file" || log.die "Generated configuration contains invalid Bash syntax: $config_file"
+	config_mode=$(stat -c '%a' "$config_file")
+	[[ $config_mode == 600 ]] || log.die "Generated configuration permissions are $config_mode; expected 600."
+	for config_name in root_dev efi_dev mp rescue_dev keyslot_size iter_time enlarge swap_size btrfs_options suite suite_type \
+		PASSPHRASE pre_download root_sub_vol enable_tpm snapshot_menu snapshot_menu_pin snapshot_menu_pin_value mok_pin; do
+		grep -q "^export ${config_name}=" "$config_file" ||
+			log.die "Generated configuration is missing required value: $config_name"
+	done
+	log.success "Configuration syntax, permissions, and required values are valid."
+	log.section_end
+}
 
 setup.load_configuration() {
 	local config_file="$repository_root/setup.conf"
 
+	if [[ ! -e $config_file ]]; then
+		setup.generate_configuration "$config_file"
+	fi
 	common.require_readable_file "$config_file" "Configuration file"
 	# The configuration path is runtime-derived so the script works from any cwd.
 	# shellcheck disable=SC1090,SC1091
@@ -234,6 +369,10 @@ setup.cleanup_on_exit() {
 
 setup.main() {
 	common.require_root
+
+	if [[ ${1:-} != "$INNER_MODE" ]]; then
+		setup.parse_arguments "$@"
+	fi
 	setup.load_configuration
 	log.info "Script path: $script_path"
 
@@ -242,7 +381,6 @@ setup.main() {
 		return
 	fi
 
-	setup.parse_arguments "$@"
 	[[ -n ${PASSPHRASE:-} ]] || log.die "PASSPHRASE must be configured for the root volume."
 
 	setup.prepare_target

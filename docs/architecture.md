@@ -49,6 +49,16 @@ The chroot is launched through `unshare --mount --fork`. The outer phase binds
 the host resources needed by the installed system and later recursively
 unmounts the target and closes the `root` LUKS mapping.
 
+Before either phase, a missing `setup.conf` activates the guided configuration
+flow implemented with `lib/tui.sh`. Disk and partition choices come from
+`lsblk`; root selection is scoped to the previously selected disk. The wizard
+writes shell-quoted values atomically with mode 0600 and validates the resulting
+syntax, permissions and required assignments. `suite` is selected from
+`resolute` and `focal`; `suite_type` currently exposes only `ubuntu`. Boolean
+configuration uses `yes`/`no` toggles. Mount point, LUKS header reservation and
+Btrfs options remain fixed implementation defaults rather than interactive
+choices.
+
 The target-side repository copy is an installation input, not a permanent
 runtime dependency. Four commands are deliberately installed as autonomous
 artifacts:

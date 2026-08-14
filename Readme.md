@@ -76,6 +76,26 @@ Review `setup.conf` carefully. It is sourced as shell code and contains
 secret-bearing values. At minimum, replace the example LUKS passphrase and the
 example PINs before a real installation.
 
+If `setup.conf` does not exist, running `sudo ./setup.sh` starts an interactive
+terminal wizard. Every prompt shows the repository's current default. The
+wizard first lists block devices, then lists only the partitions belonging to
+the selected device for root selection. ESP and oversized rescue partitions are
+selected from the remaining partitions. `suite` is a single selection limited
+to `resolute` or `focal`; `suite_type` is a single selection currently limited
+to `ubuntu`. Every `yes`/`no` setting is presented as a toggle and normalized to
+one of those two literal values. Secrets use hidden input. The generated file is
+written atomically with mode `0600`, then checked for Bash syntax, required
+values and permissions.
+
+The wizard deliberately does not ask for `mp`, `keyslot_size` or
+`btrfs_options`; it writes their current supported values directly:
+
+```text
+mp=/mnt/root
+keyslot_size=32m
+btrfs_options=defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1
+```
+
 Important current options are:
 
 | Variable | Default | Meaning |

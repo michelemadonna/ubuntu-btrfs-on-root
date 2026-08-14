@@ -62,6 +62,8 @@ are inherited from that caller.
 Prefer tests of deterministic transformations and decisions:
 
 - setup configuration validation and device-name construction;
+- TUI default handling, hidden input, single/multiple selection, normalized
+  `yes`/`no` toggles and generated configuration contract;
 - `log.*` output channels, formatting and fatal-exit behavior;
 - rescue source/destination sizing and FAT32/persistence limits;
 - rescue GPT split calculations and the partition-backed `writable` contract;

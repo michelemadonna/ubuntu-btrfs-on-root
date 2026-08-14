@@ -164,6 +164,12 @@ boot and maintenance commands.
 ## Configuration truth
 
 - `setup.conf` is sourced shell input and may contain secrets.
+- When absent, it is generated only through the interactive TUI and installed
+  atomically with mode 0600. `mp`, `keyslot_size` and `btrfs_options` retain
+  their repository defaults and are not prompted.
+- The guided flow restricts `suite` to `resolute` or `focal` and `suite_type`
+  to the currently supported `ubuntu` value. All `yes`/`no` questions use
+  toggles and persist only those literal values.
 - Placeholder credentials are replaced before real execution and real
   credentials are never committed.
 - Feature flags `pre_download` and `enable_tpm` activate only for literal `yes`.
