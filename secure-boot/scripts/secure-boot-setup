@@ -43,22 +43,22 @@ secure-boot-setup.detect_firmware_state() {
 
 	if [[ -f $state_file ]]; then
 		SETUP_MODE="$(<"$state_file")"
-		common.log_info "Read cached UEFI SetupMode=$SETUP_MODE from $state_file"
+		log.info "Read cached UEFI SetupMode=$SETUP_MODE from $state_file"
 	else
 		SETUP_MODE="$(secure-boot-setup.read_efi_uint8 SetupMode)" ||
-			common.die "Cannot read UEFI SetupMode."
-		common.log_info "Persist detected UEFI SetupMode=$SETUP_MODE to $state_file"
+			log.die "Cannot read UEFI SetupMode."
+		log.info "Persist detected UEFI SetupMode=$SETUP_MODE to $state_file"
 		printf '%s\n' "$SETUP_MODE" >"$state_file"
 	fi
 
 	SECURE_BOOT="$(secure-boot-setup.read_efi_uint8 SecureBoot 2>/dev/null || printf '0\n')"
 	case $SETUP_MODE in
 	0 | 1) ;;
-	*) common.die "Invalid SetupMode value: $SETUP_MODE" ;;
+	*) log.die "Invalid SetupMode value: $SETUP_MODE" ;;
 	esac
 	case $SECURE_BOOT in
 	0 | 1) ;;
-	*) common.die "Invalid SecureBoot value: $SECURE_BOOT" ;;
+	*) log.die "Invalid SecureBoot value: $SECURE_BOOT" ;;
 	esac
 	export SETUP_MODE SECURE_BOOT
 }
@@ -77,29 +77,29 @@ secure-boot-setup.run_phase() {
 	local phase_name=$1
 	local phase_script=$2
 
-	common.log_section "$phase_name"
-	common.log_info "Execute $phase_script"
+	log.section "$phase_name"
+	log.info "Execute $phase_script"
 	"$phase_script"
-	common.log_success "$phase_name completed"
+	log.success "$phase_name completed"
 }
 
 secure-boot-setup.print_summary() {
 	local trust_path
 
 	trust_path="$(secure-boot-setup.trust_path "$SETUP_MODE")"
-	common.log_section "Secure Boot setup summary"
-	common.log_summary_item "Status" "completed successfully"
-	common.log_summary_item "SetupMode" "$SETUP_MODE"
-	common.log_summary_item "SecureBoot" "$SECURE_BOOT"
-	common.log_summary_item "Trust path" "$trust_path"
-	common.log_summary_item "Signing key root" "$SBCTL_KEYROOT"
-	common.log_summary_item "ESP" "$ESP"
-	common.log_summary_item "Shim directory" "$SHIM_DIR"
-	common.log_summary_item "rEFInd" "$ESP/EFI/refind"
-	common.log_success "Secure Boot configuration completed"
+	log.section "Secure Boot setup summary"
+	log.summary_item "Status" "completed successfully"
+	log.summary_item "SetupMode" "$SETUP_MODE"
+	log.summary_item "SecureBoot" "$SECURE_BOOT"
+	log.summary_item "Trust path" "$trust_path"
+	log.summary_item "Signing key root" "$SBCTL_KEYROOT"
+	log.summary_item "ESP" "$ESP"
+	log.summary_item "Shim directory" "$SHIM_DIR"
+	log.summary_item "rEFInd" "$ESP/EFI/refind"
+	log.success "Secure Boot configuration completed"
 
 	if [[ $SETUP_MODE == 0 ]]; then
-		common.log_warn "Complete the pending MOK enrollment at the next reboot if requested"
+		log.warn "Complete the pending MOK enrollment at the next reboot if requested"
 	fi
 }
 
@@ -107,20 +107,20 @@ secure-boot-setup.run() {
 	common.require_root
 	common.require_commands apt-get find od tr uname
 	[[ -d /sys/firmware/efi ]] ||
-		common.die "System was not booted in UEFI mode."
+		log.die "System was not booted in UEFI mode."
 	case $(uname -m) in
 	x86_64 | amd64) ;;
-	*) common.die "Only x86-64 UEFI is currently supported." ;;
+	*) log.die "Only x86-64 UEFI is currently supported." ;;
 	esac
 
-	common.log_section "Secure Boot preflight"
-	common.log_info "Install base packages required for firmware-state discovery"
+	log.section "Secure Boot preflight"
+	log.info "Install base packages required for firmware-state discovery"
 	export DEBIAN_FRONTEND=noninteractive
 	apt-get update
 	apt-get install -y ca-certificates findutils coreutils
 	secure-boot-setup.detect_firmware_state
-	common.log_info "Detected SetupMode=$SETUP_MODE and SecureBoot=$SECURE_BOOT"
-	common.log_info "Selected trust path: $(secure-boot-setup.trust_path "$SETUP_MODE")"
+	log.info "Detected SetupMode=$SETUP_MODE and SecureBoot=$SECURE_BOOT"
+	log.info "Selected trust path: $(secure-boot-setup.trust_path "$SETUP_MODE")"
 
 	secure-boot-setup.run_phase \
 		"Secure Boot key management" "$script_dir/sbctl-setup"
@@ -128,7 +128,7 @@ secure-boot-setup.run() {
 		secure-boot-setup.run_phase \
 			"Shim and MOK preparation" "$script_dir/shim-setup"
 	else
-		common.log_info "Skip Shim/MOK preparation because SetupMode=1 selects direct firmware trust"
+		log.info "Skip Shim/MOK preparation because SetupMode=1 selects direct firmware trust"
 	fi
 	secure-boot-setup.run_phase \
 		"rEFInd installation and signing" "$script_dir/refind-setup"

@@ -5,37 +5,45 @@ umask 077
 
 TPM_CONFIG="${TPM_CONFIG:-/etc/tpm.conf}"
 
-tpm-enroll.log_info() {
+log.info() {
 	printf 'INFO: %s\n' "$*"
 }
 
-tpm-enroll.log_warn() {
+log.warn() {
 	printf 'WARN: %s\n' "$*" >&2
 }
 
-tpm-enroll.die() {
+log.success() {
+	printf 'SUCCESS: %s\n' "$*"
+}
+
+log.section() {
+	printf '\n==> %s\n' "$*"
+}
+
+log.die() {
 	printf 'ERROR: %s\n' "$*" >&2
 	exit 1
 }
 
 tpm-enroll.require_root() {
-	((EUID == 0)) || tpm-enroll.die "Must be run as root."
+	((EUID == 0)) || log.die "Must be run as root."
 }
 
 tpm-enroll.require_file() {
 	local path=$1 description=$2
-	[[ -r $path ]] || tpm-enroll.die "$description not found or not readable: $path"
+	[[ -r $path ]] || log.die "$description not found or not readable: $path"
 }
 
 tpm-enroll.require_nonempty() {
 	local name=$1 value=${2:-}
-	[[ -n $value ]] || tpm-enroll.die "$name must be configured."
+	[[ -n $value ]] || log.die "$name must be configured."
 }
 
 tpm-enroll.require_commands() {
 	local command_name
 	for command_name in "$@"; do
-		command -v "$command_name" >/dev/null 2>&1 || tpm-enroll.die "Required command not found: $command_name"
+		command -v "$command_name" >/dev/null 2>&1 || log.die "Required command not found: $command_name"
 	done
 }
 
@@ -49,7 +57,7 @@ tpm-enroll.validate_configuration() {
 	tpm-enroll.require_nonempty TPM_SIGNED_PCRS "${TPM_SIGNED_PCRS:-}"
 	tpm-enroll.require_nonempty PCR_PUBLIC_KEY "${PCR_PUBLIC_KEY:-}"
 	tpm-enroll.require_nonempty LUKS_HEADER_BACKUP_DIR "${LUKS_HEADER_BACKUP_DIR:-}"
-	case $TPM_USE_PIN in true | false) ;; *) tpm-enroll.die "TPM_USE_PIN must be true or false." ;; esac
+	case $TPM_USE_PIN in true | false) ;; *) log.die "TPM_USE_PIN must be true or false." ;; esac
 }
 
 tpm-enroll.build_arguments() {
@@ -65,7 +73,7 @@ tpm-enroll.build_arguments() {
 	case $wipe_existing in
 	yes) arguments+=("--wipe-slot=tpm2") ;;
 	no) ;;
-	*) tpm-enroll.die "wipe_existing must be either yes or no." ;;
+	*) log.die "wipe_existing must be either yes or no." ;;
 	esac
 	printf '%s\n' "${arguments[@]}"
 }
@@ -75,7 +83,7 @@ tpm-enroll.create_header_backup() {
 	install -d -m 0700 "$LUKS_HEADER_BACKUP_DIR"
 	backup_directory="$(mktemp -d "$LUKS_HEADER_BACKUP_DIR/$(basename "$LUKS_DEVICE")-$(date +%Y%m%d-%H%M%S).XXXXXX")"
 	backup_file="$backup_directory/header.img"
-	tpm-enroll.log_info "Back up the LUKS header to $backup_file"
+	log.info "Back up the LUKS header to $backup_file"
 	cryptsetup luksHeaderBackup "$LUKS_DEVICE" --header-backup-file "$backup_file"
 	chmod 0600 "$backup_file"
 }
@@ -90,24 +98,24 @@ tpm-enroll.run() {
 	case ${1:-} in
 	'') wipe_existing=no ;;
 	--wipe-existing-tpm2) wipe_existing=yes ;;
-	*) tpm-enroll.die "Usage: tpm-enroll [--wipe-existing-tpm2]" ;;
+	*) log.die "Usage: tpm-enroll [--wipe-existing-tpm2]" ;;
 	esac
-	[[ -b $LUKS_DEVICE ]] || tpm-enroll.die "LUKS_DEVICE is not a block device: $LUKS_DEVICE"
+	[[ -b $LUKS_DEVICE ]] || log.die "LUKS_DEVICE is not a block device: $LUKS_DEVICE"
 	tpm-enroll.require_file "$PCR_PUBLIC_KEY" "PCR public key"
-	cryptsetup isLuks "$LUKS_DEVICE" || tpm-enroll.die "Configured device is not a valid LUKS volume."
+	cryptsetup isLuks "$LUKS_DEVICE" || log.die "Configured device is not a valid LUKS volume."
 
-	printf '\n==> TPM2 LUKS enrollment\n'
+	log.section "TPM2 LUKS enrollment"
 	tpm-enroll.create_header_backup
 	mapfile -t enroll_arguments < <(tpm-enroll.build_arguments "$wipe_existing")
 	if [[ $wipe_existing == yes ]]; then
-		tpm-enroll.log_warn "Explicitly removing every existing systemd TPM2 token before enrollment."
+		log.warn "Explicitly removing every existing systemd TPM2 token before enrollment."
 	else
-		tpm-enroll.log_info "Preserve all existing password, recovery and TPM2 enrollments."
+		log.info "Preserve all existing password, recovery and TPM2 enrollments."
 	fi
-	tpm-enroll.log_info "Enroll literal PCR policy $TPM_LITERAL_PCRS and signed PCR policy $TPM_SIGNED_PCRS"
+	log.info "Enroll literal PCR policy $TPM_LITERAL_PCRS and signed PCR policy $TPM_SIGNED_PCRS"
 	systemd-cryptenroll "${enroll_arguments[@]}"
-	cryptsetup luksDump "$LUKS_DEVICE" | grep -qi systemd-tpm2 || tpm-enroll.die "No systemd-tpm2 token found after enrollment."
-	printf 'SUCCESS: TPM enrollment completed and verified\n'
+	cryptsetup luksDump "$LUKS_DEVICE" | grep -qi systemd-tpm2 || log.die "No systemd-tpm2 token found after enrollment."
+	log.success "TPM enrollment completed and verified"
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

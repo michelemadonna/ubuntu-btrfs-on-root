@@ -12,9 +12,9 @@ snapper-setup.configure_profile() {
 	local profile=$1
 	local mountpoint=$2
 
-	common.log_info "Create Snapper profile '$profile' for $mountpoint"
+	log.info "Create Snapper profile '$profile' for $mountpoint"
 	snapper -c "$profile" create-config "$mountpoint"
-	common.log_info "Enable timeline snapshots, sudo access and ACL synchronization for '$profile'"
+	log.info "Enable timeline snapshots, sudo access and ACL synchronization for '$profile'"
 	snapper -c "$profile" set-config \
 		'TIMELINE_CREATE=yes' \
 		'ALLOW_GROUPS=sudo' \
@@ -24,17 +24,17 @@ snapper-setup.configure_profile() {
 snapper-setup.run() {
 	common.require_root
 	common.require_commands apt
-	common.log_section "Snapper installation"
-	common.log_info "Install Snapper and filesystem change monitoring"
+	log.section "Snapper installation"
+	log.info "Install Snapper and filesystem change monitoring"
 	apt install -y snapper inotify-tools
 	common.require_commands snapper
 
 	snapper-setup.configure_profile root /
 	snapper-setup.configure_profile home /home
 
-	common.log_info "Install Btrfs Assistant and maintenance integration without recommended packages"
+	log.info "Install Btrfs Assistant and maintenance integration without recommended packages"
 	apt --no-install-recommends -y install btrfs-assistant btrfsmaintenance
-	common.log_success "Snapper root and home profiles configured"
+	log.success "Snapper root and home profiles configured"
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

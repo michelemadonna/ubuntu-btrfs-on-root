@@ -80,13 +80,13 @@ sbctl-setup.install_dependencies() {
 	#
 	if ! command -v sbctl >/dev/null 2>&1; then
 
-		common.log_info "Try to install sbctl from the distribution repository"
+		log.info "Try to install sbctl from the distribution repository"
 		if apt-cache search sbctl | grep -q sbctl; then
-			common.log_info "sbctl package available in distribution repository"
+			log.info "sbctl package available in distribution repository"
 			apt-get install -y sbctl || true
 		else
-			common.log_info "sbctl package unavailable in distribution repository"
-			common.log_info "Build sbctl version $SBCTL_VERSION from upstream source"
+			log.info "sbctl package unavailable in distribution repository"
+			log.info "Build sbctl version $SBCTL_VERSION from upstream source"
 			sbctl-setup.install_upstream
 		fi
 
@@ -139,7 +139,7 @@ sbctl-setup.install_upstream() {
 
 	file "$tmp/sbctl" |
 		grep -q 'ELF' ||
-		common.die "Built sbctl is not an ELF executable."
+		log.die "Built sbctl is not an ELF executable."
 
 	install \
 		-m 0755 \
@@ -165,7 +165,7 @@ sbctl-setup.keys_exist() {
 
 sbctl-setup.create_keys() {
 	if sbctl-setup.keys_exist; then
-		common.log_info "Complete sbctl key hierarchy already exists at $SBCTL_KEYROOT"
+		log.info "Complete sbctl key hierarchy already exists at $SBCTL_KEYROOT"
 		return
 	fi
 
@@ -175,15 +175,15 @@ sbctl-setup.create_keys() {
 			-print \
 			-quit 2>/dev/null |
 		grep -q .; then
-		common.die "Incomplete sbctl key hierarchy in $SBCTL_KEYROOT."
+		log.die "Incomplete sbctl key hierarchy in $SBCTL_KEYROOT."
 	fi
 
-	common.log_info "Generate new PK, KEK and db Secure Boot key hierarchy in $SBCTL_KEYROOT"
+	log.info "Generate new PK, KEK and db Secure Boot key hierarchy in $SBCTL_KEYROOT"
 
 	sbctl create-keys
 	sbctl setup --migrate || true
 	sbctl-setup.keys_exist ||
-		common.die "sbctl did not create the expected key hierarchy."
+		log.die "sbctl did not create the expected key hierarchy."
 }
 
 # ============================================================
@@ -232,7 +232,7 @@ sbctl-setup.enroll_db() {
 	#
 	sbctl-setup.unprotect_efi_variables
 
-	common.log_info "Enroll db last-level trust certificate; preserve configured existing trust sources"
+	log.info "Enroll db last-level trust certificate; preserve configured existing trust sources"
 
 	sbctl "${args[@]}"
 }
@@ -258,7 +258,7 @@ sbctl-setup.enroll_kek() {
 	#
 	sbctl-setup.unprotect_efi_variables
 
-	common.log_info "Enroll KEK after db"
+	log.info "Enroll KEK after db"
 
 	sbctl "${args[@]}"
 }
@@ -270,7 +270,7 @@ sbctl-setup.enroll_pk() {
 	#
 	sbctl-setup.unprotect_efi_variables
 
-	common.log_info "Enroll PK last; this exits firmware Setup Mode"
+	log.info "Enroll PK last; this exits firmware Setup Mode"
 
 	#
 	# Always last.
@@ -291,7 +291,7 @@ sbctl-setup.unprotect_efi_variables() {
 			if lsattr "$file" 2>/dev/null |
 				awk '{print $1}' |
 				grep -q 'i'; then
-				common.log_info "Temporarily remove immutable flag from $(basename "$file")"
+				log.info "Temporarily remove immutable flag from $(basename "$file")"
 				chattr -i "$file"
 			fi
 
@@ -315,7 +315,7 @@ sbctl-setup.protect_efi_variables() {
 		while IFS= read -r file; do
 			[[ -e "$file" ]] || continue
 
-			common.log_info "Restore immutable flag on $(basename "$file")"
+			log.info "Restore immutable flag on $(basename "$file")"
 
 			chattr +i "$file" 2>/dev/null || true
 
@@ -333,13 +333,13 @@ sbctl-setup.protect_efi_variables() {
 sbctl-setup.migrate_configuration() {
 	local output
 
-	common.log_info "Check whether the sbctl configuration requires migration"
+	log.info "Check whether the sbctl configuration requires migration"
 
 	output="$(sbctl setup --migrate 2>&1 || true)"
 	if [[ $output == *"old configuration detected"* ]]; then
-		common.log_info "Migrated an older sbctl configuration"
+		log.info "Migrated an older sbctl configuration"
 	else
-		common.log_info "No sbctl configuration migration was required"
+		log.info "No sbctl configuration migration was required"
 	fi
 }
 
@@ -350,18 +350,18 @@ sbctl-setup.enroll_if_setup_mode() {
 		else
 			SETUP_MODE="$(
 				sbctl-setup.read_efi_uint8 SetupMode
-			)" || common.die "Cannot read UEFI SetupMode."
+			)" || log.die "Cannot read UEFI SetupMode."
 		fi
 	fi
 
 	if [[ "$SETUP_MODE" != "1" ]]; then
 
-		common.log_info "SetupMode=0; skip firmware PK/KEK/db enrollment and preserve the existing hierarchy"
+		log.info "SetupMode=0; skip firmware PK/KEK/db enrollment and preserve the existing hierarchy"
 
 		return
 	fi
 
-	common.log_info "SetupMode=1; prepare EFI variables for direct enrollment"
+	log.info "SetupMode=1; prepare EFI variables for direct enrollment"
 
 	#
 	# Make sure we attempt to restore protection even if
@@ -369,7 +369,7 @@ sbctl-setup.enroll_if_setup_mode() {
 	#
 	trap 'sbctl-setup.protect_efi_variables' RETURN
 
-	common.log_info "Enroll Secure Boot hierarchy in db, KEK, PK order"
+	log.info "Enroll Secure Boot hierarchy in db, KEK, PK order"
 
 	#
 	# db first.
@@ -391,7 +391,7 @@ sbctl-setup.enroll_if_setup_mode() {
 	sbctl-setup.protect_efi_variables
 	trap - RETURN
 
-	common.log_success "Direct firmware Secure Boot enrollment completed"
+	log.success "Direct firmware Secure Boot enrollment completed"
 }
 
 # ============================================================

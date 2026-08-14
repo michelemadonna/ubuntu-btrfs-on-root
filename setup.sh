@@ -30,9 +30,9 @@ setup.load_configuration() {
 	common.require_nonempty "suite" "${suite:-}"
 	common.require_nonempty "pre_download" "${pre_download:-}"
 	[[ $rescue_dev != */* && $rescue_dev != *..* ]] ||
-		common.die "rescue_dev must be a device name relative to /dev."
+		log.die "rescue_dev must be a device name relative to /dev."
 	[[ $rescue_dev != "$root_dev" && $rescue_dev != "$efi_dev" ]] ||
-		common.die "rescue_dev must be distinct from root_dev and efi_dev."
+		log.die "rescue_dev must be distinct from root_dev and efi_dev."
 }
 
 setup.show_help() {
@@ -45,7 +45,6 @@ setup.show_help() {
 		Options:
 		  -h, --help                    show this help
 		  --setup-tpm-luks-auto-unlock  enroll TPM-based LUKS unlock
-		  --setup-tpm-luks-auto_ulock   deprecated spelling of the same option
 		  --seal-luks-disk-tpm          replace all TPM2 tokens and reseal
 	EOF
 }
@@ -59,7 +58,7 @@ setup.parse_arguments() {
 		setup.show_help
 		exit 0
 		;;
-	--setup-tpm-luks-auto_ulock | --setup-tpm-luks-auto-unlock)
+	--setup-tpm-luks-auto-unlock)
 		common.require_commands tpm-enroll
 		tpm-enroll
 		exit 0
@@ -70,16 +69,16 @@ setup.parse_arguments() {
 		exit 0
 		;;
 	--*)
-		common.die "Invalid option $1. Use --help for more information."
+		log.die "Invalid option $1. Use --help for more information."
 		;;
 	*)
-		common.die "Unexpected argument: $1"
+		log.die "Unexpected argument: $1"
 		;;
 	esac
 }
 
 setup.prepare_target() {
-	common.log_info "Prepare installation target"
+	log.info "Prepare installation target"
 	umount /target/boot/efi
 	umount /target/cdrom
 	umount /target
@@ -88,10 +87,10 @@ setup.prepare_target() {
 
 setup.install_rescue_system() {
 	common.require_commands apt-get env
-	common.log_section "Persistent rescue system"
-	common.log_info "Install rescue-system filesystem and synchronization tools in the live environment"
+	log.section "Persistent rescue system"
+	log.info "Install rescue-system filesystem and synchronization tools in the live environment"
 	apt-get install -y dosfstools e2fsprogs rsync
-	common.log_info "Create the rescue system from /cdrom on /dev/$rescue_dev"
+	log.info "Create the rescue system from /cdrom on /dev/$rescue_dev"
 	env \
 		repository_root="$repository_root" \
 		SOURCE_DIR=/cdrom \
@@ -100,7 +99,7 @@ setup.install_rescue_system() {
 }
 
 setup.prepare_chroot() {
-	common.log_info "Prepare $mp for chroot"
+	log.info "Prepare $mp for chroot"
 	mount --rbind /dev "$mp/dev"
 	mount --make-rslave "$mp/dev"
 	mount -t proc proc "$mp/proc"
@@ -135,7 +134,7 @@ setup.run_inner_installation() {
 
 	cp -Rf "$repository_root" "$mp/root/"
 	chmod a+x "$mp$inner_repository/$script_name"
-	common.log_info "Run installation phases in the target chroot"
+	log.info "Run installation phases in the target chroot"
 	unshare --mount --fork chroot "$mp" "$inner_repository/$script_name" "$INNER_MODE"
 }
 
@@ -166,7 +165,7 @@ setup.inner_installation() {
 		setup.pre_download_all
 	fi
 
-	common.log_info "Install target initramfs integration for the configured LUKS root"
+	log.info "Install target initramfs integration for the configured LUKS root"
 	apt-get install -y cryptsetup-initramfs
 
 	# The Btrfs/LUKS storage phase has already completed outside the chroot.
@@ -197,13 +196,13 @@ setup.unmount_everything() {
 	for ((index = ${#mounts[@]} - 1; index >= 0; index--)); do
 		target="${mounts[index]}"
 		mountpoint -q "$target" || continue
-		common.log_info "Unmounting $target"
+		log.info "Unmounting $target"
 
 		if umount "$target"; then
 			continue
 		fi
 
-		common.log_warn "Retrying unmount: $target"
+		log.warn "Retrying unmount: $target"
 		sync
 		sleep 0.2
 		if umount "$target"; then
@@ -235,7 +234,7 @@ setup.cleanup_on_exit() {
 setup.main() {
 	common.require_root
 	setup.load_configuration
-	common.log_info "Script path: $script_path"
+	log.info "Script path: $script_path"
 
 	if [[ ${1:-} == "$INNER_MODE" ]]; then
 		setup.inner_installation
@@ -243,7 +242,7 @@ setup.main() {
 	fi
 
 	setup.parse_arguments "$@"
-	[[ -n ${PASSPHRASE:-} ]] || common.die "PASSPHRASE must be configured for the root volume."
+	[[ -n ${PASSPHRASE:-} ]] || log.die "PASSPHRASE must be configured for the root volume."
 
 	setup.install_rescue_system
 	setup.prepare_target
@@ -257,7 +256,7 @@ setup.main() {
 	setup.unmount_everything
 	cleanup_required=false
 	trap - EXIT
-	common.log_info "Finished"
+	log.info "Finished"
 }
 
 setup.main "$@"

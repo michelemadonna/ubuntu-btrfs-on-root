@@ -62,6 +62,7 @@ are inherited from that caller.
 Prefer tests of deterministic transformations and decisions:
 
 - setup configuration validation and device-name construction;
+- `log.*` output channels, formatting and fatal-exit behavior;
 - rescue source/destination sizing and FAT32/persistence limits;
 - Btrfs subvolume and fstab/crypttab model generation;
 - Secure Boot mode detection and enrollment ordering;

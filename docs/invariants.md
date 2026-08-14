@@ -142,6 +142,8 @@ boot and maintenance commands.
 
 - Domain-specific logic remains in its subsystem scripts.
 - Only functions shared by multiple repository scripts belong under `lib/`.
+- Shared logging lives only in `lib/log.sh` and is invoked through `log.*`;
+  `common.sh` must not become a second logging implementation.
 - Function names identify their owner, for example `common.require_root` or
   `tpm-enroll.load_configuration`.
 - `generate-uki`, `tpm-enroll`, `tpm-reseal` and `tpm-status` have no runtime

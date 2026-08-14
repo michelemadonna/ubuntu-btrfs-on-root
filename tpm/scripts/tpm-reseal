@@ -2,13 +2,17 @@
 
 set -Eeuo pipefail
 
-tpm-reseal.die() {
+log.warn() {
+	printf 'WARN: %s\n' "$*" >&2
+}
+
+log.die() {
 	printf 'ERROR: %s\n' "$*" >&2
 	exit 1
 }
 
 tpm-reseal.require_root() {
-	((EUID == 0)) || tpm-reseal.die "Must be run as root."
+	((EUID == 0)) || log.die "Must be run as root."
 }
 
 tpm-reseal.run() {
@@ -27,9 +31,9 @@ tpm-reseal.run() {
 		EOF
 		return 2
 	}
-	(($# == 1)) || tpm-reseal.die "Usage: tpm-reseal --wipe-all-tpm2"
-	command -v tpm-enroll >/dev/null 2>&1 || tpm-reseal.die "Required command not found: tpm-enroll"
-	printf 'WARN: Destructive TPM2 token replacement explicitly requested.\n' >&2
+	(($# == 1)) || log.die "Usage: tpm-reseal --wipe-all-tpm2"
+	command -v tpm-enroll >/dev/null 2>&1 || log.die "Required command not found: tpm-enroll"
+	log.warn "Destructive TPM2 token replacement explicitly requested."
 	tpm-reseal.enroll
 }
 

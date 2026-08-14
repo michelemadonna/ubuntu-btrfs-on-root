@@ -23,11 +23,11 @@ btrfs-snapshots-mng-setup.validate_configuration() {
 
 	case $snapshot_menu in
 	yes | no) ;;
-	*) common.die "snapshot_menu must be either 'yes' or 'no'." ;;
+	*) log.die "snapshot_menu must be either 'yes' or 'no'." ;;
 	esac
 	case $snapshot_menu_pin in
 	yes | no) ;;
-	*) common.die "snapshot_menu_pin must be either 'yes' or 'no'." ;;
+	*) log.die "snapshot_menu_pin must be either 'yes' or 'no'." ;;
 	esac
 	if [[ $snapshot_menu_pin == yes ]]; then
 		common.require_nonempty "snapshot_menu_pin_value" "${snapshot_menu_pin_value:-}"
@@ -79,12 +79,12 @@ btrfs-snapshots-mng-setup.install_module() {
 	local salt
 	local pin_hash
 
-	common.log_section "Snapshot-menu dracut module"
-	common.log_info "Synchronize module source $module_source to $module_target"
+	log.section "Snapshot-menu dracut module"
+	log.info "Synchronize module source $module_source to $module_target"
 	install -d -m 0755 "$module_target"
 	rsync -a --delete "$module_source/" "$module_target/"
 
-	common.log_info "Compile the early keyboard listener with C17 warnings enabled"
+	log.info "Compile the early keyboard listener with C17 warnings enabled"
 	gcc \
 		-O2 \
 		-Wall \
@@ -102,42 +102,42 @@ btrfs-snapshots-mng-setup.install_module() {
 		"$module_target/listener/snapshot-key-listener" \
 		"$module_target/listener/snapshot-key-listener-stop"
 
-	common.log_info "Write snapshot-menu configuration for normal root $root_subvolume"
+	log.info "Write snapshot-menu configuration for normal root $root_subvolume"
 	btrfs-snapshots-mng-setup.render_base_config "$root_subvolume" >"$menu_config"
 	if [[ $snapshot_menu_pin == yes ]]; then
 		salt="$(openssl rand -hex 16)"
 		pin_hash="$(btrfs-snapshots-mng-setup.hash_pin "$salt" "$snapshot_menu_pin_value")"
 		btrfs-snapshots-mng-setup.append_pin_config "$salt" "$pin_hash" >>"$menu_config"
-		common.log_info "Snapshot PIN enabled with three attempts; plaintext PIN is never written or logged"
+		log.info "Snapshot PIN enabled with three attempts; plaintext PIN is never written or logged"
 	else
-		common.log_info "Snapshot PIN disabled"
+		log.info "Snapshot PIN disabled"
 	fi
 	chmod 0644 "$menu_config"
 
-	common.log_info "Force inclusion of snapshot-menu and overlayfs dracut modules"
+	log.info "Force inclusion of snapshot-menu and overlayfs dracut modules"
 	cat >/etc/dracut.conf.d/52-snapshot-menu.conf <<-'EOF'
 		force_add_dracutmodules+=" snapshot-menu "
 	EOF
 	cat >/etc/dracut.conf.d/99_overlayfs.conf <<-'EOF'
 		add_dracutmodules+=" overlayfs "
 	EOF
-	common.log_success "Snapshot-menu dracut module installed"
+	log.success "Snapshot-menu dracut module installed"
 }
 
 btrfs-snapshots-mng-setup.print_summary() {
-	common.log_section "Snapshot management summary"
-	common.log_summary_item "Status" "completed successfully"
-	common.log_summary_item "Snapper profiles" "root, home"
-	common.log_summary_item "Snapshot menu" "$snapshot_menu"
-	common.log_summary_item "Snapshot PIN" "$snapshot_menu_pin"
+	log.section "Snapshot management summary"
+	log.summary_item "Status" "completed successfully"
+	log.summary_item "Snapper profiles" "root, home"
+	log.summary_item "Snapshot menu" "$snapshot_menu"
+	log.summary_item "Snapshot PIN" "$snapshot_menu_pin"
 	if [[ $snapshot_menu == yes ]]; then
-		common.log_summary_item "Normal root" "$root_sub_vol/@"
-		common.log_summary_item "Module" "$module_target"
-		common.log_summary_item "Configuration" "$menu_config"
-		common.log_summary_item "Trigger" "ALT+B (5.0 seconds)"
-		common.log_summary_item "Snapshot root" "read-only lower layer + tmpfs overlay"
+		log.summary_item "Normal root" "$root_sub_vol/@"
+		log.summary_item "Module" "$module_target"
+		log.summary_item "Configuration" "$menu_config"
+		log.summary_item "Trigger" "ALT+B (5.0 seconds)"
+		log.summary_item "Snapshot root" "read-only lower layer + tmpfs overlay"
 	fi
-	common.log_success "Btrfs snapshot management setup completed"
+	log.success "Btrfs snapshot management setup completed"
 }
 
 btrfs-snapshots-mng-setup.run() {
@@ -145,8 +145,8 @@ btrfs-snapshots-mng-setup.run() {
 	btrfs-snapshots-mng-setup.validate_configuration
 	common.require_commands apt-get install rsync
 
-	common.log_section "Btrfs snapshot management"
-	common.log_info "Install dracut module build and synchronization dependencies"
+	log.section "Btrfs snapshot management"
+	log.info "Install dracut module build and synchronization dependencies"
 	apt-get install -y dracut binutils coreutils gcc openssl rsync
 	"$script_dir/snapper-setup"
 
@@ -154,7 +154,7 @@ btrfs-snapshots-mng-setup.run() {
 		common.require_commands awk gcc openssl sha256sum
 		btrfs-snapshots-mng-setup.install_module
 	else
-		common.log_info "Snapshot menu disabled; skip dracut module installation"
+		log.info "Snapshot menu disabled; skip dracut module installation"
 	fi
 	btrfs-snapshots-mng-setup.print_summary
 }

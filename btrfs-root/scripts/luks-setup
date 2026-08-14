@@ -23,14 +23,14 @@ luks-setup.validate_configuration() {
 	common.require_nonempty "PASSPHRASE" "${PASSPHRASE:-}"
 
 	[[ $root_dev != /dev/* ]] ||
-		common.die "root_dev must be configured without the /dev/ prefix."
+		log.die "root_dev must be configured without the /dev/ prefix."
 	[[ $mp == /* && $mp != / ]] ||
-		common.die "mp must be an absolute path other than /."
+		log.die "mp must be an absolute path other than /."
 	[[ $root_sub_vol != /* && $root_sub_vol != *..* ]] ||
-		common.die "root_sub_vol must be a safe relative Btrfs path."
+		log.die "root_sub_vol must be a safe relative Btrfs path."
 	case $enlarge in
 	yes | no) ;;
-	*) common.die "enlarge must be either 'yes' or 'no'." ;;
+	*) log.die "enlarge must be either 'yes' or 'no'." ;;
 	esac
 }
 
@@ -59,7 +59,7 @@ luks-setup.write_crypttab() {
 
 	luks_uuid="$(blkid --match-tag UUID --output value "$luks_device")"
 	common.require_nonempty "LUKS UUID" "$luks_uuid"
-	common.log_info "Write root LUKS mapping to $crypttab_file using UUID $luks_uuid"
+	log.info "Write root LUKS mapping to $crypttab_file using UUID $luks_uuid"
 	luks-setup.build_crypttab_entry "$luks_uuid" >"$crypttab_file"
 }
 
@@ -69,18 +69,18 @@ luks-setup.run() {
 	local disk_name
 	local partition_number
 
-	common.log_section "LUKS2 encryption"
-	common.log_info "Reserve $keyslot_size at the end of the Btrfs filesystem for the LUKS2 header"
+	log.section "LUKS2 encryption"
+	log.info "Reserve $keyslot_size at the end of the Btrfs filesystem for the LUKS2 header"
 	btrfs filesystem resize "-$keyslot_size" "$mp"
 
 	cd /
-	common.log_info "Unmount plaintext Btrfs filesystem from $mp before in-place encryption"
+	log.info "Unmount plaintext Btrfs filesystem from $mp before in-place encryption"
 	umount "$mp"
 
 	luks-setup.read_partition_identity "$source_device" disk_name partition_number
-	common.log_info "Resolved $source_device as partition $partition_number on /dev/$disk_name"
-	common.log_warn "cryptsetup may report that a keyslot operation could fail during in-place encryption"
-	common.log_info "Encrypt $source_device in place as LUKS2 using Argon2id; passphrase is supplied through standard input and is never logged"
+	log.info "Resolved $source_device as partition $partition_number on /dev/$disk_name"
+	log.warn "cryptsetup may report that a keyslot operation could fail during in-place encryption"
+	log.info "Encrypt $source_device in place as LUKS2 using Argon2id; passphrase is supplied through standard input and is never logged"
 	printf '%s\n' "$PASSPHRASE" |
 		cryptsetup reencrypt \
 			--encrypt \
@@ -91,22 +91,22 @@ luks-setup.run() {
 			"$source_device"
 
 	if [[ $enlarge == yes ]]; then
-		common.log_info "Extend partition $partition_number on /dev/$disk_name to all available space"
+		log.info "Extend partition $partition_number on /dev/$disk_name to all available space"
 		parted --script "/dev/$disk_name" resizepart "$partition_number" '100%'
 	else
-		common.log_info "Partition enlargement disabled by configuration"
+		log.info "Partition enlargement disabled by configuration"
 	fi
 
-	common.log_info "Open $source_device as LUKS mapper $mapper_device"
+	log.info "Open $source_device as LUKS mapper $mapper_device"
 	printf '%s\n' "$PASSPHRASE" |
 		cryptsetup open "$source_device" root
-	common.log_info "Mount normal root subvolume $root_sub_vol/@ from $mapper_device at $mp"
+	log.info "Mount normal root subvolume $root_sub_vol/@ from $mapper_device at $mp"
 	mount "$mapper_device" -o "subvol=$root_sub_vol/@" "$mp"
-	common.log_info "Grow the Btrfs filesystem to the maximum size exposed by the mapper"
+	log.info "Grow the Btrfs filesystem to the maximum size exposed by the mapper"
 	btrfs filesystem resize max "$mp"
 
 	luks-setup.write_crypttab "$source_device" "$mp/etc/crypttab"
-	common.log_success "LUKS2 encryption and root mapping configured"
+	log.success "LUKS2 encryption and root mapping configured"
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

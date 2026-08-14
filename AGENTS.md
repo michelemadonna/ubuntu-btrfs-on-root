@@ -125,9 +125,18 @@ style. Do not silence ShellCheck without a nearby explanation.
 ## Framework use
 
 Repository-bound setup scripts should use the framework for shared concerns
-that are already implemented there, including logging, fatal errors, command
+that are already implemented there, including fatal errors, command
 execution, cleanup, configuration loading, validation and prompts. Search
 before adding a helper.
+
+Logging is isolated in `lib/log.sh` and uses the `log.*` namespace:
+
+    log.info "Prepare target"
+    log.warn "Retrying operation"
+    log.die "Target validation failed"
+
+Do not add logging functions back to `common.sh`. Standalone installed commands
+must provide compatible local `log.*` primitives instead of sourcing `lib/`.
 
 Do not move domain logic into `lib/`. Btrfs layout decisions belong under
 `btrfs-root/`; signing policy under `secure-boot/`; snapshot selection under

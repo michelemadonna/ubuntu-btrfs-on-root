@@ -4,6 +4,24 @@ set -Eeuo pipefail
 umask 077
 
 # ---------------------------------------------------------------------------
+# Standalone logging helpers
+# ---------------------------------------------------------------------------
+
+log.info() { printf 'INFO: %s\n' "$*"; }
+log.warn() { printf 'WARN: %s\n' "$*" >&2; }
+log.error() { printf 'ERROR: %s\n' "$*" >&2; }
+log.success() { printf 'SUCCESS: %s\n' "$*"; }
+log.section() { printf '\n==> %s\n' "$*"; }
+log.summary_item() {
+	local label=$1 value=$2
+	printf '  %-24s %s\n' "$label:" "$value"
+}
+log.die() {
+	log.error "$*"
+	exit 1
+}
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -29,7 +47,7 @@ generate-uki.reject_artifact() {
 	local uki=$1
 
 	if [[ -e $uki ]]; then
-		printf 'Rejecting invalid UKI artifact: %s\n' "$uki" >&2
+		log.error "Rejecting invalid UKI artifact: $uki"
 		rm -f -- "$uki"
 	fi
 	if [[ -x $REFIND_MENU_HOOK ]]; then
@@ -39,7 +57,7 @@ generate-uki.reject_artifact() {
 
 generate-uki.run() {
 	[[ $EUID -eq 0 ]] || {
-		printf 'Run generate-uki as root.\n' >&2
+		log.error "Run generate-uki as root."
 		return 1
 	}
 
@@ -67,7 +85,7 @@ generate-uki.run() {
 	esac
 
 	((${#kernels[@]} > 0)) || {
-		echo "No installed kernels were found in /boot." >&2
+		log.error "No installed kernels were found in /boot."
 		exit 1
 	}
 
@@ -83,7 +101,7 @@ generate-uki.run() {
 	for kernel in "${kernels[@]}"; do
 		if [[ ! -f "$kernel" ]]; then
 			version="${kernel#/boot/vmlinuz-}"
-			echo "❌ Kernel image not found: ${kernel}" >&2
+			log.error "Kernel image not found: ${kernel}"
 			uki_failed+=("${version}: kernel image missing")
 			continue
 		fi
@@ -94,23 +112,20 @@ generate-uki.run() {
 
 		declare -a kernel_errors=()
 
-		echo
-		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-		echo "🚀 Processing kernel: ${version}"
-		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+		log.section "Process kernel $version"
 
 		if [[ ! -d "$module_dir" ]]; then
-			echo "⚠️  Kernel modules not found: ${module_dir}"
+			log.warn "Kernel modules not found: ${module_dir}"
 			uki_failed+=("${version}: kernel modules missing")
 			continue
 		fi
 
-		echo "🔧 Generating UKI..."
+		log.info "Generate UKI for kernel $version"
 
 		if kernel-install add "$version" "$kernel"; then
-			echo "✅ kernel-install completed"
+			log.success "kernel-install completed for $version"
 		else
-			echo "❌ kernel-install failed"
+			log.error "kernel-install failed for $version"
 			kernel_errors+=("kernel-install failed")
 		fi
 
@@ -119,7 +134,7 @@ generate-uki.run() {
 		# ------------------------------------------------------------
 
 		if [[ ! -f "$uki" ]]; then
-			echo "❌ Generated UKI not found: ${uki}"
+			log.error "Generated UKI not found: ${uki}"
 			kernel_errors+=("generated UKI not found")
 			uki_failed+=(
 				"${version}: ${kernel_errors[*]}"
@@ -128,14 +143,14 @@ generate-uki.run() {
 			continue
 		fi
 
-		echo "📦 Generated UKI: ${uki}"
+		log.info "Generated UKI: ${uki}"
 
 		temporary_uki="$(mktemp --tmpdir "${PREFIX}-${version}.XXXXXX.efi")"
 
 		if cp -- "$uki" "$temporary_uki"; then
-			echo "📋 Created validation copy: ${temporary_uki}"
+			log.info "Created validation copy: ${temporary_uki}"
 		else
-			echo "❌ Unable to create temporary UKI copy"
+			log.error "Unable to create temporary UKI copy"
 			kernel_errors+=("unable to create temporary UKI copy")
 			uki_failed+=(
 				"${version}: ${kernel_errors[*]}"
@@ -148,20 +163,19 @@ generate-uki.run() {
 		# Secure Boot signature validation
 		# ------------------------------------------------------------
 
-		echo
-		echo "🔐 Validating Secure Boot signature..."
+		log.info "Validate Secure Boot signature"
 
 		if sbverify --cert /var/lib/sbctl/keys/db/db.pem "$temporary_uki"; then
-			echo "✅ sbverify verification passed"
+			log.success "sbverify verification passed"
 		else
-			echo "❌ sbverify verification failed"
+			log.error "sbverify verification failed"
 			kernel_errors+=("sbverify signature verification failed")
 		fi
 
 		if sbverify --list "$temporary_uki"; then
-			echo "✅ PE/COFF signature found"
+			log.success "PE/COFF signature found"
 		else
-			echo "❌ Unable to validate PE/COFF signature"
+			log.error "Unable to validate PE/COFF signature"
 			kernel_errors+=("sbverify signature verification failed")
 		fi
 
@@ -169,8 +183,7 @@ generate-uki.run() {
 		# PE section validation
 		# ------------------------------------------------------------
 
-		echo
-		echo "🔍 Inspecting UKI sections..."
+		log.info "Inspect UKI sections"
 
 		if sections="$(objdump -h "$temporary_uki" 2>/dev/null)"; then
 
@@ -183,15 +196,15 @@ generate-uki.run() {
 				.pcrsig \
 				.sbat; do
 				if grep -Fq "$section" <<<"$sections"; then
-					printf '   ✅ %-10s present\n' "$section"
+					log.success "UKI section present: $section"
 				else
-					printf '   ❌ %-10s missing\n' "$section"
+					log.error "UKI section missing: $section"
 					kernel_errors+=("missing UKI section ${section}")
 				fi
 			done
 
 		else
-			echo "❌ Unable to inspect generated UKI"
+			log.error "Unable to inspect generated UKI"
 			kernel_errors+=("unable to inspect UKI sections")
 		fi
 
@@ -199,8 +212,7 @@ generate-uki.run() {
 		# Validate embedded kernel version
 		# ------------------------------------------------------------
 
-		echo
-		echo "🏷️  Validating embedded kernel version..."
+		log.info "Validate embedded kernel version"
 
 		if embedded_uname="$(
 			objcopy \
@@ -211,16 +223,16 @@ generate-uki.run() {
 		)"; then
 
 			if [[ "$embedded_uname" == "$version" ]]; then
-				echo "✅ Embedded kernel version: ${embedded_uname}"
+				log.success "Embedded kernel version: ${embedded_uname}"
 			else
-				echo "❌ Embedded kernel version '${embedded_uname}' does not match '${version}'"
+				log.error "Embedded kernel version '${embedded_uname}' does not match '${version}'"
 				kernel_errors+=(
 					"embedded kernel version mismatch (${embedded_uname})"
 				)
 			fi
 
 		else
-			echo "❌ Unable to extract embedded kernel version"
+			log.error "Unable to extract embedded kernel version"
 			kernel_errors+=("unable to extract .uname section")
 		fi
 
@@ -228,17 +240,16 @@ generate-uki.run() {
 		# Extract and validate initrd
 		# ------------------------------------------------------------
 
-		echo
-		echo "📂 Extracting embedded initrd..."
+		log.info "Extract embedded initrd"
 
 		work_directory="$(mktemp -d)"
 		if objcopy \
 			--dump-section ".initrd=${work_directory}/initrd" \
 			"$temporary_uki" \
 			2>/dev/null; then
-			echo "✅ Embedded initrd extracted"
+			log.success "Embedded initrd extracted"
 		else
-			echo "❌ Unable to extract embedded initrd"
+			log.error "Unable to extract embedded initrd"
 			kernel_errors+=("unable to extract embedded initrd")
 		fi
 
@@ -249,29 +260,28 @@ generate-uki.run() {
 			if initrd_listing="$(lsinitrd "$initrd" 2>/dev/null)"; then
 
 				if [[ -f "$SNAPSHOT_MENU_CONFIG" ]]; then
-					echo
-					echo "📸 Validating snapshot menu inside initrd..."
+					log.info "Validate snapshot menu inside initrd"
 
 					if grep -qE 'usr/libexec/snapshot-menu$' <<<"$initrd_listing"; then
-						echo "   ✅ Snapshot menu executable"
+						log.success "Snapshot menu executable"
 					else
-						echo "   ❌ Snapshot menu executable missing"
+						log.error "Snapshot menu executable missing"
 						kernel_errors+=("snapshot menu executable missing")
 					fi
 
 					if grep -qE 'etc/snapshot-menu\.conf$' <<<"$initrd_listing"; then
-						echo "   ✅ Snapshot menu configuration"
+						log.success "Snapshot menu configuration"
 					else
-						echo "   ❌ Snapshot menu configuration missing"
+						log.error "Snapshot menu configuration missing"
 						kernel_errors+=("snapshot menu configuration missing")
 					fi
 
 					if grep -qE \
 						'hooks/pre-mount/.+snapshot-menu-hook\.sh$' \
 						<<<"$initrd_listing"; then
-						echo "   ✅ Snapshot menu pre-mount hook"
+						log.success "Snapshot menu pre-mount hook"
 					else
-						echo "   ❌ Snapshot menu pre-mount hook missing"
+						log.error "Snapshot menu pre-mount hook missing"
 						kernel_errors+=("snapshot menu pre-mount hook missing")
 					fi
 
@@ -279,44 +289,44 @@ generate-uki.run() {
 					#    'hooks/cmdline/.+01-snapshot-key-listener\.sh$' \
 					#    <<<"$initrd_listing"
 					#then
-					#    echo "   ✅ Snapshot menu cmdline hook"
+					#    log.success "Snapshot menu cmdline hook"
 					#else
-					#    echo "   ❌ Snapshot menu cmdline hook missing"
+					#    log.error "Snapshot menu cmdline hook missing"
 					#    kernel_errors+=("snapshot menu cmdline hook missing")
 					#fi
 
 					if grep -qE 'usr/libexec/snapshot-key-listener$' <<<"$initrd_listing"; then
-						echo "   ✅ Snapshot key listener"
+						log.success "Snapshot key listener"
 					else
-						echo "   ❌ Snapshot key listener missing"
+						log.error "Snapshot key listener missing"
 						kernel_errors+=("snapshot key listener missing")
 					fi
 
 					if grep -qE 'usr/libexec/snapshot-key-listener-stop$' <<<"$initrd_listing"; then
-						echo "   ✅ Snapshot key listener stop"
+						log.success "Snapshot key listener stop"
 					else
-						echo "   ❌ Snapshot key listener stop missing"
+						log.error "Snapshot key listener stop missing"
 						kernel_errors+=("snapshot key listener stop missing")
 					fi
 
 					if grep -qE 'etc/systemd/system/systemd-cryptsetup@\.service\.d/50-snapshot-key-listener-stop\.conf$' <<<"$initrd_listing"; then
-						echo "   ✅ Snapshot menu systemd key listener stopper configuration"
+						log.success "Snapshot menu systemd key listener stopper configuration"
 					else
-						echo "   ❌ Snapshot menu systemd key listener stopper configuration missing"
+						log.error "Snapshot menu systemd key listener stopper configuration missing"
 						kernel_errors+=("snapshot menu systemd key listener stopper configuration missing")
 					fi
 
 				else
-					echo "ℹ️  Snapshot menu validation skipped: ${SNAPSHOT_MENU_CONFIG} not found"
+					log.info "Snapshot menu validation skipped: ${SNAPSHOT_MENU_CONFIG} not found"
 				fi
 
 			else
-				echo "❌ Unable to inspect embedded initrd"
+				log.error "Unable to inspect embedded initrd"
 				kernel_errors+=("lsinitrd failed")
 			fi
 
 		else
-			echo "❌ Extracted initrd is empty or missing"
+			log.error "Extracted initrd is empty or missing"
 			kernel_errors+=("embedded initrd is empty")
 		fi
 
@@ -334,13 +344,13 @@ generate-uki.run() {
 		echo
 
 		if ((${#kernel_errors[@]} == 0)); then
-			echo "🎉 UKI ${version} generated and validated successfully"
+			log.success "UKI ${version} generated and validated successfully"
 			uki_success+=("$version")
 		else
-			echo "⚠️  UKI ${version} completed with ${#kernel_errors[@]} error(s):"
+			log.warn "UKI ${version} completed with ${#kernel_errors[@]} error(s):"
 
 			for error in "${kernel_errors[@]}"; do
-				echo "   ❌ ${error}"
+				log.error "${error}"
 			done
 
 			uki_failed+=(
@@ -358,36 +368,28 @@ generate-uki.run() {
 	# Final report
 	# ==================================================================
 
-	echo
-	echo
-	echo "╔════════════════════════════════════════════════════════════╗"
-	echo "║                    📊 UKI BUILD REPORT                     ║"
-	echo "╚════════════════════════════════════════════════════════════╝"
-	echo
+	log.section "UKI build report"
 
-	echo "✅ Successful: ${#uki_success[@]}"
+	log.summary_item "Successful" "${#uki_success[@]}"
 
 	for version in "${uki_success[@]}"; do
-		echo "   ✅ ${version}"
+		log.success "${version}"
 	done
 
 	echo
-	echo "❌ Failed: ${#uki_failed[@]}"
+	log.summary_item "Failed" "${#uki_failed[@]}"
 
 	for failure in "${uki_failed[@]}"; do
-		echo "   ❌ ${failure}"
+		log.error "${failure}"
 	done
 
 	echo
-	echo "────────────────────────────────────────────────────────────"
 
 	if ((${#uki_failed[@]} == 0)); then
-		echo "🎉 All UKIs were generated and validated successfully."
+		log.success "All UKIs were generated and validated successfully."
 	else
-		echo "⚠️  ${#uki_failed[@]} UKI(s) reported validation errors."
+		log.warn "${#uki_failed[@]} UKI(s) reported validation errors."
 	fi
-
-	echo "────────────────────────────────────────────────────────────"
 
 	((${#uki_failed[@]} == 0))
 }

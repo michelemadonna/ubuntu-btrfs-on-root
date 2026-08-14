@@ -84,7 +84,7 @@ shim-setup.install_dependencies() {
 		2>/dev/null |
 		grep -q 'install ok installed'; then
 
-		common.log_info "Try the distribution shim-signed package"
+		log.info "Try the distribution shim-signed package"
 
 		apt-get install -y shim-signed || true
 	fi
@@ -96,14 +96,14 @@ shim-setup.install_dependencies() {
 
 shim-setup.create_der_certificate() {
 	[[ -f "$DB_CERT" ]] ||
-		common.die "Missing sbctl db certificate: $DB_CERT"
+		log.die "Missing sbctl db certificate: $DB_CERT"
 
 	if [[ -f "$DB_CERT_DER" &&
 		"$DB_CERT_DER" -nt "$DB_CERT" ]]; then
 		return
 	fi
 
-	common.log_info "Create DER certificate for MOK at $DB_CERT_DER"
+	log.info "Create DER certificate for MOK at $DB_CERT_DER"
 
 	openssl x509 \
 		-in "$DB_CERT" \
@@ -203,7 +203,7 @@ shim-setup.download_debian_shim() {
 
 		else
 
-			common.die "Debian archive keyring unavailable; refusing an unverified Snapshot repository."
+			log.die "Debian archive keyring unavailable; refusing an unverified Snapshot repository."
 
 		fi
 	fi
@@ -218,11 +218,11 @@ shim-setup.download_debian_shim() {
 			"$@"
 	}
 
-	common.log_info "Update temporary Debian Snapshot metadata from $SNAPSHOT_URL"
+	log.info "Update temporary Debian Snapshot metadata from $SNAPSHOT_URL"
 
 	shim-setup.apt_snapshot update
 
-	common.log_info "Download Shim from Debian Snapshot suite $DEBIAN_SUITE"
+	log.info "Download Shim from Debian Snapshot suite $DEBIAN_SUITE"
 
 	shim-setup.apt_snapshot \
 		--download-only \
@@ -271,10 +271,10 @@ shim-setup.download_debian_shim() {
 	)"
 
 	[[ -n "$shim" ]] ||
-		common.die "Signed Shim not found in Debian package."
+		log.die "Signed Shim not found in Debian package."
 
 	[[ -n "$mm" ]] ||
-		common.die "MokManager not found in Debian package."
+		log.die "MokManager not found in Debian package."
 
 	install -d -m 0755 "$SHIM_DIR"
 
@@ -293,22 +293,22 @@ shim-setup.download_debian_shim() {
 
 shim-setup.verify_shim() {
 	[[ -f "$SHIM_DIR/shimx64.efi" ]] ||
-		common.die "Shim is missing."
+		log.die "Shim is missing."
 
 	[[ -f "$SHIM_DIR/mmx64.efi" ]] ||
-		common.die "MokManager is missing."
+		log.die "MokManager is missing."
 
 	sbverify \
 		--list \
 		"$SHIM_DIR/shimx64.efi" \
 		>/dev/null ||
-		common.die "Cannot verify Shim PE signature."
+		log.die "Cannot verify Shim PE signature."
 
 	sbverify \
 		--list \
 		"$SHIM_DIR/mmx64.efi" \
 		>/dev/null ||
-		common.die "Cannot verify MokManager PE signature."
+		log.die "Cannot verify MokManager PE signature."
 }
 
 # ============================================================
@@ -322,16 +322,16 @@ shim-setup.mok_is_enrolled_or_pending() {
 
 shim-setup.enroll_mok() {
 	if shim-setup.mok_is_enrolled_or_pending; then
-		common.log_info "sbctl db certificate is already enrolled or pending as MOK"
+		log.info "sbctl db certificate is already enrolled or pending as MOK"
 		return
 	fi
 
 	common.require_nonempty "mok_pin" "${mok_pin:-}"
-	common.log_info "Request MOK enrollment for $DB_CERT_DER; the PIN is supplied through standard input and is never logged"
+	log.info "Request MOK enrollment for $DB_CERT_DER; the PIN is supplied through standard input and is never logged"
 
 	printf '%s\n%s\n' "$mok_pin" "$mok_pin" | mokutil --import "$DB_CERT_DER"
 
-	common.log_warn "Complete the MOK enrollment at the next reboot"
+	log.warn "Complete the MOK enrollment at the next reboot"
 }
 
 # ============================================================
@@ -347,7 +347,7 @@ shim-setup.run() {
 	fi
 
 	if [[ "$SETUP_MODE" == "1" ]]; then
-		common.log_info "SetupMode=1; Shim/MOK is not required"
+		log.info "SetupMode=1; Shim/MOK is not required"
 		return
 	fi
 
@@ -358,12 +358,12 @@ shim-setup.run() {
 
 	if shim-setup.install_local_shim; then
 
-		common.log_info "Use Shim installed by the distribution"
+		log.info "Use Shim installed by the distribution"
 
 	else
 
-		common.log_info "shim-signed unavailable in current distribution"
-		common.log_info "Fall back to pinned Debian Snapshot $DEBIAN_SNAPSHOT"
+		log.info "shim-signed unavailable in current distribution"
+		log.info "Fall back to pinned Debian Snapshot $DEBIAN_SNAPSHOT"
 
 		shim-setup.download_debian_shim
 	fi
@@ -371,7 +371,7 @@ shim-setup.run() {
 	shim-setup.verify_shim
 	shim-setup.enroll_mok
 
-	common.log_success "Shim and MokManager prepared in $SHIM_DIR"
+	log.success "Shim and MokManager prepared in $SHIM_DIR"
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

@@ -25,9 +25,9 @@ install-uki.validate_configuration() {
 	common.require_nonempty root_dev "${root_dev:-}"
 	common.require_nonempty root_sub_vol "${root_sub_vol:-}"
 	common.require_nonempty btrfs_options "${btrfs_options:-}"
-	[[ $suite =~ ^[a-z0-9][a-z0-9._-]*$ ]] || common.die "suite is not a safe UKI entry token: $suite"
-	[[ $suite_type =~ ^[a-z0-9][a-z0-9._-]*$ ]] || common.die "suite_type is not a safe rEFInd icon name: $suite_type"
-	[[ $root_dev != */* && $root_dev != *..* ]] || common.die "root_dev must be relative to /dev."
+	[[ $suite =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "suite is not a safe UKI entry token: $suite"
+	[[ $suite_type =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "suite_type is not a safe rEFInd icon name: $suite_type"
+	[[ $root_dev != */* && $root_dev != *..* ]] || log.die "root_dev must be relative to /dev."
 }
 
 install-uki.build_cmdline() {
@@ -36,7 +36,7 @@ install-uki.build_cmdline() {
 }
 
 install-uki.write_kernel_install_config() {
-	common.log_info "Write kernel-install UKI layout to $INSTALL_UKI_KERNEL_CONFIG"
+	log.info "Write kernel-install UKI layout to $INSTALL_UKI_KERNEL_CONFIG"
 	cat >"$INSTALL_UKI_KERNEL_CONFIG" <<-'EOF'
 		layout=uki
 		initrd_generator=dracut
@@ -46,7 +46,7 @@ install-uki.write_kernel_install_config() {
 }
 
 install-uki.write_ukify_config() {
-	common.log_info "Write signed and measured UKI policy to $INSTALL_UKI_UKIFY_CONFIG"
+	log.info "Write signed and measured UKI policy to $INSTALL_UKI_UKIFY_CONFIG"
 	cat >"$INSTALL_UKI_UKIFY_CONFIG" <<-'EOF'
 		[UKI]
 		PCRBanks=sha256
@@ -75,14 +75,14 @@ install-uki.write_ukify_config() {
 }
 
 install-uki.write_dracut_config() {
-	common.log_info "Disable dracut host-only cmdline embedding; ukify owns the embedded cmdline"
+	log.info "Disable dracut host-only cmdline embedding; ukify owns the embedded cmdline"
 	cat >/etc/dracut.conf.d/53-uki-cmdline.conf <<-'EOF'
 		hostonly_cmdline="no"
 	EOF
 }
 
 install-uki.create_splash() {
-	common.log_info "Convert the Plymouth fallback image into the UKI BMP splash"
+	log.info "Convert the Plymouth fallback image into the UKI BMP splash"
 	python3 - <<-'PY'
 		from PIL import Image
 
@@ -95,44 +95,44 @@ install-uki.create_splash() {
 install-uki.ensure_pcr_keys() {
 	install -d -m 0700 /etc/uki/keys
 	if [[ ! -s /etc/uki/keys/pcr-private.pem ]]; then
-		common.log_info "Generate the RSA key pair used for UKI PCR signatures"
+		log.info "Generate the RSA key pair used for UKI PCR signatures"
 		openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /etc/uki/keys/pcr-private.pem
 		openssl pkey -pubout -in /etc/uki/keys/pcr-private.pem -out /etc/uki/keys/pcr-public.pem
 	else
-		common.log_info "Reuse the existing UKI PCR signing key"
+		log.info "Reuse the existing UKI PCR signing key"
 	fi
 	chmod 0600 /etc/uki/keys/pcr-private.pem
 	chmod 0644 /etc/uki/keys/pcr-public.pem
 }
 
 install-uki.install_hooks() {
-	common.log_info "Install Debian postinst/postrm bridge to kernel-install"
+	log.info "Install Debian postinst/postrm bridge to kernel-install"
 	install -m 0755 "$repository_root/uki/hooks/kernel/postinst.d/debian-kernel-install-bridge" /usr/local/libexec/debian-kernel-install-bridge
 	ln -sfn /usr/local/libexec/debian-kernel-install-bridge /etc/kernel/postinst.d/zz-kernel-install
 	ln -sfn /usr/local/libexec/debian-kernel-install-bridge /etc/kernel/postrm.d/zz-kernel-install
 
-	common.log_info "Install the rEFInd kernel-install hook"
+	log.info "Install the rEFInd kernel-install hook"
 	install -m 0755 "$repository_root/uki/hooks/kernel/install.d/99-refind-menu.install" /usr/lib/kernel/install.d/99-refind-menu.install
 	if ! grep -Fqx "include refind-linux-$suite.conf" "$INSTALL_UKI_ESP/EFI/refind/refind.conf"; then
 		printf 'include refind-linux-%s.conf\n' "$suite" >>"$INSTALL_UKI_ESP/EFI/refind/refind.conf"
 	fi
 
-	common.log_info "Install the UKI generation and validation command"
+	log.info "Install the UKI generation and validation command"
 	install -m 0755 "$repository_root/uki/scripts/generate-uki" /usr/local/sbin/generate-uki
 }
 
 install-uki.print_summary() {
-	common.log_section "UKI setup summary"
-	common.log_summary_item "Status" "completed successfully"
-	common.log_summary_item "Entry token" "$suite"
-	common.log_summary_item "rEFInd icon" "os_${suite_type}.png (generic Linux fallback)"
-	common.log_summary_item "UKI directory" "$INSTALL_UKI_ESP/EFI/Linux"
-	common.log_summary_item "Normal root" "$root_sub_vol/@"
-	common.log_summary_item "Kernel install" "$INSTALL_UKI_KERNEL_CONFIG"
-	common.log_summary_item "ukify policy" "$INSTALL_UKI_UKIFY_CONFIG"
-	common.log_summary_item "Embedded cmdline" "$INSTALL_UKI_CMDLINE"
-	common.log_summary_item "rEFInd menu" "$INSTALL_UKI_ESP/EFI/refind/refind-linux-$suite.conf"
-	common.log_success "UKI support installed and all installed kernels validated"
+	log.section "UKI setup summary"
+	log.summary_item "Status" "completed successfully"
+	log.summary_item "Entry token" "$suite"
+	log.summary_item "rEFInd icon" "os_${suite_type}.png (generic Linux fallback)"
+	log.summary_item "UKI directory" "$INSTALL_UKI_ESP/EFI/Linux"
+	log.summary_item "Normal root" "$root_sub_vol/@"
+	log.summary_item "Kernel install" "$INSTALL_UKI_KERNEL_CONFIG"
+	log.summary_item "ukify policy" "$INSTALL_UKI_UKIFY_CONFIG"
+	log.summary_item "Embedded cmdline" "$INSTALL_UKI_CMDLINE"
+	log.summary_item "rEFInd menu" "$INSTALL_UKI_ESP/EFI/refind/refind-linux-$suite.conf"
+	log.success "UKI support installed and all installed kernels validated"
 }
 
 install-uki.run() {
@@ -141,8 +141,8 @@ install-uki.run() {
 	install-uki.validate_configuration
 	common.require_commands apt-get blkid cryptsetup env grep install ln openssl python3
 
-	common.log_section "Unified Kernel Image setup"
-	common.log_info "Install dracut, ukify and UKI inspection dependencies"
+	log.section "Unified Kernel Image setup"
+	log.info "Install dracut, ukify and UKI inspection dependencies"
 	apt-get install -y dracut dialog systemd-ukify binutils rsync openssl python3-pil
 	common.require_commands kernel-install lsinitrd objcopy objdump sbverify
 
@@ -151,31 +151,31 @@ install-uki.run() {
 	root_subvolume="$root_sub_vol/@"
 	common.require_nonempty "Btrfs UUID" "$btrfs_uuid"
 	common.require_nonempty "LUKS UUID" "$luks_uuid"
-	common.log_info "Resolved Btrfs UUID $btrfs_uuid and LUKS UUID $luks_uuid"
+	log.info "Resolved Btrfs UUID $btrfs_uuid and LUKS UUID $luks_uuid"
 
 	install-uki.write_kernel_install_config
 	printf '%s\n' "$suite" >"$INSTALL_UKI_ENTRY_TOKEN"
 	chmod 0644 "$INSTALL_UKI_ENTRY_TOKEN"
 	printf '%s\n' "$suite_type" >"$INSTALL_UKI_REFIND_ICON"
 	chmod 0644 "$INSTALL_UKI_REFIND_ICON"
-	common.log_info "Configured rEFInd icon selector os_${suite_type}.png"
+	log.info "Configured rEFInd icon selector os_${suite_type}.png"
 	install-uki.create_splash
 	install-uki.write_ukify_config
 	install-uki.write_dracut_config
 	install-uki.ensure_pcr_keys
 	install-uki.build_cmdline "$btrfs_uuid" "$luks_uuid" "$btrfs_options" "$root_subvolume" >"$INSTALL_UKI_CMDLINE"
 	chmod 0644 "$INSTALL_UKI_CMDLINE"
-	common.log_info "Embedded normal-boot cmdline written for subvolume $root_subvolume"
+	log.info "Embedded normal-boot cmdline written for subvolume $root_subvolume"
 
 	if [[ $enable_tpm == yes ]]; then
-		common.log_info "TPM support enabled; install TPM integration before generating UKIs"
+		log.info "TPM support enabled; install TPM integration before generating UKIs"
 		env repository_root="$repository_root" "$repository_root/tpm/scripts/install-tpm"
 	else
-		common.log_info "TPM support disabled; skip TPM integration"
+		log.info "TPM support disabled; skip TPM integration"
 	fi
 
 	install-uki.install_hooks
-	common.log_info "Generate and validate UKIs for every installed kernel"
+	log.info "Generate and validate UKIs for every installed kernel"
 	/usr/local/sbin/generate-uki --all
 	install-uki.print_summary
 }

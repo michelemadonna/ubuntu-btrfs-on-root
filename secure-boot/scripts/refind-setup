@@ -80,15 +80,15 @@ refind-setup.install_dependencies() {
 	#
 	if ! command -v refind-install >/dev/null 2>&1; then
 
-		common.log_info "Try to install rEFInd from the distribution repository"
+		log.info "Try to install rEFInd from the distribution repository"
 
 		if apt-cache search refind | grep -q refind; then
 			apt-get install -y refind || true
 
 		else
 
-			common.log_info "rEFInd package unavailable in distribution repository"
-			common.log_info "Fall back to pinned Debian Snapshot $DEBIAN_SNAPSHOT"
+			log.info "rEFInd package unavailable in distribution repository"
+			log.info "Fall back to pinned Debian Snapshot $DEBIAN_SNAPSHOT"
 
 			refind-setup.download_debian_refind
 		fi
@@ -149,7 +149,7 @@ refind-setup.download_debian_refind() {
 
 		else
 
-			common.die "Debian archive keyring unavailable; refusing an unverified Snapshot repository."
+			log.die "Debian archive keyring unavailable; refusing an unverified Snapshot repository."
 
 		fi
 	fi
@@ -164,11 +164,11 @@ refind-setup.download_debian_refind() {
 			"$@"
 	}
 
-	common.log_info "Update temporary Debian Snapshot metadata from $SNAPSHOT_URL"
+	log.info "Update temporary Debian Snapshot metadata from $SNAPSHOT_URL"
 
 	refind-setup.apt_snapshot update
 
-	common.log_info "Download rEFInd from Debian Snapshot suite $DEBIAN_SUITE"
+	log.info "Download rEFInd from Debian Snapshot suite $DEBIAN_SUITE"
 
 	refind-setup.apt_snapshot \
 		--download-only \
@@ -202,19 +202,19 @@ refind-setup.download_debian_refind() {
 			-print \
 			-quit |
 		grep -q . ||
-		common.die "refind-install not found in Debian package."
+		log.die "refind-install not found in Debian package."
 
 	#
 	# Copy only the extracted Debian payload.
 	#
 	# dpkg database remains untouched.
 	#
-	common.log_info "Install the verified extracted rEFInd payload"
+	log.info "Install the verified extracted rEFInd payload"
 
 	cp -a "$root"/. /
 
 	refind-setup.find_local_refind ||
-		common.die "refind-install unavailable after Debian extraction."
+		log.die "refind-install unavailable after Debian extraction."
 }
 
 # ============================================================
@@ -222,7 +222,7 @@ refind-setup.download_debian_refind() {
 # ============================================================
 
 refind-setup.install_direct() {
-	common.log_info "Install rEFInd directly on the ESP"
+	log.info "Install rEFInd directly on the ESP"
 
 	refind-install --yes
 
@@ -250,10 +250,10 @@ refind-setup.install_with_shim() {
 	local work
 
 	[[ -f "$shim" ]] ||
-		common.die "Shim not prepared. Run shim-setup first."
+		log.die "Shim not prepared. Run shim-setup first."
 
 	[[ -f "$mm" ]] ||
-		common.die "MokManager not prepared. Run shim-setup first."
+		log.die "MokManager not prepared. Run shim-setup first."
 
 	work="$(
 		mktemp -d /tmp/refind-shim.XXXXXX
@@ -269,7 +269,7 @@ refind-setup.install_with_shim() {
 		"$mm" \
 		"$work/mmx64.efi"
 
-	common.log_info "Install rEFInd behind Shim using the prepared MokManager"
+	log.info "Install rEFInd behind Shim using the prepared MokManager"
 
 	refind-install \
 		--shim "$work/shimx64.efi" \
@@ -297,9 +297,9 @@ refind-setup.sign_efi() {
 	local file="$1"
 
 	[[ -f "$file" ]] ||
-		common.die "EFI file not found: $file"
+		log.die "EFI file not found: $file"
 
-	common.log_info "Sign EFI executable with sbctl: $file"
+	log.info "Sign EFI executable with sbctl: $file"
 
 	sbctl sign \
 		--save \
@@ -326,22 +326,22 @@ refind-setup.verify() {
 		refind="$(refind-setup.repository_signed_loader_path "$SETUP_MODE")"
 
 		[[ -f "$REFIND_EFI/mmx64.efi" ]] ||
-			common.die "MokManager missing from rEFInd directory."
+			log.die "MokManager missing from rEFInd directory."
 		[[ -f "$REFIND_EFI/shimx64.efi" ]] ||
-			common.die "Shim missing from rEFInd directory."
+			log.die "Shim missing from rEFInd directory."
 		[[ -f "$refind" ]] ||
-			common.die "Shim-chain rEFInd loader missing: $refind"
+			log.die "Shim-chain rEFInd loader missing: $refind"
 	else
 		refind="$(refind-setup.repository_signed_loader_path "$SETUP_MODE")"
 
 		[[ -f "$REFIND_EFI/refind_x64.efi" ]] ||
-			common.die "rEFInd EFI binary missing from rEFInd directory."
+			log.die "rEFInd EFI binary missing from rEFInd directory."
 	fi
 
-	common.log_info "Verify repository-signed rEFInd loader $refind with $DB_CERT"
+	log.info "Verify repository-signed rEFInd loader $refind with $DB_CERT"
 
 	sbverify --cert "$DB_CERT" "$refind" ||
-		common.die "rEFInd signature verification failed: $refind"
+		log.die "rEFInd signature verification failed: $refind"
 
 }
 
@@ -352,7 +352,7 @@ refind-setup.sign_refind() {
 	local refind
 
 	refind="$(refind-setup.repository_signed_loader_path "$SETUP_MODE")" ||
-		common.die "Invalid SetupMode value: $SETUP_MODE"
+		log.die "Invalid SetupMode value: $SETUP_MODE"
 
 	refind-setup.sign_efi "$refind"
 	if [[ "$SETUP_MODE" == "1" ]]; then
@@ -393,7 +393,7 @@ refind-setup.run() {
 	else
 		SETUP_MODE="$(
 			refind-setup.read_efi_uint8 SetupMode
-		)" || common.die "Cannot read UEFI SetupMode."
+		)" || log.die "Cannot read UEFI SetupMode."
 	fi
 
 	case "$SETUP_MODE" in
@@ -407,11 +407,11 @@ refind-setup.run() {
 		;;
 
 	*)
-		common.die "Invalid SetupMode value: $SETUP_MODE"
+		log.die "Invalid SetupMode value: $SETUP_MODE"
 		;;
 	esac
 
-	common.log_info "Install rEFInd themes into $REFIND_EFI"
+	log.info "Install rEFInd themes into $REFIND_EFI"
 	unzip "$repository_root/refind_themes.zip" -d "$REFIND_EFI"
 
 	#
@@ -419,7 +419,7 @@ refind-setup.run() {
 	#
 	# Sign only rEFInd and its drivers.
 	#
-	common.log_info "Sign rEFInd EFI executable and filesystem drivers with sbctl"
+	log.info "Sign rEFInd EFI executable and filesystem drivers with sbctl"
 	refind-setup.sign_refind
 
 	refind-setup.verify
@@ -433,7 +433,7 @@ refind-setup.run() {
 		grub-efi-amd64 \
 		grub-efi-amd64-bin
 
-	common.log_success "rEFInd installation, signing and verification completed"
+	log.success "rEFInd installation, signing and verification completed"
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

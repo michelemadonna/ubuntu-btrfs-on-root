@@ -25,15 +25,22 @@ assert_equal() {
 test_log_info() {
 	local output
 
-	output="$(common.log_info "installation ready")"
+	output="$(log.info "installation ready")"
 	assert_equal $'\033[32mINFO:\033[0m installation ready' "$output"
 }
 
 test_log_summary_item() {
 	local output
 
-	output="$(common.log_summary_item "Root mapper" "/dev/mapper/root")"
+	output="$(log.summary_item "Root mapper" "/dev/mapper/root")"
 	assert_equal "  Root mapper:             /dev/mapper/root" "$output"
+}
+
+test_log_error() {
+	local output
+
+	output="$(log.error "installation failed" 2>&1)"
+	assert_equal $'\033[31mERROR:\033[0m installation failed' "$output"
 }
 
 test_require_readable_file() {
@@ -47,7 +54,7 @@ test_require_nonempty() {
 	if output="$(common.require_nonempty "suite" "" 2>&1)"; then
 		fail "require_nonempty accepted an empty value"
 	fi
-	assert_equal "ERROR: suite must be configured." "$output"
+	assert_equal $'\033[31mERROR:\033[0m suite must be configured.' "$output"
 }
 
 test_require_commands() {
@@ -59,6 +66,7 @@ test_require_commands() {
 
 test_log_info
 test_log_summary_item
+test_log_error
 test_require_readable_file
 test_require_nonempty
 test_require_commands

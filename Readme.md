@@ -65,6 +65,7 @@ sudo apt-get update
 sudo apt-get install -y git
 git clone https://github.com/michelemadonna/ubuntu-btrfs-on-root.git
 cd ubuntu-btrfs-on-root
+chmod +x setup.sh
 ```
 
 Review `setup.conf` carefully. It is sourced as shell code and contains
@@ -79,7 +80,7 @@ Important current options are:
 | `efi_dev` | `sda2` | EFI System Partition |
 | `rescue_dev` | `sda1` | partition that setup will reformat for rescue |
 | `mp` | `/mnt/root` | target mount point used during conversion |
-| `suite` | `ubuntu` | UKI token and Btrfs distribution container; produces `@ubuntu/@` |
+| `suite` | `resolute` | UKI token and Btrfs distribution container; produces `@resolute/@` |
 | `suite_type` | `ubuntu` | distribution icon name used by rEFInd, such as `os_ubuntu.png` |
 | `btrfs_options` | repository default | mount options embedded in fstab and the UKI command line |
 | `swap_size` | `4G` | Btrfs swap-file size |
@@ -90,8 +91,7 @@ Important current options are:
 | `enable_tpm` | `yes` | install TPM integration; it does not enroll a token |
 
 `PASSPHRASE`, `snapshot_menu_pin_value` and `mok_pin` must not be logged or
-committed with real values. `sb_key_dir` is currently declared but is not
-consumed by the scripts.
+committed with real values.
 
 ## Run setup
 
@@ -376,7 +376,7 @@ limitations. Security and boot assumptions are listed in
 .
 ├── setup.sh                 live-session and target-chroot orchestrator
 ├── setup.conf               devices, credentials and feature switches
-├── lib/                     genuinely shared shell framework
+├── lib/                     shared framework and dedicated log.* module
 ├── rescue/                  persistent Ubuntu live rescue creation
 ├── btrfs-root/              Btrfs conversion and LUKS2 encryption
 ├── secure-boot/             sbctl, shim/MOK, rEFInd and fwupd

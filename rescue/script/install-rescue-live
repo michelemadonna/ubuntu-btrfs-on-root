@@ -29,14 +29,14 @@ install-rescue-live.cleanup() {
 
 install-rescue-live.validate_integer() {
 	local name=$1 value=$2
-	[[ $value =~ ^[0-9]+$ ]] || common.die "$name must be a non-negative integer."
+	[[ $value =~ ^[0-9]+$ ]] || log.die "$name must be a non-negative integer."
 }
 
 install-rescue-live.validate_configuration() {
 	install-rescue-live.validate_integer RESERVE_MIB "$RESERVE_MIB"
 	install-rescue-live.validate_integer MIN_PERSISTENCE_MIB "$MIN_PERSISTENCE_MIB"
 	[[ $TARGET_LABEL =~ ^[A-Za-z0-9_-]{1,11}$ ]] ||
-		common.die "TARGET_LABEL must be a valid FAT label of at most 11 characters."
+		log.die "TARGET_LABEL must be a valid FAT label of at most 11 characters."
 }
 
 install-rescue-live.calculate_persistence_mib() {
@@ -75,14 +75,14 @@ install-rescue-live.confirm_destruction() {
 
 	EOF
 	read -r -p "Type the exact device name ($TARGET_DEV) to continue: " confirmation
-	[[ $confirmation == "$TARGET_DEV" ]] || common.die "Confirmation failed; nothing was changed."
+	[[ $confirmation == "$TARGET_DEV" ]] || log.die "Confirmation failed; nothing was changed."
 }
 
 install-rescue-live.validate_source_files() {
 	local oversized_file
 
 	oversized_file="$(find "$SOURCE_DIR" -type f -size +${FAT32_MAX_FILE_MIB}M -print -quit)"
-	[[ -z $oversized_file ]] || common.die "Source file exceeds the FAT32 limit: $oversized_file"
+	[[ -z $oversized_file ]] || log.die "Source file exceeds the FAT32 limit: $oversized_file"
 }
 
 install-rescue-live.run() {
@@ -93,35 +93,35 @@ install-rescue-live.run() {
 	common.require_root
 	install-rescue-live.validate_configuration
 	common.require_commands blockdev dd df du find findmnt grep lsblk mkfs.ext4 mkfs.vfat mount mountpoint rm rsync sed sync tail tr umount xargs
-	[[ -d $SOURCE_DIR/casper ]] || common.die "$SOURCE_DIR is not an Ubuntu live medium: casper/ is missing."
-	[[ -b $TARGET_DEV ]] || common.die "$TARGET_DEV is not a block device."
-	[[ $(lsblk -ndo TYPE "$TARGET_DEV") == part ]] || common.die "$TARGET_DEV must be a partition, not a whole disk."
+	[[ -d $SOURCE_DIR/casper ]] || log.die "$SOURCE_DIR is not an Ubuntu live medium: casper/ is missing."
+	[[ -b $TARGET_DEV ]] || log.die "$TARGET_DEV is not a block device."
+	[[ $(lsblk -ndo TYPE "$TARGET_DEV") == part ]] || log.die "$TARGET_DEV must be a partition, not a whole disk."
 	source_dev="$(findmnt -no SOURCE --target "$SOURCE_DIR" 2>/dev/null || true)"
 	source_dev="${source_dev%%\[*}"
-	[[ $source_dev != "$TARGET_DEV" ]] || common.die "Source and target are the same device."
+	[[ $source_dev != "$TARGET_DEV" ]] || log.die "Source and target are the same device."
 	target_size_mib=$(($(blockdev --getsize64 "$TARGET_DEV") / 1024 / 1024))
-	((target_size_mib >= 4096)) || common.die "$TARGET_DEV is too small (${target_size_mib} MiB)."
+	((target_size_mib >= 4096)) || log.die "$TARGET_DEV is too small (${target_size_mib} MiB)."
 	install-rescue-live.validate_source_files
 	read -r source_size_mib _ < <(du -sm "$SOURCE_DIR")
 	required_size_mib=$((source_size_mib + RESERVE_MIB + MIN_PERSISTENCE_MIB))
 	((target_size_mib >= required_size_mib)) ||
-		common.die "$TARGET_DEV is ${target_size_mib} MiB; at least ${required_size_mib} MiB are required for this live medium."
+		log.die "$TARGET_DEV is ${target_size_mib} MiB; at least ${required_size_mib} MiB are required for this live medium."
 	install-rescue-live.confirm_destruction
 
 	trap install-rescue-live.cleanup EXIT
-	trap 'common.die "Rescue installation failed at line $LINENO."' ERR
+	trap 'log.die "Rescue installation failed at line $LINENO."' ERR
 	if findmnt -rn -S "$TARGET_DEV" >/dev/null 2>&1; then
-		common.log_info "Unmount mounted rescue target $TARGET_DEV"
+		log.info "Unmount mounted rescue target $TARGET_DEV"
 		umount "$TARGET_DEV"
 	fi
 
-	common.log_section "Rescue live-system creation"
-	common.log_info "Format $TARGET_DEV as FAT32 with label $TARGET_LABEL"
+	log.section "Rescue live-system creation"
+	log.info "Format $TARGET_DEV as FAT32 with label $TARGET_LABEL"
 	mkfs.vfat -F 32 -n "$TARGET_LABEL" "$TARGET_DEV"
 	rescue_mount_dir="$(mktemp -d /tmp/ubuntu-live.XXXXXX)"
 	mount "$TARGET_DEV" "$rescue_mount_dir"
 
-	common.log_info "Copy Ubuntu live medium from $SOURCE_DIR to $TARGET_DEV"
+	log.info "Copy Ubuntu live medium from $SOURCE_DIR to $TARGET_DEV"
 	rsync -rltD --info=progress2 --no-links --no-owner --no-group --no-perms \
 		--exclude=/writable "$SOURCE_DIR/" "$rescue_mount_dir/"
 
@@ -132,28 +132,28 @@ install-rescue-live.run() {
 		grub_files+=("$relative_path")
 		grub_paths+=("$grub_file")
 	done
-	((${#grub_files[@]} > 0)) || common.die "No supported GRUB configuration was found."
+	((${#grub_files[@]} > 0)) || log.die "No supported GRUB configuration was found."
 	grep -Eqs '^[[:space:]]*linux(efi)?[[:space:]].*/casper/vmlinuz.*[[:space:]]persistent([[:space:]]|$)' \
-		"${grub_paths[@]}" || common.die "Could not enable persistence in the GRUB configuration."
+		"${grub_paths[@]}" || log.die "Could not enable persistence in the GRUB configuration."
 
 	sync
 	available_mib=$(($(df --output=avail -BM "$rescue_mount_dir" | tail -n 1 | tr -dc '0-9')))
 	persistence_mib="$(install-rescue-live.calculate_persistence_mib "$available_mib")"
 	((persistence_mib >= MIN_PERSISTENCE_MIB)) ||
-		common.die "Only ${available_mib} MiB remain; persistence requires at least ${MIN_PERSISTENCE_MIB} MiB."
-	common.log_info "Create ${persistence_mib} MiB ext4 persistence file $rescue_mount_dir/writable"
+		log.die "Only ${available_mib} MiB remain; persistence requires at least ${MIN_PERSISTENCE_MIB} MiB."
+	log.info "Create ${persistence_mib} MiB ext4 persistence file $rescue_mount_dir/writable"
 	dd if=/dev/zero of="$rescue_mount_dir/writable" bs=1M count="$persistence_mib" status=progress conv=fsync
 	mkfs.ext4 -F -L writable "$rescue_mount_dir/writable"
 	sync
 
-	common.log_section "Rescue system summary"
-	common.log_summary_item "Status" "completed successfully"
-	common.log_summary_item "Source" "$SOURCE_DIR"
-	common.log_summary_item "Target" "$TARGET_DEV"
-	common.log_summary_item "Filesystem label" "$TARGET_LABEL"
-	common.log_summary_item "Persistence" "$persistence_mib MiB"
-	common.log_summary_item "Modified GRUB files" "${grub_files[*]}"
-	common.log_success "Persistent Ubuntu rescue system created"
+	log.section "Rescue system summary"
+	log.summary_item "Status" "completed successfully"
+	log.summary_item "Source" "$SOURCE_DIR"
+	log.summary_item "Target" "$TARGET_DEV"
+	log.summary_item "Filesystem label" "$TARGET_LABEL"
+	log.summary_item "Persistence" "$persistence_mib MiB"
+	log.summary_item "Modified GRUB files" "${grub_files[*]}"
+	log.success "Persistent Ubuntu rescue system created"
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

@@ -56,6 +56,11 @@ artifacts:
 They do not source the repository framework at runtime and must remain usable
 after the repository directory is removed.
 
+Shared repository logging is implemented by `lib/log.sh` through the `log.*`
+namespace. `lib/common.sh` sources that module and contains validation and other
+non-logging helpers. Standalone installed commands embed compatible `log.*`
+primitives so this separation does not create a runtime repository dependency.
+
 ## Rescue subsystem
 
 `rescue/script/install-rescue-live` builds `/dev/sda1` from the live medium's
