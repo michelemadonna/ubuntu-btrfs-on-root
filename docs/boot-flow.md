@@ -1,651 +1,192 @@
-# Boot Flow
-
-## 1. Purpose
-
-This document describes the runtime boot sequence of the system.
-
-It defines the ordering and responsibilities of:
-
-- UEFI firmware
-- Secure Boot
-- shim / MOK when required
-- rEFInd
-- Unified Kernel Image (UKI)
-- Linux kernel
-- dracut initramfs
-- snapshot-menu trigger
-- TPM2 / LUKS unlock
-- snapshot selection
-- Btrfs root selection
-- OverlayFS snapshot boot
-- switch_root
-
-This document describes runtime behavior.
-
-System architecture is documented in `docs/architecture.md`.
-Security and boot invariants are documented in `docs/invariants.md`.
-
-## 2. Complete boot flow
-
-### 2.1 Installation-established state
-
-Before the runtime boot flow can succeed, the live installer establishes the
-following persistent state exactly once:
-
-- the configured Btrfs root and data subvolumes;
-- a LUKS2 container opened at `/dev/mapper/root`;
-- target `/etc/crypttab` using the post-encryption LUKS UUID;
-- target `/etc/fstab` using `/dev/mapper/root` and the configured subvolumes;
-- a swapfile inside the configured `@swap` subvolume.
-- an independent persistent Ubuntu live rescue system on the configured
-  FAT32 rescue partition.
-
-The package and boot-artifact phases then run inside the target chroot. They
-must not repeat the destructive storage phase. At runtime, dracut consumes
-the resulting LUKS mapping and Btrfs root configuration described below.
-
-### 2.2 Rescue boot path
-
-The rescue partition is an independent UEFI live-medium path. Firmware boots
-the copied Ubuntu live loader and GRUB configuration rather than the installed
-rEFInd/UKI chain. Casper sees the idempotently added `persistent` option and
-uses the ext4 filesystem stored in the FAT32 `writable` file.
-
-The rescue environment remains usable when the installed LUKS root, UKIs or
-rEFInd configuration cannot boot. Its persistence is not LUKS-encrypted, so
-unlocking or repairing the installed root still requires normal recovery
-credentials and no secrets should be stored persistently in the rescue system.
-
-### 2.3 Installed-system runtime sequence
-
-The complete boot process is:
-
-    Power on
-       |
-       v
-    UEFI firmware
-       |
-       v
-    Secure Boot verification
-       |
-       +---------------------------+
-       |                           |
-       v                           v
-    direct trust               shim path
-       |                           |
-       |                          shim
-       |                           |
-       |                         MOK
-       |                           |
-       +-------------+-------------+
-                     |
-                     v
-                   rEFInd
-                     |
-                     v
-                    UKI
-                     |
-              +------+------+
-              | kernel      |
-              | initrd      |
-              | cmdline     |
-              | PCR data    |
-              +------+------+
-                     |
-                     v
-                Linux kernel
-                     |
-                     v
-               dracut initramfs
-                     |
-                     v
-           snapshot trigger window
-                     |
-             +-------+-------+
-             |               |
-        not requested     requested
-             |               |
-             |          request marker
-             |               |
-             +-------+-------+
-                     |
-                     v
-                TPM2 / LUKS
-                   unlock
-                     |
-                     v
-             encrypted Btrfs
-                available
-                     |
-             +-------+-------+
-             |               |
-        normal boot      snapshot requested
-             |               |
-             |               v
-             |        discover snapshots
-             |               |
-             |               v
-             |          snapshot menu
-             |               |
-             |               v
-             |       selected snapshot
-             |               |
-             |               v
-             |       configure snapshot
-             |          root + overlay
-             |               |
-             +-------+-------+
-                     |
-                     v
-                root mount
-                     |
-                     v
-                switch_root
-                     |
-                     v
-                  systemd
-
-## 3. Secure Boot entry
-The firmware is the initial root of trust.
-Before executing the Linux boot chain, the installer may have configured
-one of two supported trust paths.
-### 3.1 Direct trust path
-When the project has configured direct firmware trust:
-	UEFI
-	  |
-	  | verify
-	  v
-	rEFInd
-	  |
-	  | verify
-	  v
-	 UKI
-rEFInd is signed using a key accepted by the firmware Secure Boot
-configuration.
-No shim component participates in this path.
-
-The directly installed `refind_x64.efi` and fallback `BOOTX64.EFI` copy are
-signed with the repository db key. Verification checks `refind_x64.efi`
-against the corresponding db certificate.
-
-### 3.2 shim trust path
-When the project uses the existing firmware trust hierarchy:
-	UEFI
-	  |
-	  | verify using firmware db
-	  v
-	 shim
-	  |
-	  | verify through MOK trust
-	  v
-	rEFInd
-	  |
-	  | verify
-	  v
-	 UKI
-
-shim provides the bridge between firmware-established trust and
-repository-managed signing keys.
-
-`refind-install --shim` places the repository-signed rEFInd payload behind
-shim as `grubx64.efi`. The concrete chain is:
-
-    firmware db -> shimx64.efi -> MOK db certificate -> grubx64.efi
-
-MokManager remains the vendor-signed enrollment component. Repository
-signature verification targets `grubx64.efi`, not `shimx64.efi`.
-
-fwupd follows the same selected path: direct mode disables shim for capsule
-loading, while shim/MOK mode retains shim in the fwupd chain.
-
-Both paths converge at rEFInd.
-The remainder of the runtime boot sequence should therefore not depend on
-which of these two paths was used.
-
-## 4. rEFInd phase
-At this stage:
-```bash
-LUKS             LOCKED
-Btrfs            UNAVAILABLE
-snapshots        UNAVAILABLE
-normal root      UNAVAILABLE
-initramfs        NOT RUNNING
-```
-rEFInd selects and launches the appropriate UKI.
-The UKI is stored on the EFI System Partition and can therefore be loaded
-without unlocking the LUKS container.
-rEFInd must not require access to the encrypted root filesystem.
-
-## 5. UKI phase
-The UKI contains the components required to enter Linux early userspace.
-Conceptually:
-	UKI
-	|
-	+-- Linux kernel
-	+-- initramfs
-	+-- kernel command line
-	+-- metadata
-	+-- PCR signature information
-	`-- Secure Boot signature
-Execution transfers from EFI to the Linux kernel.
-At this point the UKI contents participate in the measured boot process
-according to the configured measurement policy.
-
-The selected artifact is named `<entry-token>-<kernel-version>.efi`. rEFInd
-uses the newest version-aware filename as its main entry and retains older
-kernels as submenus. The embedded `.uname` must match both that filename and
-the module tree later required for snapshot boot.
-
-The embedded command line selects the normal Btrfs root and LUKS mapping.
-Snapshot selection does not replace the running UKI; dracut adds only the
-runtime overlay fragment after a compatible snapshot is selected.
-
-## 6. Kernel initialization
-The Linux kernel:
-1. initializes the architecture;
-2. initializes memory;
-3. initializes required drivers;
-4. initializes the initramfs;
-5. starts /init.
-The initramfs was generated by dracut.
-Control now moves from firmware/EFI boot into Linux early userspace.
-
-## 7. dracut early userspace
-At initramfs entry:
-```bash
-kernel            RUNNING
-initramfs         AVAILABLE
-/run              AVAILABLE
-real root         NOT MOUNTED
-LUKS              LOCKED
-Btrfs root        UNAVAILABLE
-```
-dracut parses the kernel command line and initializes the devices required
-to locate the root filesystem.
-The custom snapshot-menu module participates in this phase.
-
-## 8. Snapshot trigger phase
-Snapshot selection must be requested before the normal LUKS password input
-phase can consume keyboard input.
-The `systemd-cryptsetup@.service` drop-in starts
-`snapshot-key-listener-stop` as an `ExecStartPre` operation. That controller
-starts the C input listener for the configured trigger window (currently
-`ALT+B` for 5.0 seconds), stops it, restores the display/input state and then
-returns control to cryptsetup.
-Conceptually:
-              listener
-                 |
-           keyboard input
-                 |
-          trigger detected?
-             /       \
-           no         yes
-           |           |
-           |           v
-           |    create request marker
-           |           |
-           +-----+-----+
-                 |
-                 v
-              continue
-
-The request marker is:
-```bash
-/run/snapshot-menu-requested
-```
-The marker represents intent only.
-At this stage the snapshots themselves cannot yet be inspected because the
-Btrfs filesystem remains inside the locked LUKS container.
-
-## 9. Input ownership transition
-This phase is particularly important.
-The snapshot listener must stop consuming keyboard input before LUKS
-password handling takes ownership of the input device.
-Required transition:
-	snapshot listener
-	       |
-	       | stop
-	       v
-	consume/clean only input belonging
-	to the snapshot trigger mechanism
-	       |
-	       v
-	release input device
-	       |
-	       v
-	cryptsetup / systemd ask-password
-
-The listener must not consume input intended for the LUKS password prompt.
-Conversely, input used to activate the snapshot menu must not leak into the
-password prompt.
-Input-device ownership therefore has a strict lifetime.
-
-## 10. LUKS unlock
-The encrypted root device is unlocked.
-The preferred path is TPM2 automatic unlocking.
-Conceptually:
-                LUKS
-                 |
-              TPM token
-                 |
-                 v
-            TPM policy
-                 |
-          PCRs acceptable?
-            /         \
-          yes          no
-           |            |
-           v            v
-      automatic      fallback
-        unlock       authentication
-           |            |
-           +-----+------+
-                 |
-                 v
-         /dev/mapper/root
-
-A TPM policy mismatch must not silently bypass LUKS security.
-Fallback behavior is determined by the configured LUKS/systemd policy.
-
-The enrolled token evaluates literal PCR 7/14/15 constraints together with a
-signed PCR 11 policy authorized by the UKI PCR public key. The kernel command
-line requests `tpm2-device=<configured-device>`, PCR measurement and PIN
-support. `tpm2-pin=yes` is intentionally always embedded, but a PIN is needed
-only when the selected token was enrolled with `TPM_USE_PIN=true`.
-
-Failure to satisfy this policy falls back to normal LUKS authentication; it
-does not authorize an unencrypted root. Password and recovery access are kept
-when adding or deliberately replacing TPM2 tokens.
-
-## 11. Btrfs becomes available
-After successful LUKS unlocking:
-	/dev/mapper/root
-	        |
-	        v
-	      Btrfs
-
-At this point the initramfs can inspect:
-Btrfs subvolumes;
-- Snapper snapshot hierarchy;
-- selected snapshot metadata;
-- files contained in snapshots;
-- kernel information required by the snapshot menu.
-The final root filesystem has not yet been mounted.
-This is the window in which snapshot discovery and selection occur.
-
-### 11.1 Snapshot-menu decision
-The module checks:
-```bash
-/run/snapshot-menu-requested
-```
-If the marker does not exist:
-```text 
-continue normal boot
-```
-If the marker exists:
-```text
-execute snapshot-menu
-```
-Conceptually:
-         marker?
-         /    \
-       no      yes
-       |        |
-       |        v
-       |    mount/access
-       |    Btrfs metadata
-       |        |
-       |        v
-       |    discover Snapper
-       |      snapshots
-       |        |
-       |        v
-       |     show menu
-       |        |
-       |        v
-       |      select
-       |        |
-       +----+---+
-            |
-            v
-      root configuration
-
-Failure to request the menu must never alter the normal boot path.
-
-### 11.2 Snapshot discovery
-Snapshot discovery reads the configured Snapper snapshot hierarchy.
-For every relevant snapshot the menu may determine:
-- snapshot number;
-- snapshot description;
-- creation time;
-- snapshot type;
-- whether the expected kernel is available;
-- other configured metadata.
-Expensive metadata should be obtained lazily where possible.
-The menu supports pagination according to repository configuration.
-Snapshot discovery must not modify snapshots.
-
-### 11.3 Snapshot selection
-The user navigates the snapshot list and selects a root snapshot.
-The menu must also provide a safe way to cancel and return to the normal
-boot path.
-Special input such as:
-```text
-Ctrl-C
-escape sequences
-EOF
-invalid input
-```
-must result in explicitly defined behavior rather than leaving the
-initramfs in a partially configured state.
-If PIN protection is enabled, authorization occurs before accepting the
-snapshot for boot.
-
-Before PIN authorization, the menu verifies that the selected snapshot
-contains `/usr/lib/modules/$(uname -r)`. A missing module tree makes that
-entry non-bootable because the running kernel was already selected by the
-UKI and cannot be replaced at this stage. The current-system entry bypasses
-both this snapshot check and the snapshot PIN.
-
-The configured PIN is checked against a salted SHA-256 value included in the
-initramfs. It gates menu selection only and must not be described as disk
-encryption or protection against offline inspection.
-
-### 11.4 Normal root path
-Without a selected snapshot, dracut proceeds using the configured normal
-root subvolume.
-Conceptually:
-	/dev/mapper/root
-	        |
-	        v
-	   Btrfs filesystem
-	        |
-	        v
-	   normal root subvolume
-	        |
-	        v
-	     real root
-
-Snapshot-specific overlay configuration must not remain active in this
-path.
-In particular, runtime configuration introduced solely for snapshot boot
-must not contaminate normal boot.
-
-### 11.5 Snapshot root path
-When a snapshot is selected, the root selection is changed before dracut
-performs the final root mount.
-Conceptually:
-	/dev/mapper/root
-	        |
-	        v
-	  selected snapshot
-	        |
-	        v
-	      lowerdir
-	        |
-	        v
-	     OverlayFS
-	   /           \
-	lower         upper/work
-	   \           /
-	    +---------+
-	         |
-	         v
-	      new root
-
-The selected Btrfs snapshot remains the historical base.
-Writes generated by the running system must not modify the snapshot.
-
-### 11.6 Kernel command-line handling
-The default kernel command line originates from the UKI.
-The snapshot module may alter the effective root configuration used by
-dracut for the current boot.
-The module must preserve unrelated root flags.
-For example, given configuration conceptually equivalent to:
-```text
-rootflags=ssd,discard=async,noatime,compress=zstd:1,...
-```
-snapshot boot must change only parameters required to select the snapshot
-and enable the overlay mechanism.
-Normal boot must not retain snapshot-specific parameters.
-Kernel-command-line transformation logic should be implemented separately
-from the code that applies the transformation so it can be tested without
-booting a system.
-
-### 11.7 Overlay phase
-For snapshot boot, the dracut overlay mechanism creates the writable root
-view.
-The selected snapshot is the immutable historical base.
-Conceptually:
-
-               /
-               |
-           OverlayFS
-           /       \
-          /         \
-  Btrfs snapshot   writable layer
-
-The exact implementation is provided by the configured dracut overlay
-mechanism.
-The custom snapshot module is responsible for selecting/configuring the
-correct lower root, not for independently reimplementing OverlayFS unless
-explicitly required.
-
-### 11.8 Final root mount
-At this point one of two root configurations exists:
-	NORMAL BOOT
-
-	/dev/mapper/root
-	      |
-	      v
-	normal Btrfs root
-	      |
-	      v
-	   /sysroot
-
-
-	SNAPSHOT BOOT
-
-	/dev/mapper/root
-	      |
-	      v
-	selected snapshot
-	      |
-	      v
-	   OverlayFS
-	      |
-	      v
-	   /sysroot
-
-dracut completes the root preparation.
-
-### 11.9 switch_root
-After the real root is ready:
-	initramfs
-	   |
-	   v
-	switch_root
-	   |
-	   v
-	real root
-	   |
-	   v
-	systemd
-
-The initramfs environment is abandoned.
-Temporary resources owned exclusively by the snapshot-menu module must have
-been cleaned up or intentionally transferred before this point.
-
-## 12. Runtime state summary
-The following table describes the expected availability of important
-resources.
-
-| Phase            | LUKS      | Btrfs | Snapshots | Listener | Menu     | Real root |
-| ---------------- | --------- | ----- | --------- | -------- | -------- | --------- |
-| UEFI             | locked    | no    | no        | no       | no       | no        |
-| shim/rEFInd      | locked    | no    | no        | no       | no       | no        |
-| kernel           | locked    | no    | no        | no       | no       | no        |
-| early dracut     | locked    | no    | no        | yes      | no       | no        |
-| LUKS unlock      | unlocking | no    | no        | stopped  | no       | no        |
-| post-unlock      | open      | yes   | yes       | no       | possible | no        |
-| snapshot menu    | open      | yes   | yes       | no       | yes      | no        |
-| root preparation | open      | yes   | yes       | no       | no       | preparing |
-| switch_root      | open      | yes   | yes       | no       | no       | yes       |
-
-This table should be consulted before moving code between dracut hooks.
-
-## 13. Critical ordering constraints
-The following ordering is intentional:
-
-	snapshot trigger
-	      BEFORE
-	LUKS password input
-
-	LUKS unlock
-	      BEFORE
-	snapshot discovery
-
-	snapshot selection
-	      BEFORE
-	final root mount
-
-	snapshot root configuration
-	      BEFORE
-	OverlayFS/root preparation
-
-	cleanup
-	      BEFORE
-	switch_root
-Changing these relationships is an architectural change, not a local
-refactoring.
-
-## 14. Failure paths
-Every early-boot component must have an explicitly defined failure policy.
-Failures that affect only optional snapshot functionality should prefer a
-safe return to normal boot when doing so does not violate security or leave
-partial state.
-Failures involving:
-LUKS integrity;
-Secure Boot trust;
-TPM policy configuration;
-ambiguous root selection;
-corrupted root configuration;
-must not be hidden merely to continue booting.
-The exact failure policy for each component is documented in `docs/invariants.md`
-
-## 15. Boot-flow validation
-Changes affecting this flow must be evaluated against at least:
-- Normal boot
-- TPM automatic unlock
-- LUKS fallback authentication
-- snapshot trigger not requested
-- snapshot trigger requested
-- snapshot menu cancelled
-- valid snapshot selected
-- invalid/unbootable snapshot
-- listener timeout
-- snapshot PIN enabled
-- snapshot PIN disabled
-Static validation does not prove that these scenarios boot successfully.
-Tests should validate state transitions, generated configuration and
-decision logic wherever real boot execution is unavailable
+# Boot and Installation Flow
+
+## Before running setup
+
+Boot the Ubuntu live medium in UEFI mode and start Ubiquity. Select manual
+partitioning and install Ubuntu with this layout:
+
+1. `/dev/sda1` reserved for the rescue system;
+2. `/dev/sda2` as the FAT32 EFI System Partition mounted at `/boot/efi`;
+3. `/dev/sda3` as the unencrypted Btrfs root mounted at `/`.
+
+The rescue partition must be at least 4096 MiB and large enough for the live
+medium plus persistence. Complete the Ubiquity installation but remain in the
+same live session. The scripts expect `/target`, `/target/boot/efi` and `/cdrom`
+to remain available.
+
+Review `setup.conf`, replace credential placeholders, and then run `setup.sh` as
+root. The configured defaults target `/dev/sda1`, `/dev/sda2` and `/dev/sda3`.
+
+## Installation sequence
+
+The outer live-session phase performs these operations in order:
+
+1. Validate root execution and configuration.
+2. Reformat `/dev/sda1`, copy the current Ubuntu live environment and create its
+   persistence filesystem.
+3. Convert the Ubiquity Btrfs layout into the `@ubuntu/@` hierarchy and create
+   the dedicated data subvolumes and swap file.
+4. Shrink Btrfs, encrypt `/dev/sda3` in place as LUKS2, open it as
+   `/dev/mapper/root`, remount the target and expand Btrfs.
+5. Rewrite the target's crypttab and fstab.
+6. Prepare target bind mounts and copy the repository into the installed system.
+7. Enter a mount-isolated chroot and run `setup.sh //inner`.
+
+The inner phase then:
+
+1. starts the required D-Bus service and clears the old suite-specific EFI
+   directory;
+2. updates packages and optionally pre-downloads them;
+3. installs initramfs cryptsetup support;
+4. detects the firmware mode and configures Secure Boot, rEFInd and fwupd;
+5. configures Snapper and, when enabled, installs the snapshot-menu dracut
+   module;
+6. configures kernel-install, dracut and ukify, generates and validates UKIs;
+7. optionally installs TPM integration without enrolling it.
+
+On return, the outer phase recursively unmounts the target and closes the
+`root` mapping.
+
+## Rescue boot
+
+The rescue partition contains a copy of `/cdrom/casper` on FAT32. Its GRUB
+Casper entries include `persistent`, and the file `/writable` contains an ext4
+filesystem used for persistence.
+
+The rescue system is independent from the installed root and remains usable
+when LUKS unlocking or the installed boot chain needs repair. Its persistent
+data is not encrypted by the root LUKS container.
+
+Root, home, logs, containers and swap of the installed operating system are
+encrypted. Its ESP is the only unencrypted partition in the normal boot chain;
+the separate rescue system is intentionally outside this FDE boundary.
+
+## Installed Secure Boot chain
+
+The selected chain depends on the firmware state captured during setup.
+
+### Direct firmware trust
+
+When the firmware is in Setup Mode, sbctl keys are enrolled into db, KEK and PK,
+with PK enrolled last. The boot path is:
+
+    UEFI firmware -> signed rEFInd -> signed UKI -> Linux kernel and embedded initrd
+
+The signed rEFInd loader is also placed at the architecture fallback path.
+This path is used only in Setup Mode. It avoids shim and gives direct control of
+PK/KEK/db, but makes local key backup and firmware recovery an administrator
+responsibility.
+
+### Shim and MOK trust
+
+When the firmware is already in User Mode, setup does not replace its enrolled
+platform keys. It prepares a shim/MOK path and imports the local db certificate
+through `mokutil`. The user must confirm MOK enrollment at the next reboot.
+
+The resulting path is:
+
+    UEFI firmware -> shim -> MOK-authorized rEFInd payload -> signed UKI
+
+MokManager is installed beside shim to support the enrollment step.
+This path is used in User Mode. It preserves existing firmware ownership and
+OEM/Microsoft compatibility, but adds shim and requires interactive MOK
+enrollment. sbctl still signs local artifacts; MOK authorizes that identity
+through shim instead of direct firmware db enrollment.
+
+In both modes, rEFInd scans the generated configuration rather than booting a
+traditional GRUB kernel entry. fwupd is configured for the detected trust path,
+and the selected EFI executables are signed and verified during setup.
+
+## UKI selection
+
+UKIs are stored as `/boot/efi/EFI/Linux/<entry-token>-<kernel-version>.efi`.
+The exact prefix is derived by the installed generator. The rEFInd hook sorts
+kernel versions in descending version order, makes the newest UKI the main
+entry, and exposes older valid UKIs in a submenu.
+
+Each UKI embeds the kernel, initrd, command line, OS metadata, version, splash,
+PCR public key and PCR signature. The generator rejects artifacts that fail the
+db signature check, lack required PE sections, contain the wrong kernel version
+or omit the installed snapshot-menu content when that feature is configured.
+
+## Early userspace sequence
+
+For a normal installed boot:
+
+1. The firmware validates the direct loader or shim.
+2. rEFInd launches a signed UKI.
+3. The UKI starts the embedded kernel and dracut initramfs with its embedded
+   command line.
+4. The snapshot input listener watches TTY1 for Alt+B for five seconds when the
+   module is enabled.
+5. The listener is stopped before cryptsetup needs input, releasing all grabbed
+   devices.
+6. systemd/cryptsetup unlocks the LUKS root using an available method: TPM2 when
+   enrolled and policy-valid, otherwise a retained password or recovery method.
+7. dracut mounts `@ubuntu/@` and switches to the installed system.
+
+The kernel command line keeps
+`rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes,tpm2-pin=yes` even when
+the current TPM token does not use a PIN. This is intentional and allows future
+PIN enrollment without regenerating every UKI.
+
+## Unique feature: snapshot boot branch
+
+If Alt+B is detected, the listener creates a request marker. After the LUKS
+block device is available but before the real root mount, the snapshot hook:
+
+1. mounts the Btrfs top level read-only;
+2. lists the current system and root snapshots for the active suite at
+   `@$suite/@/.snapshots/<number>/snapshot`;
+3. obtains descriptions lazily from Snapper metadata;
+4. optionally asks for the configured selector PIN;
+5. rejects a snapshot without `/usr/lib/modules/<running-kernel>`;
+6. mounts the chosen snapshot read-only as the new root;
+7. enables dracut's in-memory overlay through
+   `/etc/cmdline.d/99-snapshot.conf`.
+
+The menu includes the current system, numbered snapshots, lazily loaded Snapper
+metadata and descriptions, pagination and cancellation. Current defaults use
+TTY1, Alt+B, a five-second window, 20 entries per page and 24-character
+descriptions. Optional PIN protection allows three attempts and at most 12
+characters.
+
+Use Up/Down or `j`/`k` to select, Left/Right or `h`/`l` to change page, Enter
+to boot and Ctrl+C to cancel snapshot selection and boot the current system.
+
+The overlay supplies ephemeral writes while the selected snapshot remains
+unchanged. Selecting the current system, cancelling, entering an invalid choice,
+failing PIN authentication or encountering a menu error returns to normal root
+boot.
+
+The selector PIN is not a disk-unlock credential. Its salted hash is embedded
+in the initramfs, and the current-system entry does not require it.
+
+The separate home profile stores snapshots below
+`@$suite/@home/.snapshots/<number>/snapshot`. They are not selectable boot roots.
+Because every suite is a top-level sibling such as `@noble` or `@resolute`, each
+distribution has independent root and home snapshot histories.
+
+## TPM enrollment lifecycle
+
+Initial installation only writes TPM configuration and installs commands. It
+does not change LUKS tokens.
+
+After booting the installed system, enrollment is explicit:
+
+- `setup.sh --setup-tpm-luks-auto-unlock` invokes the installed `tpm-enroll`;
+- the deprecated misspelled option ending in `_ulock` is still accepted;
+- `setup.sh --seal-luks-disk-tpm` invokes `tpm-reseal --wipe-all-tpm2`;
+- the standalone commands may be called directly after the repository is
+  removed.
+
+Enrollment creates a LUKS header backup before changing tokens. Ordinary
+enrollment preserves existing tokens and recovery access. Resealing replaces
+TPM2 tokens only after the explicit wipe acknowledgement and leaves password and
+recovery keyslots intact.
+
+For PIN-protected automatic unlock, set `TPM_USE_PIN="true"` in `/etc/tpm.conf`
+before enrollment. Early boot will request the PIN before TPM key release. This
+adds protection against theft of the complete machine but prevents unattended
+boot; retain a tested LUKS password or recovery method. Both modes keep
+`tpm2-pin=yes` in the UKI command line.

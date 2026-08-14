@@ -24,6 +24,7 @@ REFIND_CONFIG="${REFIND_DIR}/refind.conf"
 
 REFIND_ICON_DIR="${REFIND_DIR}/themes/refind-theme-regular/"
 PREFIX_FILE="/etc/kernel/entry-token"
+ICON_TOKEN_FILE="/etc/kernel/refind-icon"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -45,6 +46,12 @@ refind-menu.trim() {
 [[ -r "${PREFIX_FILE}" ]] || exit 0
 
 PREFIX="$(refind-menu.trim "$(<"${PREFIX_FILE}")")"
+ICON_TOKEN="${PREFIX}"
+
+if [[ -r "${ICON_TOKEN_FILE}" ]]; then
+	ICON_TOKEN="$(refind-menu.trim "$(<"${ICON_TOKEN_FILE}")")"
+	ICON_TOKEN="${ICON_TOKEN:-${PREFIX}}"
+fi
 
 [[ -n "${PREFIX}" ]] || exit 0
 [[ -d "${UKI_DIR}" ]] || exit 0
@@ -104,8 +111,8 @@ ICON_PATH=""
 
 if [[ -n "${ICON_DIR}" ]]; then
 
-	if [[ -f "${ICON_DIR}/os_${PREFIX}.png" ]]; then
-		ICON_FILE="${ICON_DIR}/os_${PREFIX}.png"
+	if [[ -f "${ICON_DIR}/os_${ICON_TOKEN}.png" ]]; then
+		ICON_FILE="${ICON_DIR}/os_${ICON_TOKEN}.png"
 
 	elif [[ -f "${ICON_DIR}/os_linux.png" ]]; then
 		ICON_FILE="${ICON_DIR}/os_linux.png"

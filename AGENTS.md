@@ -1,500 +1,242 @@
 # Repository Agent Instructions
 
-## Project purpose
+## Purpose and source of truth
 
-This repository installs and configures Ubuntu with:
+This repository converts an Ubuntu installation created by Ubiquity into a
+Btrfs, LUKS2, Secure Boot, UKI, TPM2 and Snapper system. It also copies the
+Ubuntu live environment to a dedicated rescue partition.
 
-- Btrfs root filesystem
-- LUKS full-disk encryption
-- Secure Boot
-- UKI boot images
-- TPM2 automatic LUKS unlock
-- Snapper snapshots
-- a custom dracut module for selecting a root snapshot during early boot
+The executable scripts are the authoritative description of current behavior.
+Documentation must describe what those scripts do now, not a desired future
+architecture. Before changing code, inspect its callers, generated files and
+boot/security consequences.
 
-The project consists primarily of Bash scripts.
+## Required installation context
 
-Changes to the boot chain, storage layout, encryption or TPM configuration
-must be treated as security-sensitive.
+The normal entry point is `setup.sh`, executed as root from the same Ubuntu live
+session in which Ubiquity has just completed the installation. Do not reboot
+into the installed system first.
 
----
+Ubiquity must use manual partitioning with this default layout:
 
-## Primary goals
+- `/dev/sda1`: rescue partition, at least 4096 MiB and large enough for the live
+  medium plus persistence;
+- `/dev/sda2`: FAT32 EFI System Partition mounted by Ubiquity at `/boot/efi`;
+- `/dev/sda3`: unencrypted Btrfs filesystem mounted by Ubiquity at `/`.
+
+The setup scripts assume the installed target is available at `/target`, its ESP
+at `/target/boot/efi`, and the live medium at `/cdrom`. Device names and other
+installation values come from `setup.conf`; changing them requires checking all
+consumers before execution.
+
+The rescue script reformats `/dev/sda1`. The root conversion encrypts
+`/dev/sda3` in place. These are destructive operations.
+
+## Priorities
 
 Changes must prioritize, in order:
 
-1. system bootability
-2. data integrity
-3. encryption integrity
-4. Secure Boot integrity
-5. TPM sealing integrity
-6. rollback capability
-7. maintainability
-8. user experience
+1. system bootability;
+2. data integrity;
+3. encryption and recovery integrity;
+4. Secure Boot integrity;
+5. TPM sealing integrity;
+6. rollback capability;
+7. maintainability;
+8. user experience.
 
-Never trade a higher-priority property for a lower-priority one without
-explicit justification.
+Never trade a higher-priority property for a lower-priority one without an
+explicit, documented reason.
 
----
+## Repository structure
 
-## Existing behavior
+- `setup.sh`: live-session and target-chroot orchestrator;
+- `setup.conf`: installation devices, credentials and feature switches;
+- `lib/`: framework functions genuinely shared by multiple repository scripts;
+- `rescue/`: construction of the persistent Ubuntu live rescue filesystem;
+- `btrfs-root/`: Btrfs subvolume conversion and in-place LUKS2 encryption;
+- `secure-boot/`: sbctl keys, firmware/MOK enrollment preparation, rEFInd and
+  fwupd setup;
+- `btrfs-snapshots-mng/`: Snapper and the dracut snapshot selector;
+- `uki/`: kernel-install, ukify, dracut and rEFInd UKI integration;
+- `tpm/`: TPM configuration and standalone enrollment/status commands;
+- `tests/`: non-destructive shell tests and static-validation helper;
+- `docs/`: architecture, boot flow, invariants and testing documentation.
 
-This is an existing, working system.
+Read all files in the affected subsystem and the relevant files under `docs/`
+before modifying boot, storage, encryption, signing or TPM behavior.
 
-Existing behavior is authoritative unless a task explicitly requests
-a behavioral change.
+## Refactoring rules
 
-Do not rewrite working code solely to apply preferred patterns or
-best practices.
+Preserve existing observable behavior unless the task explicitly requests a
+change. Refactor incrementally and keep unrelated behavioral changes separate.
 
-Before modifying existing code:
+Logic specific to one executable stays in that executable. Extract a helper to
+`lib/` only when it is actually shared by multiple scripts. Do not create a
+generic `common` module merely to shorten an individual script.
 
-1. understand its current behavior;
-2. identify its callers and dependencies;
-3. identify relevant boot/security invariants;
-4. preserve existing behavior not explicitly targeted by the task.
+Shell function names use a namespace that identifies their owner:
 
-Prefer the smallest change that solves the requested problem.
+    common.require_root
+    btrfs-subvol-setup.validate_btrfs_subvolume_configuration
 
-## Refactoring
+Use the `common.` prefix only for framework functions and a script-specific
+prefix for local functions. Hyphens in Bash function names are intentional in
+this repository.
 
-Refactoring must be incremental.
-
-Do not combine unrelated refactoring with behavioral changes.
-
-When extracting existing logic into the common framework, preserve
-observable behavior first. Improvements may be performed separately
-after equivalent behavior has been validated.
-
-If existing code conflicts with a documented best practice, do not
-silently rewrite it. Report the conflict and determine whether changing
-it could affect compatibility or boot behavior.
-
-## Architecture
-
-Read the following documents when relevant:
-
-- `docs/architecture.md`
-- `docs/boot-flow.md`
-- `docs/invariants.md`
-- `docs/testing.md`
-
-Do not duplicate detailed architecture documentation in this file.
-
----
+The installed commands `generate-uki`, `tpm-enroll`, `tpm-reseal` and
+`tpm-status` are standalone artifacts. They must continue to work after the
+repository copy has been deleted and therefore must not source the repository
+framework or other repository files at runtime. Their installed configuration
+files may be used as documented by the scripts.
 
 ## Bash requirements
 
-All executable shell scripts must use Bash explicitly.
-
-Prefer:
+Executable shell scripts must use Bash explicitly, preferably:
 
     #!/usr/bin/env bash
 
-New or modified scripts must:
+For new or modified shell code:
 
-- pass `bash -n`
-- pass ShellCheck
-- follow the repository shfmt configuration
-- quote parameter expansions unless intentional
-- use arrays when representing argument lists
-- avoid `eval`
-- avoid parsing `ls`
-- avoid unnecessary subshells
-- avoid temporary files when pipes or variables are sufficient
-- use `printf` rather than `echo` when output interpretation matters
-- use `local` for function-local variables
-- use meaningful function and variable names
-- keep functions focused on one responsibility
-- namespace every production function as `<owner>.<function>`, where `<owner>`
-  identifies the defining script or framework module (for example,
-  `common.require_root` or
-  `btrfs-subvol-setup.validate_configuration`)
-- indent `cat` heredoc bodies and terminators with the surrounding code;
-  use `<<-` with tab indentation so the generated content does not contain
-  the source indentation
+- quote expansions unless splitting or globbing is intentional;
+- use arrays for command argument lists;
+- use `local` for function variables;
+- avoid `eval`, parsing `ls`, and unnecessary subshells;
+- prefer `printf` where output interpretation matters;
+- handle expected command failures explicitly;
+- use `set -euo pipefail` for executables when compatible with their behavior;
+- do not add shell options mechanically to sourced libraries;
+- keep functions focused and name them after their responsibility;
+- never expose passphrases, PINs, recovery keys or private-key material in logs.
 
-Do not silence ShellCheck warnings without documenting why.
+Every `cat` heredoc must keep its content visibly indented in the source. Use an
+indented `<<-EOF` heredoc with leading tabs when literal output must begin in
+column zero. Do not introduce unindented heredoc bodies.
 
----
+Logs for installation and system-modification scripts must identify the phase,
+relevant non-secret target, action and result. Fatal messages must state what
+failed and, when safe, the recovery action. The main subsystem setup scripts
+must finish with a truthful operation summary; do not report skipped or failed
+steps as completed.
 
-## Error handling
+Modified Bash files must pass `bash -n`, ShellCheck and the repository shfmt
+style. Do not silence ShellCheck without a nearby explanation.
 
-Scripts that perform installation or system modification must fail
-predictably.
+## Framework use
 
-Use the common framework for:
+Repository-bound setup scripts should use the framework for shared concerns
+that are already implemented there, including logging, fatal errors, command
+execution, cleanup, configuration loading, validation and prompts. Search
+before adding a helper.
 
-- logging
-- warnings
-- fatal errors
-- command execution
-- temporary files
-- cleanup
-- user input
-- password/PIN input
+Do not move domain logic into `lib/`. Btrfs layout decisions belong under
+`btrfs-root/`; signing policy under `secure-boot/`; snapshot selection under
+`btrfs-snapshots-mng/`; UKI construction under `uki/`; and TPM enrollment policy
+under `tpm/`.
 
-Do not implement duplicate logging or error-handling frameworks inside
-individual scripts.
+Separate pure transformations, argument construction and validation from
+privileged execution where practical. This supports tests without touching
+real devices.
 
-Logs for destructive or long-running installation phases must be exhaustive
-enough to identify:
+## Security and boot invariants
 
-- the phase being executed;
-- the resolved target device, mapper, mount point or configuration file;
-- the operation about to run;
-- whether optional behavior was executed or skipped;
-- successful completion of the phase.
+### Storage and LUKS
 
-Required commands and configuration must be validated before the first
-destructive operation whenever practical.
-
-Never include passphrases, PINs, recovery keys or private-key material in
-those logs. High-level orchestrators must finish with a concise summary of
-completed operations and resulting paths when all phases succeed.
-
-When appropriate, use:
-
-    set -euo pipefail
-
-Do not add it mechanically to sourced libraries where its behavior could
-unexpectedly affect the caller.
-
-Explicitly handle expected command failures rather than relying on
-`set -e`.
-
----
-
-## Common framework
-
-Reusable functionality belongs under `lib/`.
-
-Only cross-cutting infrastructure shared by unrelated repository components
-belongs in the top-level `lib/` directory. Domain-specific helpers must stay
-in the individual script that owns the behavior so the complete flow can be
-followed locally. A feature-level common file may be introduced only when the
-same function is genuinely used by multiple scripts in that feature; it must
-not be used merely to split up a long script or make functions easier to test.
-
-Before adding a helper function, search for an existing implementation.
-
-Scripts should source the common framework rather than reimplement:
-
-- logging
-- error handling
-- command execution
-- dry-run support
-- cleanup handlers
-- configuration parsing
-- path validation
-- confirmation prompts
-
-Core logic should be separated from destructive execution whenever
-practical, but this separation must not move feature-specific logic into the
-top-level common framework or into an unnecessary feature-level common file.
-
-Prefer:
-
-    tpm-enroll.validate_configuration
-    tpm-enroll.build_cryptenroll_arguments
-    tpm-enroll.enroll_key
-
-over one large function performing all operations.
-
-This separation is required to make logic testable without modifying a
-real system.
-
-Call sites must use the fully qualified function name. Do not add unqualified
-aliases, because they hide ownership and reintroduce collision risk. The
-namespace is an ownership marker, not permission to move a function away from
-the script that owns its behavior.
-
-Installed runtime commands that must survive removal of the repository are an
-explicit exception to framework reuse. In particular, `generate-uki`,
-`tpm-enroll`, `tpm-reseal` and `tpm-status` must be self-contained and must not
-source repository libraries or an installed copy of `common.sh`.
-
----
-
-## Security invariants
-
-Never weaken these properties unless explicitly requested.
-
-### LUKS
-
-- Never remove an existing LUKS keyslot unless explicitly required.
-- Never assume the TPM token is the only recovery mechanism.
-- Recovery access must remain possible.
-- Never expose passphrases, PINs or recovery keys in logs.
-- Never pass secrets through command-line arguments when a safer mechanism
+- Never format, shrink, encrypt, resize or mount a device inferred from
+  ambiguous input.
+- Preserve recovery access and existing non-TPM keyslots unless an explicit
+  operation says otherwise.
+- Never pass secrets through command-line arguments when a safer input channel
   is available.
+- Keep the installed root at `@ubuntu/@` and check every consumer before
+  changing any subvolume path.
+- Treat each suite as a top-level sibling container, such as `@noble` or
+  `@resolute`; never document releases as nested below `@ubuntu`.
+- Keep root snapshots under `@$suite/@/.snapshots` and home snapshots under
+  `@$suite/@home/.snapshots`; only root snapshots participate in snapshot boot.
+- Keep the rescue partition outside LUKS; document that its persistence is not
+  encrypted.
 
 ### Secure Boot
 
-- Do not disable Secure Boot as a workaround.
-- Do not bypass signature verification.
-- Do not replace signing keys automatically.
-- Do not enroll or remove firmware keys during validation.
-- UKIs and EFI executables expected to participate in the trusted boot
-  chain must remain correctly signed.
-- Secure Boot phase scripts must execute as isolated entry points; do not
-  source an entry point whose main routine performs enrollment or signing.
-- Direct firmware enrollment must preserve the order `db`, `KEK`, then `PK`;
-  `PK` is always last because it exits firmware Setup Mode.
-- Snapshot-package fallbacks must remain authenticated by an archive keyring.
-  Never use `trusted=yes` for shim, rEFInd or other boot-chain packages.
-- Verify the repository-signed loader that follows the selected trust anchor:
-  `refind_x64.efi` for direct trust and `grubx64.efi` for shim/MOK trust.
-- UKI generation must fail overall when any requested kernel fails generation,
-  signature verification or structural validation; a summary containing
-  failures must not return success.
-- Preserve the UKI filename contract `<entry-token>-<kernel-version>.efi` in
-  `/boot/efi/EFI/Linux`, because the rEFInd hook derives ownership and menu
-  versions from it.
-- `/etc/kernel/cmdline` and ukify own the embedded normal-boot command line.
-  Keep dracut `hostonly_cmdline="no"` to avoid embedding a second cmdline.
-- PCR signing keys under `/etc/uki/keys` and Secure Boot db private keys are
-  long-lived secrets. Reuse existing keys and never print their contents.
+- Do not disable signature verification or Secure Boot as a workaround.
+- Do not replace existing signing keys automatically.
+- Preserve the distinction between firmware Setup Mode enrollment and the
+  shim/MOK path.
+- When enrolling firmware variables, the Platform Key remains last.
+- UKIs, rEFInd, its selected drivers and fwupd executables in the trusted path
+  must retain the signatures verified by the scripts.
 
 ### TPM
 
-- Do not change PCR policy without explaining the effect on existing
-  enrolled LUKS tokens.
-- Treat PCR policy changes as compatibility-breaking security changes.
 - Never clear the TPM.
-- Never execute TPM enrollment during automated repository validation.
-- `/etc/tpm.conf` is the authoritative installed TPM/LUKS configuration.
-  Keep the installer, enrollment, status and reseal commands on that path.
-- TPM installation must not enroll or replace LUKS tokens. Enrollment is a
-  separate explicit operation and requires a successful LUKS-header backup.
-- Normal enrollment preserves existing TPM2, password and recovery access.
-  Removing all systemd TPM2 tokens requires the explicit
-  `tpm-reseal --wipe-all-tpm2` operation and must not remove non-TPM keyslots.
-- `TPM_USE_PIN` controls `systemd-cryptenroll --tpm2-with-pin`. Keep
-  `tpm2-pin=yes` unconditionally in the embedded kernel command line so a
-  later PIN-enabled enrollment does not require regenerating every UKI.
-- Do not describe the current literal PCR policy as a generic safe dual-boot
-  default. PCR 14/15 compatibility must be verified from every booted OS.
+- Do not change PCR policy without documenting that existing enrollments may
+  stop unlocking.
+- Do not enroll a TPM token during ordinary automated validation.
+- Preserve password/recovery access during enrollment and resealing.
+- Keep `tpm2-pin=yes` in the kernel command line even when PIN enrollment is
+  disabled. This supports PINless operation while avoiding regeneration of all
+  UKIs if PIN use is enabled later.
 
-### Btrfs / Snapper
+### Snapshot boot and dracut
 
-- Never delete snapshots as a side effect of validation.
-- Snapshot boot must not modify the selected snapshot.
-- Preserve the distinction between normal root boot and snapshot boot.
-- Do not change subvolume paths without checking every consumer.
-- Do not offer a snapshot for boot unless it contains modules for the kernel
-  already running from the UKI (`/usr/lib/modules/$(uname -r)`).
-- The current-system menu entry must remain available without snapshot PIN
-  authentication. The snapshot PIN is a menu access control stored in the
-  initramfs as a salted hash; it is not an encryption boundary.
+- Normal boot must remain the fallback when the selector is not requested,
+  cancelled or fails.
+- A selected snapshot must be mounted read-only.
+- The writable overlay must remain ephemeral.
+- Do not delete snapshots as a validation side effect.
+- The input listener must release devices before cryptsetup needs console input.
+- Snapshot selection must happen before the real root mount and remain
+  compatible with LUKS unlock.
 
-### Rescue system
+## Destructive operations
 
-- Rescue creation is a destructive formatting operation limited to the
-  configured `rescue_dev`; require exact-device confirmation immediately
-  before formatting.
-- The rescue source must be an Ubuntu live medium containing `casper/`, and
-  source and target must never resolve to the same partition.
-- The rescue partition is FAT32 and outside LUKS. Its file-backed `writable`
-  persistence is not encrypted; never copy installed-system secrets into it.
-- Preserve UEFI live-media contents and modify only supported Casper GRUB
-  entries to add `persistent`. The transformation must be idempotent.
-- Reserve free FAT32 space, enforce its single-file size limit and require a
-  useful minimum persistence size before creating `writable`.
-- Automated validation must not format, mount or write to a real rescue
-  partition.
+Repository scripts legitimately contain destructive commands, including
+filesystem creation, partition changes, LUKS reencryption, key enrollment and
+EFI-variable writes. Agents may inspect and edit those paths but must not run
+them on the development host.
 
-### dracut / initramfs
+Execution against a real block device, firmware, MOK database or TPM requires
+an explicit user request and a prepared disposable or intended target. Never
+use validation as permission to run destructive operations.
 
-The snapshot menu executes during early boot.
+## Validation
 
-Changes must preserve:
+Normal development validation is non-destructive:
 
-- availability before root mount
-- compatibility with LUKS unlocking
-- normal boot when no snapshot is selected
-- snapshot boot through the expected overlay mechanism
-- console/input availability
-- cleanup of temporary mounts and resources
+1. parse every modified shell executable with `bash -n`;
+2. run ShellCheck on every modified shell file, including extensionless files;
+3. run `shfmt -d` using repository style;
+4. run relevant scripts under `tests/`;
+5. inspect generated text and artifact metadata without installing them;
+6. inspect the final diff and check for secrets or private keys.
 
-The snapshot trigger listener is started immediately before the systemd
-cryptsetup operation and must release the input device before cryptsetup
-prompts. Its request marker is consumed later by the pre-mount hook, after
-the unlocked Btrfs root is available.
+`tests/validate.sh` is not currently a complete repository validator: it only
+searches for `*.sh`, does not cover every extensionless executable, and its
+unit-test calls are disabled. Do not rely on it alone.
 
-Dracut module entry points named `check`, `depends` and `install` are an
-explicit exception to the production-function namespace rule because dracut
-discovers those exact API names. Document any similar external API exception
-at the definition.
+Never claim that boot, LUKS reencryption, firmware enrollment, MOK enrollment or
+TPM unlocking works solely because static or mocked tests pass. Final reports
+must distinguish verified, statically validated, inferred and not tested.
 
-Initramfs executables may use `#!/bin/bash` instead of `/usr/bin/env bash`
-when the module installs `/bin/bash` but does not include `/usr/bin/env`.
+## Configuration cautions
 
----
+`setup.conf` is sourced as shell code and contains passphrase/PIN values. Treat
+it as secret-bearing input, replace placeholder credentials before use, never
+log it wholesale and never commit real credentials.
 
-## Destructive commands
+`suite_type` selects the distribution icon used by the installed rEFInd hook;
+for example, `ubuntu` selects `os_ubuntu.png` when the theme provides it.
+`sb_key_dir` is not consumed by the scripts. `pre_download` and `enable_tpm`
+activate only when their value is exactly `yes`. Do not document unused
+variables as functional.
 
-Repository scripts may legitimately contain destructive commands.
-
-The agent may inspect, create and modify such code, but MUST NOT execute
-destructive system operations during development or validation unless the
-user explicitly requests execution.
-
-Examples include:
-
-- `cryptsetup luksFormat`
-- `cryptsetup luksKillSlot`
-- `systemd-cryptenroll`
-- `mkfs.*`
-- `wipefs`
-- destructive `sgdisk` operations
-- `dd` targeting block devices
-- `sbctl enroll-keys`
-- EFI variable modifications
-- TPM clear/reset operations
-- reboot or shutdown
-- writes to real block devices
-
-Do not "test" these commands against the development machine.
-
----
-
-## Validation strategy
-
-This repository distinguishes:
-
-1. static validation
-2. unit validation
-3. artifact validation
-4. destructive/integration testing
-
-Normal agent work may automatically perform categories 1-3.
-
-Category 4 requires an explicitly prepared disposable environment.
-
-### Static validation
-
-Run:
-
-    bash -n
-    shellcheck
-    shfmt -d
-
-for modified Bash files.
-
-### Unit validation
-
-Pure functions should be tested independently from the host environment.
-
-Use fixtures and mocks for:
-
-- `lsblk`
-- `findmnt`
-- `blkid`
-- `cryptsetup`
-- `systemd-cryptenroll`
-- `btrfs`
-- `snapper`
-- `bootctl`
-- `sbctl`
-- `tpm2_*`
-- `dracut`
-
-Tests must not require root privileges.
-
-### Artifact validation
-
-Generated configuration may be inspected, parsed and validated.
-
-Examples:
-
-- dracut module structure
-- generated kernel command lines
-- generated rEFInd configuration
-- UKI command-line contents
-- expected initramfs file lists
-- configuration file syntax
-
-Artifact validation must not enroll keys, alter TPM state or modify block
-devices.
-
----
-
-## Testing philosophy
-
-Prefer testing transformations:
-
-    input -> logic -> expected output
-
-rather than executing privileged operations.
-
-Examples:
-
-    PCR configuration
-        ->
-    cryptenroll argument builder
-        ->
-    expected argv[]
-
-or:
-
-    snapshot metadata
-        ->
-    snapshot menu model
-        ->
-    expected selectable entries
-
-or:
-
-    kernel version list
-        ->
-    UKI selection logic
-        ->
-    expected EFI paths
-
-Functions that build command arguments should be separated from functions
-that execute those commands.
-
----
+Secure Boot setup expects `refind_themes.zip` at the repository root. Preserve
+that installation artifact or change its consumer and documentation together.
 
 ## Definition of done
 
-Before considering a Bash change complete:
-
-1. inspect the affected architecture
-2. inspect existing related code
-3. implement the smallest coherent change
-4. run syntax validation
-5. run ShellCheck
-6. run formatting validation
-7. run applicable unit/static tests
-8. inspect the final git diff
-9. verify no secrets or generated private keys were added
-10. report validations that could not safely be performed
-
-Do not claim that boot, TPM enrollment, Secure Boot enrollment or disk
-installation works merely because static tests pass.
-
-Clearly distinguish:
-
-- verified
-- statically validated
-- inferred
-- not tested
-
----
-
-## Change policy
-
-Prefer minimal changes.
-
-Do not:
-
-- rename files unnecessarily
-- reorganize unrelated code
-- replace existing mechanisms merely because another approach is preferred
-- change boot architecture while fixing an unrelated bug
-- change paths or configuration formats without migration consideration
-
-When modifying security-sensitive or boot-critical logic, explain the
-behavioral change in the final response.
+A change is complete only after the affected flow and callers have been read,
+the smallest coherent implementation has been made, safe validation has passed,
+documentation has been reconciled with actual behavior, and the final diff has
+been reviewed for boot/security regressions and secret material.

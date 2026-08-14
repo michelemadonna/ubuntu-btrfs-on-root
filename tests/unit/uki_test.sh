@@ -37,6 +37,8 @@ uki-test.artifact_contract() {
 	rg -q '\.sbat' "$generator"
 	rg -q 'sort -Vr' "$menu_hook"
 	rg -q 'refind-menu\.generate' "$menu_hook"
+	rg -q 'ICON_TOKEN_FILE="/etc/kernel/refind-icon"' "$menu_hook"
+	rg -q 'os_\$\{ICON_TOKEN\}\.png' "$menu_hook"
 }
 
 uki-test.reject_invalid_artifact() {
