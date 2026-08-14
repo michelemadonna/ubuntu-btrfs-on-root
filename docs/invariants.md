@@ -57,6 +57,25 @@ must access EFI executables before LUKS unlock.
 The installer must never silently move sensitive persistent data outside the
 encrypted filesystem.
 
+### 3.2 Rescue partition
+
+The configured rescue partition is an explicit exception for an independent
+Ubuntu live environment. Both its FAT32 contents and file-backed persistence
+are outside LUKS and must be treated as unencrypted.
+
+Rescue creation must:
+
+- target only `/dev/<rescue_dev>` after exact-device confirmation;
+- reject whole disks, the live source partition, undersized partitions and
+  sources without `casper/`;
+- reject source files that exceed the FAT32 single-file limit;
+- preserve a reserve after copying and require minimum useful persistence;
+- add `persistent` only to Casper kernel lines and never duplicate it;
+- unmount temporary mounts during success and failure cleanup.
+
+It must not copy data, credentials or keys from the installed encrypted root.
+Normal validation must never format or mount the configured rescue device.
+
 ### 3.2 Existing encrypted data
 
 Existing encrypted data must never be destroyed as a side effect of:
@@ -230,6 +249,28 @@ may invalidate existing LUKS TPM enrollment.
 Such changes must therefore be treated as a behavioral and security change.
 
 They must not be introduced as incidental refactoring.
+
+The current configured policy is literal PCR
+`7+14+15:sha256=<all-zero-digest>` plus signed PCR 11. Documentation must not
+shorten this to PCR 7 or describe PCR 14/15 as portable without measurements
+from every operating system in the boot configuration.
+
+`TPM_USE_PIN` controls whether enrollment creates a PIN-protected token.
+`tpm2-pin=yes` must remain unconditionally available in the embedded command
+line: PIN-less tokens continue to work, while switching future enrollment to
+a PIN does not require rebuilding all UKIs beforehand.
+
+Before every `systemd-cryptenroll` operation, create a uniquely named,
+mode-0600 LUKS header backup. Failure to create the backup is fatal.
+
+Normal enrollment must omit `--wipe-slot=tpm2`. That option is allowed only
+after the explicit `tpm-reseal --wipe-all-tpm2` request. Even then, password
+and recovery-key slots must remain available.
+
+`generate-uki`, `tpm-enroll`, `tpm-reseal` and `tpm-status` are persistent
+administrative commands, not installer entry points. They must remain
+self-contained after repository deletion and may depend only on installed
+system commands and their documented configuration/artifact paths.
 
 ### 6.2 TPM failure
 

@@ -209,6 +209,11 @@ aliases, because they hide ownership and reintroduce collision risk. The
 namespace is an ownership marker, not permission to move a function away from
 the script that owns its behavior.
 
+Installed runtime commands that must survive removal of the repository are an
+explicit exception to framework reuse. In particular, `generate-uki`,
+`tpm-enroll`, `tpm-reseal` and `tpm-status` must be self-contained and must not
+source repository libraries or an installed copy of `common.sh`.
+
 ---
 
 ## Security invariants
@@ -258,6 +263,18 @@ Never weaken these properties unless explicitly requested.
 - Treat PCR policy changes as compatibility-breaking security changes.
 - Never clear the TPM.
 - Never execute TPM enrollment during automated repository validation.
+- `/etc/tpm.conf` is the authoritative installed TPM/LUKS configuration.
+  Keep the installer, enrollment, status and reseal commands on that path.
+- TPM installation must not enroll or replace LUKS tokens. Enrollment is a
+  separate explicit operation and requires a successful LUKS-header backup.
+- Normal enrollment preserves existing TPM2, password and recovery access.
+  Removing all systemd TPM2 tokens requires the explicit
+  `tpm-reseal --wipe-all-tpm2` operation and must not remove non-TPM keyslots.
+- `TPM_USE_PIN` controls `systemd-cryptenroll --tpm2-with-pin`. Keep
+  `tpm2-pin=yes` unconditionally in the embedded kernel command line so a
+  later PIN-enabled enrollment does not require regenerating every UKI.
+- Do not describe the current literal PCR policy as a generic safe dual-boot
+  default. PCR 14/15 compatibility must be verified from every booted OS.
 
 ### Btrfs / Snapper
 
@@ -270,6 +287,22 @@ Never weaken these properties unless explicitly requested.
 - The current-system menu entry must remain available without snapshot PIN
   authentication. The snapshot PIN is a menu access control stored in the
   initramfs as a salted hash; it is not an encryption boundary.
+
+### Rescue system
+
+- Rescue creation is a destructive formatting operation limited to the
+  configured `rescue_dev`; require exact-device confirmation immediately
+  before formatting.
+- The rescue source must be an Ubuntu live medium containing `casper/`, and
+  source and target must never resolve to the same partition.
+- The rescue partition is FAT32 and outside LUKS. Its file-backed `writable`
+  persistence is not encrypted; never copy installed-system secrets into it.
+- Preserve UEFI live-media contents and modify only supported Casper GRUB
+  entries to add `persistent`. The transformation must be idempotent.
+- Reserve free FAT32 space, enforce its single-file size limit and require a
+  useful minimum persistence size before creating `writable`.
+- Automated validation must not format, mount or write to a real rescue
+  partition.
 
 ### dracut / initramfs
 

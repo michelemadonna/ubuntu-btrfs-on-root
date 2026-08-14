@@ -24,10 +24,15 @@ setup.load_configuration() {
 
 	common.require_nonempty "root_dev" "${root_dev:-}"
 	common.require_nonempty "efi_dev" "${efi_dev:-}"
+	common.require_nonempty "rescue_dev" "${rescue_dev:-}"
 	common.require_nonempty "mp" "${mp:-}"
 	common.require_nonempty "root_sub_vol" "${root_sub_vol:-}"
 	common.require_nonempty "suite" "${suite:-}"
 	common.require_nonempty "pre_download" "${pre_download:-}"
+	[[ $rescue_dev != */* && $rescue_dev != *..* ]] ||
+		common.die "rescue_dev must be a device name relative to /dev."
+	[[ $rescue_dev != "$root_dev" && $rescue_dev != "$efi_dev" ]] ||
+		common.die "rescue_dev must be distinct from root_dev and efi_dev."
 }
 
 setup.show_help() {
@@ -39,8 +44,9 @@ setup.show_help() {
 
 		Options:
 		  -h, --help                    show this help
-		  --setup-tpm-luks-auto_ulock   enroll TPM-based LUKS unlock
-		  --seal-luks-disk-tpm          reseal the TPM LUKS policy
+		  --setup-tpm-luks-auto-unlock  enroll TPM-based LUKS unlock
+		  --setup-tpm-luks-auto_ulock   deprecated spelling of the same option
+		  --seal-luks-disk-tpm          replace all TPM2 tokens and reseal
 	EOF
 }
 
@@ -53,12 +59,14 @@ setup.parse_arguments() {
 		setup.show_help
 		exit 0
 		;;
-	--setup-tpm-luks-auto_ulock)
-		tpm_enroll
+	--setup-tpm-luks-auto_ulock | --setup-tpm-luks-auto-unlock)
+		common.require_commands tpm-enroll
+		tpm-enroll
 		exit 0
 		;;
 	--seal-luks-disk-tpm)
-		tpm_reseal
+		common.require_commands tpm-reseal
+		tpm-reseal --wipe-all-tpm2
 		exit 0
 		;;
 	--*)
@@ -76,6 +84,19 @@ setup.prepare_target() {
 	umount /target/cdrom
 	umount /target
 	mkdir "$mp"
+}
+
+setup.install_rescue_system() {
+	common.require_commands apt-get env
+	common.log_section "Persistent rescue system"
+	common.log_info "Install rescue-system filesystem and synchronization tools in the live environment"
+	apt-get install -y dosfstools e2fsprogs rsync
+	common.log_info "Create the rescue system from /cdrom on /dev/$rescue_dev"
+	env \
+		repository_root="$repository_root" \
+		SOURCE_DIR=/cdrom \
+		TARGET_DEV="/dev/$rescue_dev" \
+		"$repository_root/rescue/script/install-rescue-live"
 }
 
 setup.prepare_chroot() {
@@ -121,7 +142,7 @@ setup.run_inner_installation() {
 setup.pre_download_all() {
 	local -a packages=(
 		asciidoc-base binutils build-essential ca-certificates coreutils cryptsetup-bin
-		cryptsetup-initramfs curl dialog dosfstools dracut efibootmgr findutils fwupd
+		cryptsetup-initramfs curl dialog dosfstools dracut e2fsprogs efibootmgr findutils fwupd
 		fwupd-unsigned git golang-go jq libpcsclite-dev libpcsclite1
 		libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64
 		libtss2-tcti-tabrmd0 openssl pcscd pkgconf pkgconf-bin refind rsync
@@ -224,6 +245,7 @@ setup.main() {
 	setup.parse_arguments "$@"
 	[[ -n ${PASSPHRASE:-} ]] || common.die "PASSPHRASE must be configured for the root volume."
 
+	setup.install_rescue_system
 	setup.prepare_target
 	cleanup_required=true
 	trap setup.cleanup_on_exit EXIT

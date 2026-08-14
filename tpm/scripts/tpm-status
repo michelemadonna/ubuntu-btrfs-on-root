@@ -1,22 +1,45 @@
 #!/usr/bin/env bash
+
 set -Eeuo pipefail
 
-source /etc/tpm.conf
+TPM_CONFIG="${TPM_CONFIG:-/etc/tpm.conf}"
 
-[[ -b "$LUKS_DEVICE" ]] || {
-    echo "LUKS_DEVICE is invalid: $LUKS_DEVICE" >&2
-    exit 1
+tpm-status.die() {
+	printf 'ERROR: %s\n' "$*" >&2
+	exit 1
 }
 
-echo "LUKS device:         $LUKS_DEVICE"
-echo "TPM device:          $TPM_DEVICE"
-echo "Literal PCRs:        $TPM_LITERAL_PCRS"
-echo "Signed PCRs:         $TPM_SIGNED_PCRS"
-echo "PCR public key:      $PCR_PUBLIC_KEY"
-echo
+tpm-status.require_root() {
+	((EUID == 0)) || tpm-status.die "Must be run as root."
+}
 
-systemd-cryptenroll "$LUKS_DEVICE"
+tpm-status.summary_item() {
+	local label=$1 value=$2
+	printf '  %-24s %s\n' "$label:" "$value"
+}
 
-echo
+tpm-status.run() {
+	tpm-status.require_root
+	[[ -r $TPM_CONFIG ]] || tpm-status.die "TPM configuration not found or not readable: $TPM_CONFIG"
+	# shellcheck source=/dev/null
+	source "$TPM_CONFIG"
+	command -v cryptsetup >/dev/null 2>&1 || tpm-status.die "Required command not found: cryptsetup"
+	command -v systemd-cryptenroll >/dev/null 2>&1 || tpm-status.die "Required command not found: systemd-cryptenroll"
+	[[ -b $LUKS_DEVICE ]] || tpm-status.die "LUKS_DEVICE is invalid: $LUKS_DEVICE"
 
-cryptsetup luksDump "$LUKS_DEVICE"
+	printf '\n==> TPM2 LUKS status\n'
+	tpm-status.summary_item "LUKS device" "$LUKS_DEVICE"
+	tpm-status.summary_item "TPM device" "$TPM_DEVICE"
+	tpm-status.summary_item "Literal PCRs" "$TPM_LITERAL_PCRS"
+	tpm-status.summary_item "Signed PCRs" "$TPM_SIGNED_PCRS"
+	tpm-status.summary_item "TPM PIN" "$TPM_USE_PIN"
+	tpm-status.summary_item "PCR public key" "$PCR_PUBLIC_KEY"
+	printf '\n'
+	systemd-cryptenroll "$LUKS_DEVICE"
+	printf '\n'
+	cryptsetup luksDump "$LUKS_DEVICE"
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	tpm-status.run
+fi

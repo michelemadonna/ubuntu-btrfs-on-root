@@ -2,6 +2,11 @@
 
 set -Eeuo pipefail
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
+
 readonly SOURCE_DIR="${SOURCE_DIR:-/cdrom}"
 readonly TARGET_DEV="${TARGET_DEV:-/dev/sda1}"
 readonly TARGET_LABEL="${TARGET_LABEL:-UBUNTU_LIVE}"
@@ -9,126 +14,148 @@ readonly RESERVE_MIB="${RESERVE_MIB:-256}"
 readonly MIN_PERSISTENCE_MIB="${MIN_PERSISTENCE_MIB:-512}"
 readonly FAT32_MAX_FILE_MIB=4095
 
-mount_dir=""
+rescue_mount_dir=""
 
-log() {
-    printf '\n==> %s\n' "$*"
+install-rescue-live.cleanup() {
+	local status=$?
+
+	sync || true
+	if [[ -n $rescue_mount_dir ]] && mountpoint -q "$rescue_mount_dir"; then
+		umount "$rescue_mount_dir" || true
+	fi
+	[[ -z $rescue_mount_dir ]] || rmdir "$rescue_mount_dir" 2>/dev/null || true
+	exit "$status"
 }
 
-die() {
-    printf '\nERROR: %s\n' "$*" >&2
-    exit 1
+install-rescue-live.validate_integer() {
+	local name=$1 value=$2
+	[[ $value =~ ^[0-9]+$ ]] || common.die "$name must be a non-negative integer."
 }
 
-cleanup() {
-    local status=$?
-
-    sync || true
-    if [[ -n "$mount_dir" ]] && mountpoint -q "$mount_dir"; then
-        umount "$mount_dir" || true
-    fi
-    [[ -z "$mount_dir" ]] || rmdir "$mount_dir" 2>/dev/null || true
-    exit "$status"
+install-rescue-live.validate_configuration() {
+	install-rescue-live.validate_integer RESERVE_MIB "$RESERVE_MIB"
+	install-rescue-live.validate_integer MIN_PERSISTENCE_MIB "$MIN_PERSISTENCE_MIB"
+	[[ $TARGET_LABEL =~ ^[A-Za-z0-9_-]{1,11}$ ]] ||
+		common.die "TARGET_LABEL must be a valid FAT label of at most 11 characters."
 }
 
-trap cleanup EXIT
-trap 'die "Failure at line $LINENO: $BASH_COMMAND"' ERR
+install-rescue-live.calculate_persistence_mib() {
+	local available_mib=$1
+	local persistence_mib=$((available_mib - RESERVE_MIB))
 
-[[ $EUID -eq 0 ]] || die "Run this script as root."
+	((persistence_mib > FAT32_MAX_FILE_MIB)) && persistence_mib=$FAT32_MAX_FILE_MIB
+	printf '%s\n' "$persistence_mib"
+}
 
-for command in blockdev findmnt lsblk mkfs.ext4 mkfs.vfat mountpoint rsync sed; do
-    command -v "$command" >/dev/null 2>&1 || die "Missing command: $command"
-done
+install-rescue-live.patch_grub_config() {
+	local grub_file=$1
 
-[[ -d "$SOURCE_DIR/casper" ]] || \
-    die "$SOURCE_DIR does not look like an Ubuntu live medium (casper/ is missing)."
-[[ -b "$TARGET_DEV" ]] || die "$TARGET_DEV is not a block device."
-[[ "$(lsblk -ndo TYPE "$TARGET_DEV")" == "part" ]] || \
-    die "$TARGET_DEV must be a partition, not a whole disk."
+	sed -E -i.bak \
+		'/^[[:space:]]*linux(efi)?[[:space:]].*\/casper\/vmlinuz/ {
+		    /(^|[[:space:]])persistent([[:space:]]|$)/! {
+		        s/[[:space:]]+---/ persistent ---/
+		        t persistent_added
+		        s/$/ persistent/
+		        :persistent_added
+		    }
+		}' "$grub_file"
+	rm -f -- "${grub_file}.bak"
+}
 
-source_dev="$(findmnt -no SOURCE --target "$SOURCE_DIR" 2>/dev/null || true)"
-[[ "$source_dev" != "$TARGET_DEV" ]] || die "Source and target are the same device."
+install-rescue-live.confirm_destruction() {
+	local confirmation
 
-target_size_mib=$(( $(blockdev --getsize64 "$TARGET_DEV") / 1024 / 1024 ))
-(( target_size_mib >= 4096 )) || die "$TARGET_DEV is too small (${target_size_mib} MiB)."
+	cat <<-EOF
 
-cat <<EOF
+		WARNING: ALL DATA ON $TARGET_DEV WILL BE DESTROYED.
 
-WARNING: ALL DATA ON $TARGET_DEV WILL BE DESTROYED.
+		Source: $SOURCE_DIR
+		Target: $TARGET_DEV ($(lsblk -ndo SIZE,MODEL "$TARGET_DEV" | xargs))
+		Mode:   UEFI Ubuntu live system with file-backed persistence
 
-Source: $SOURCE_DIR
-Target: $TARGET_DEV ($(lsblk -ndo SIZE,MODEL "$TARGET_DEV" | xargs))
-Mode:   UEFI live USB with file-backed persistence
+	EOF
+	read -r -p "Type the exact device name ($TARGET_DEV) to continue: " confirmation
+	[[ $confirmation == "$TARGET_DEV" ]] || common.die "Confirmation failed; nothing was changed."
+}
 
-EOF
+install-rescue-live.validate_source_files() {
+	local oversized_file
 
-read -r -p "Type the exact device name ($TARGET_DEV) to continue: " confirmation
-[[ "$confirmation" == "$TARGET_DEV" ]] || die "Confirmation failed; nothing was changed."
+	oversized_file="$(find "$SOURCE_DIR" -type f -size +${FAT32_MAX_FILE_MIB}M -print -quit)"
+	[[ -z $oversized_file ]] || common.die "Source file exceeds the FAT32 limit: $oversized_file"
+}
 
-if findmnt -rn -S "$TARGET_DEV" >/dev/null 2>&1; then
-    log "Unmounting $TARGET_DEV"
-    umount "$TARGET_DEV"
+install-rescue-live.run() {
+	local source_dev source_size_mib target_size_mib required_size_mib
+	local available_mib persistence_mib relative_path grub_file
+	local -a grub_files=() grub_paths=()
+
+	common.require_root
+	install-rescue-live.validate_configuration
+	common.require_commands blockdev dd df du find findmnt grep lsblk mkfs.ext4 mkfs.vfat mount mountpoint rm rsync sed sync tail tr umount xargs
+	[[ -d $SOURCE_DIR/casper ]] || common.die "$SOURCE_DIR is not an Ubuntu live medium: casper/ is missing."
+	[[ -b $TARGET_DEV ]] || common.die "$TARGET_DEV is not a block device."
+	[[ $(lsblk -ndo TYPE "$TARGET_DEV") == part ]] || common.die "$TARGET_DEV must be a partition, not a whole disk."
+	source_dev="$(findmnt -no SOURCE --target "$SOURCE_DIR" 2>/dev/null || true)"
+	source_dev="${source_dev%%\[*}"
+	[[ $source_dev != "$TARGET_DEV" ]] || common.die "Source and target are the same device."
+	target_size_mib=$(($(blockdev --getsize64 "$TARGET_DEV") / 1024 / 1024))
+	((target_size_mib >= 4096)) || common.die "$TARGET_DEV is too small (${target_size_mib} MiB)."
+	install-rescue-live.validate_source_files
+	read -r source_size_mib _ < <(du -sm "$SOURCE_DIR")
+	required_size_mib=$((source_size_mib + RESERVE_MIB + MIN_PERSISTENCE_MIB))
+	((target_size_mib >= required_size_mib)) ||
+		common.die "$TARGET_DEV is ${target_size_mib} MiB; at least ${required_size_mib} MiB are required for this live medium."
+	install-rescue-live.confirm_destruction
+
+	trap install-rescue-live.cleanup EXIT
+	trap 'common.die "Rescue installation failed at line $LINENO."' ERR
+	if findmnt -rn -S "$TARGET_DEV" >/dev/null 2>&1; then
+		common.log_info "Unmount mounted rescue target $TARGET_DEV"
+		umount "$TARGET_DEV"
+	fi
+
+	common.log_section "Rescue live-system creation"
+	common.log_info "Format $TARGET_DEV as FAT32 with label $TARGET_LABEL"
+	mkfs.vfat -F 32 -n "$TARGET_LABEL" "$TARGET_DEV"
+	rescue_mount_dir="$(mktemp -d /tmp/ubuntu-live.XXXXXX)"
+	mount "$TARGET_DEV" "$rescue_mount_dir"
+
+	common.log_info "Copy Ubuntu live medium from $SOURCE_DIR to $TARGET_DEV"
+	rsync -rltD --info=progress2 --no-links --no-owner --no-group --no-perms \
+		--exclude=/writable "$SOURCE_DIR/" "$rescue_mount_dir/"
+
+	for relative_path in boot/grub/grub.cfg boot/grub/loopback.cfg; do
+		grub_file="$rescue_mount_dir/$relative_path"
+		[[ -f $grub_file ]] || continue
+		install-rescue-live.patch_grub_config "$grub_file"
+		grub_files+=("$relative_path")
+		grub_paths+=("$grub_file")
+	done
+	((${#grub_files[@]} > 0)) || common.die "No supported GRUB configuration was found."
+	grep -Eqs '^[[:space:]]*linux(efi)?[[:space:]].*/casper/vmlinuz.*[[:space:]]persistent([[:space:]]|$)' \
+		"${grub_paths[@]}" || common.die "Could not enable persistence in the GRUB configuration."
+
+	sync
+	available_mib=$(($(df --output=avail -BM "$rescue_mount_dir" | tail -n 1 | tr -dc '0-9')))
+	persistence_mib="$(install-rescue-live.calculate_persistence_mib "$available_mib")"
+	((persistence_mib >= MIN_PERSISTENCE_MIB)) ||
+		common.die "Only ${available_mib} MiB remain; persistence requires at least ${MIN_PERSISTENCE_MIB} MiB."
+	common.log_info "Create ${persistence_mib} MiB ext4 persistence file $rescue_mount_dir/writable"
+	dd if=/dev/zero of="$rescue_mount_dir/writable" bs=1M count="$persistence_mib" status=progress conv=fsync
+	mkfs.ext4 -F -L writable "$rescue_mount_dir/writable"
+	sync
+
+	common.log_section "Rescue system summary"
+	common.log_summary_item "Status" "completed successfully"
+	common.log_summary_item "Source" "$SOURCE_DIR"
+	common.log_summary_item "Target" "$TARGET_DEV"
+	common.log_summary_item "Filesystem label" "$TARGET_LABEL"
+	common.log_summary_item "Persistence" "$persistence_mib MiB"
+	common.log_summary_item "Modified GRUB files" "${grub_files[*]}"
+	common.log_success "Persistent Ubuntu rescue system created"
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	install-rescue-live.run
 fi
-
-log "Formatting $TARGET_DEV as FAT32"
-mkfs.vfat -F 32 -n "$TARGET_LABEL" "$TARGET_DEV"
-
-mount_dir="$(mktemp -d /tmp/ubuntu-live.XXXXXX)"
-mount "$TARGET_DEV" "$mount_dir"
-
-log "Copying the Ubuntu live medium"
-rsync -rltD --info=progress2 \
-    --no-links --no-owner --no-group --no-perms \
-    --exclude=/writable \
-    "$SOURCE_DIR/" "$mount_dir/"
-
-grub_files=()
-grub_paths=()
-for relative_path in boot/grub/grub.cfg boot/grub/loopback.cfg; do
-    grub_file="$mount_dir/$relative_path"
-    [[ -f "$grub_file" ]] || continue
-
-    # Ubuntu releases do not always include an explicit boot=casper option.
-    # A kernel loaded from /casper/ is an unambiguous live-system entry.
-    sed -Ei \
-        '/^[[:space:]]*linux(efi)?[[:space:]].*\/casper\/vmlinuz/ {
-            /(^|[[:space:]])persistent([[:space:]]|$)/! {
-                s/[[:space:]]+---/ persistent ---/
-                t persistent_added
-                s/$/ persistent/
-                :persistent_added
-            }
-        }' "$grub_file"
-
-    grub_files+=("$relative_path")
-    grub_paths+=("$grub_file")
-done
-
-(( ${#grub_files[@]} > 0 )) || die "No supported GRUB configuration was found."
-
-if ! grep -Eqs \
-    '^[[:space:]]*linux(efi)?[[:space:]].*/casper/vmlinuz.*[[:space:]]persistent([[:space:]]|$)' \
-    "${grub_paths[@]}"; then
-    die "Could not add the persistent kernel option to GRUB."
-fi
-
-sync
-available_mib=$(( $(df --output=avail -BM "$mount_dir" | tail -n1 | tr -dc '0-9') ))
-persistence_mib=$(( available_mib - RESERVE_MIB ))
-(( persistence_mib > FAT32_MAX_FILE_MIB )) && persistence_mib=$FAT32_MAX_FILE_MIB
-
-(( persistence_mib >= MIN_PERSISTENCE_MIB )) || \
-    die "Only ${available_mib} MiB remain: not enough for useful persistence."
-
-log "Creating a ${persistence_mib} MiB persistence file"
-dd if=/dev/zero of="$mount_dir/writable" bs=1M count="$persistence_mib" \
-    status=progress conv=fsync
-mkfs.ext4 -F -L writable "$mount_dir/writable"
-
-sync
-
-log "Completed"
-printf 'Target:      %s\n' "$TARGET_DEV"
-printf 'Persistence: %s MiB\n' "$persistence_mib"
-printf 'GRUB files:  %s\n' "${grub_files[*]}"
-printf '\nBoot the USB in UEFI mode and select Try or Install Ubuntu.\n'

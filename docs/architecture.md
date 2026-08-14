@@ -74,6 +74,8 @@ Conceptually:
 
 	physical disk
 	    |
+	    +-- FAT32 persistent rescue live system
+	    |
 	    +-- EFI System Partition
 	    |
 	    +-- LUKS container
@@ -87,6 +89,30 @@ Conceptually:
 The EFI System Partition is intentionally outside the LUKS container because
 UEFI firmware and rEFInd must be able to read EFI executables before the
 encrypted volume is unlocked.
+
+The configured rescue partition is also outside LUKS. It contains a copy of
+the Ubuntu live medium and an ext4 filesystem stored in the FAT32 file
+`writable`. This persistence is intentionally portable but unencrypted; it is
+for recovery tools and live-session state, not installed-system secrets.
+
+### 3.2 Rescue system
+
+The rescue artifact is created directly from `/cdrom` in the live installer:
+
+```text
+Ubuntu live medium (/cdrom)
+        |
+        +-- validate casper/ and FAT32 file-size compatibility
+        +-- exact confirmation of /dev/<rescue_dev>
+        +-- format target FAT32 as UBUNTU_LIVE
+        +-- copy live-medium contents
+        +-- add persistent to Casper GRUB entries
+        `-- create ext4 writable file from remaining space
+```
+
+The target must be a partition of at least 4096 MiB. The installer reserves
+256 MiB after copying the live medium, requires at least 512 MiB for useful
+persistence and caps `writable` at 4095 MiB because it resides on FAT32.
 
 ## 4. Btrfs layout
 The Btrfs filesystem contains the operating-system root and additional
@@ -462,6 +488,46 @@ enrollment.
 The selected PCR policy is part of the security architecture and must be
 treated as a compatibility-sensitive configuration.
 
+The installed authority is `/etc/tpm.conf`. It identifies the physical LUKS2
+device, TPM device, PIN mode, literal PCR policy, signed PCR policy, UKI PCR
+public key and LUKS-header backup directory.
+
+The installed commands `tpm-enroll`, `tpm-reseal` and `tpm-status` are
+self-contained runtime tools. Together with the self-contained `generate-uki`
+command, they continue to work after the installation repository is removed;
+none sources `lib/common.sh` or requires a copied framework library.
+
+The current policy combines literal PCRs
+`7+14+15:sha256=<all-zero-digest>` with signed PCR 11. PCR 11 is authorized by
+the public key used by ukify's PCR signatures. PCR 7, 14 and the explicit PCR
+15 digest remain literal compatibility constraints; changing any component
+requires new TPM2 enrollment and may affect dual boot.
+
+Installation and enrollment are separate:
+
+```text
+install-tpm
+    -> install tools/configuration/dracut support
+    -> prepare the UKI cmdline for PIN and PIN-less TPM2 tokens
+    -> no LUKS token changes
+
+tpm-enroll
+    -> validate physical LUKS2 device and PCR public key
+    -> create mode-0600 LUKS-header backup
+    -> add systemd TPM2 token while preserving existing tokens
+
+tpm-reseal --wipe-all-tpm2
+    -> explicit removal of all systemd TPM2 tokens
+    -> create one new TPM2 enrollment
+    -> preserve password and recovery-key slots
+```
+
+The runtime command line enables automatic TPM discovery and PCR measurement.
+`tpm2-pin=yes` remains present for both PIN and PIN-less tokens. The token's
+`TPM_USE_PIN` enrollment property determines whether a PIN is actually
+required. Keeping the boot option stable allows a later PIN-enabled enrollment
+without changing `/etc/kernel/cmdline` and regenerating every UKI first.
+
 ## 10. dracut architecture
 The initramfs is generated using dracut.
 A custom module provides snapshot-selection functionality.
@@ -596,10 +662,16 @@ The normal root subvolume remains unchanged.
 
 ## 14. Installation architecture
 
-`setup.sh` runs the storage phase once from the live environment, before the
-target chroot is prepared:
+`setup.sh` first creates the configured rescue system and then runs the storage
+phase once from the live environment, before the target chroot is prepared:
 
     setup.sh preflight
+           |
+           v
+    rescue/script/install-rescue-live
+           |
+           +-- confirm and format /dev/<rescue_dev>
+           +-- copy /cdrom and create persistent writable storage
            |
            v
     btrfs-root/scripts/btrfs-root-setup

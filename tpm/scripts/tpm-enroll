@@ -1,80 +1,115 @@
 #!/usr/bin/env bash
+
 set -Eeuo pipefail
 umask 077
 
-source /etc/tpm.conf
+TPM_CONFIG="${TPM_CONFIG:-/etc/tpm.conf}"
 
-log() {
-    printf '[tpm] %s\n' "$*"
+tpm-enroll.log_info() {
+	printf 'INFO: %s\n' "$*"
 }
 
-die() {
-    printf '[tpm] ERROR: %s\n' "$*" >&2
-    exit 1
+tpm-enroll.log_warn() {
+	printf 'WARN: %s\n' "$*" >&2
 }
 
-for command in systemd-cryptenroll cryptsetup date grep install; do
-    command -v "$command" >/dev/null 2>&1 ||
-        die "Required command not found: $command"
-done
+tpm-enroll.die() {
+	printf 'ERROR: %s\n' "$*" >&2
+	exit 1
+}
 
-[[ -b "$LUKS_DEVICE" ]] ||
-    die "LUKS_DEVICE is not a block device: $LUKS_DEVICE"
+tpm-enroll.require_root() {
+	((EUID == 0)) || tpm-enroll.die "Must be run as root."
+}
 
-[[ -r "$PCR_PUBLIC_KEY" ]] ||
-    die "PCR public key is not readable: $PCR_PUBLIC_KEY"
+tpm-enroll.require_file() {
+	local path=$1 description=$2
+	[[ -r $path ]] || tpm-enroll.die "$description not found or not readable: $path"
+}
 
-cryptsetup isLuks "$LUKS_DEVICE" ||
-    die "The configured device does not contain a valid LUKS volume"
+tpm-enroll.require_nonempty() {
+	local name=$1 value=${2:-}
+	[[ -n $value ]] || tpm-enroll.die "$name must be configured."
+}
 
-install -d -m 0700 "$LUKS_HEADER_BACKUP_DIR"
+tpm-enroll.require_commands() {
+	local command_name
+	for command_name in "$@"; do
+		command -v "$command_name" >/dev/null 2>&1 || tpm-enroll.die "Required command not found: $command_name"
+	done
+}
 
-backup_file="$(
-    printf '%s/%s-%s.img' \
-        "$LUKS_HEADER_BACKUP_DIR" \
-        "$(basename "$LUKS_DEVICE")" \
-        "$(date +%Y%m%d-%H%M%S)"
-)"
+tpm-enroll.validate_configuration() {
+	tpm-enroll.require_file "$TPM_CONFIG" "TPM configuration"
+	# shellcheck source=/dev/null
+	source "$TPM_CONFIG"
+	tpm-enroll.require_nonempty LUKS_DEVICE "${LUKS_DEVICE:-}"
+	tpm-enroll.require_nonempty TPM_DEVICE "${TPM_DEVICE:-}"
+	tpm-enroll.require_nonempty TPM_LITERAL_PCRS "${TPM_LITERAL_PCRS:-}"
+	tpm-enroll.require_nonempty TPM_SIGNED_PCRS "${TPM_SIGNED_PCRS:-}"
+	tpm-enroll.require_nonempty PCR_PUBLIC_KEY "${PCR_PUBLIC_KEY:-}"
+	tpm-enroll.require_nonempty LUKS_HEADER_BACKUP_DIR "${LUKS_HEADER_BACKUP_DIR:-}"
+	case $TPM_USE_PIN in true | false) ;; *) tpm-enroll.die "TPM_USE_PIN must be true or false." ;; esac
+}
 
-log "Backing up the LUKS header to ${backup_file}"
+tpm-enroll.build_arguments() {
+	local wipe_existing=$1
+	local -a arguments=(
+		"$LUKS_DEVICE"
+		"--tpm2-device=$TPM_DEVICE"
+		"--tpm2-pcrs=$TPM_LITERAL_PCRS"
+		"--tpm2-public-key=$PCR_PUBLIC_KEY"
+		"--tpm2-public-key-pcrs=$TPM_SIGNED_PCRS"
+		"--tpm2-with-pin=$TPM_USE_PIN"
+	)
+	case $wipe_existing in
+	yes) arguments+=("--wipe-slot=tpm2") ;;
+	no) ;;
+	*) tpm-enroll.die "wipe_existing must be either yes or no." ;;
+	esac
+	printf '%s\n' "${arguments[@]}"
+}
 
-cryptsetup luksHeaderBackup \
-    "$LUKS_DEVICE" \
-    --header-backup-file "$backup_file"
+tpm-enroll.create_header_backup() {
+	local backup_directory backup_file
+	install -d -m 0700 "$LUKS_HEADER_BACKUP_DIR"
+	backup_directory="$(mktemp -d "$LUKS_HEADER_BACKUP_DIR/$(basename "$LUKS_DEVICE")-$(date +%Y%m%d-%H%M%S).XXXXXX")"
+	backup_file="$backup_directory/header.img"
+	tpm-enroll.log_info "Back up the LUKS header to $backup_file"
+	cryptsetup luksHeaderBackup "$LUKS_DEVICE" --header-backup-file "$backup_file"
+	chmod 0600 "$backup_file"
+}
 
-chmod 0600 "$backup_file"
+tpm-enroll.run() {
+	local wipe_existing=""
+	local -a enroll_arguments=()
+	tpm-enroll.require_root
+	tpm-enroll.require_commands basename cryptsetup date grep install mktemp systemd-cryptenroll
+	tpm-enroll.validate_configuration
 
-enroll_arguments=(
-    "$LUKS_DEVICE"
-    "--tpm2-device=${TPM_DEVICE}"
-    "--tpm2-pcrs=${TPM_LITERAL_PCRS}"
-    "--tpm2-public-key=${PCR_PUBLIC_KEY}"
-    "--tpm2-public-key-pcrs=${TPM_SIGNED_PCRS}"
-    "--tpm2-with-pin=${TPM_USE_PIN}"
-)
+	case ${1:-} in
+	'') wipe_existing=no ;;
+	--wipe-existing-tpm2) wipe_existing=yes ;;
+	*) tpm-enroll.die "Usage: tpm-enroll [--wipe-existing-tpm2]" ;;
+	esac
+	[[ -b $LUKS_DEVICE ]] || tpm-enroll.die "LUKS_DEVICE is not a block device: $LUKS_DEVICE"
+	tpm-enroll.require_file "$PCR_PUBLIC_KEY" "PCR public key"
+	cryptsetup isLuks "$LUKS_DEVICE" || tpm-enroll.die "Configured device is not a valid LUKS volume."
 
-case "$TPM_WIPE_EXISTING" in
-    yes)
-        log "WARNING: removing all existing TPM2 enrollments first"
-        enroll_arguments+=("--wipe-slot=tpm2")
-        ;;
+	printf '\n==> TPM2 LUKS enrollment\n'
+	tpm-enroll.create_header_backup
+	mapfile -t enroll_arguments < <(tpm-enroll.build_arguments "$wipe_existing")
+	if [[ $wipe_existing == yes ]]; then
+		tpm-enroll.log_warn "Explicitly removing every existing systemd TPM2 token before enrollment."
+	else
+		tpm-enroll.log_info "Preserve all existing password, recovery and TPM2 enrollments."
+	fi
+	tpm-enroll.log_info "Enroll literal PCR policy $TPM_LITERAL_PCRS and signed PCR policy $TPM_SIGNED_PCRS"
+	systemd-cryptenroll "${enroll_arguments[@]}"
+	cryptsetup luksDump "$LUKS_DEVICE" | grep -qi systemd-tpm2 || tpm-enroll.die "No systemd-tpm2 token found after enrollment."
+	printf 'SUCCESS: TPM enrollment completed and verified\n'
+}
 
-    no)
-        log "Preserving existing TPM2 enrollments"
-        ;;
-
-    *)
-        die "TPM_WIPE_EXISTING must be either 'yes' or 'no'"
-        ;;
-esac
-
-log "Enrolling literal PCRs ${TPM_LITERAL_PCRS} and signed PCRs ${TPM_SIGNED_PCRS}"
-
-systemd-cryptenroll "${enroll_arguments[@]}"
-
-cryptsetup luksDump "$LUKS_DEVICE" |
-    grep -i 'systemd-tpm2' >/dev/null ||
-    echo "No systemd-tpm2 token was found after enrollment"
-
-log "TPM enrollment completed"
-log "Password, recovery-key, and pre-existing TPM2 slots were preserved unless TPM_WIPE_EXISTING=yes"
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	tpm-enroll.run "$@"
+fi

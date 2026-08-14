@@ -554,6 +554,23 @@ Tests must include both:
 Repository validation must not mount or modify real Btrfs subvolumes merely
 to execute unit tests.
 
+## 14.1 Rescue-system tests
+
+Test the pure rescue transformations without a real partition:
+
+- persistence size after the configured reserve;
+- the 4095 MiB FAT32 file cap;
+- rejection below the minimum useful persistence size;
+- idempotent insertion of `persistent` on Casper kernel lines;
+- preservation of unrelated GRUB menu entries;
+- target-label, integer and configured-device validation;
+- setup ordering before destructive root-storage preparation;
+- cleanup behavior through mocked mount commands.
+
+Artifact tests may use temporary directories containing representative live
+media and GRUB fixtures. They must not run `mkfs.vfat`, `mkfs.ext4`, `dd`,
+`mount` or `umount` against real devices.
+
 ---
 
 ## 15. LUKS tests
@@ -600,6 +617,22 @@ Unit tests should cover:
 - expected enrollment arguments;
 - interpretation of TPM command output;
 - detection of TPM availability.
+- `TPM_USE_PIN` controlling `--tpm2-with-pin` while `tpm2-pin=yes` remains
+  unconditionally present in the generated kernel command line;
+- preservation of existing tokens in the default argument list;
+- inclusion of `--wipe-slot=tpm2` only for explicit reseal;
+- authoritative `/etc/tpm.conf` path across all installed commands;
+- unique LUKS-header backup paths and restrictive backup permissions;
+- literal-PCR and signed-PCR argument separation;
+- failure when post-enrollment output contains no systemd TPM2 token.
+
+Argument builders should be sourced with fixture configuration and compared as
+argv arrays. Kernel-command-line normalization should replace an earlier TPM
+option rather than accumulating contradictory `rd.luks.options` tokens.
+
+Static tests must reject references to the repository or `common.sh` from
+`generate-uki`, `tpm-enroll`, `tpm-reseal` and `tpm-status`. Their unit tests
+must source the commands directly with only fixture configuration overrides.
 
 Normal validation must not:
 

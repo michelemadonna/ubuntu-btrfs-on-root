@@ -37,12 +37,26 @@ following persistent state exactly once:
 - target `/etc/crypttab` using the post-encryption LUKS UUID;
 - target `/etc/fstab` using `/dev/mapper/root` and the configured subvolumes;
 - a swapfile inside the configured `@swap` subvolume.
+- an independent persistent Ubuntu live rescue system on the configured
+  FAT32 rescue partition.
 
 The package and boot-artifact phases then run inside the target chroot. They
 must not repeat the destructive storage phase. At runtime, dracut consumes
 the resulting LUKS mapping and Btrfs root configuration described below.
 
-### 2.2 Runtime sequence
+### 2.2 Rescue boot path
+
+The rescue partition is an independent UEFI live-medium path. Firmware boots
+the copied Ubuntu live loader and GRUB configuration rather than the installed
+rEFInd/UKI chain. Casper sees the idempotently added `persistent` option and
+uses the ext4 filesystem stored in the FAT32 `writable` file.
+
+The rescue environment remains usable when the installed LUKS root, UKIs or
+rEFInd configuration cannot boot. Its persistence is not LUKS-encrypted, so
+unlocking or repairing the installed root still requires normal recovery
+credentials and no secrets should be stored persistently in the rescue system.
+
+### 2.3 Installed-system runtime sequence
 
 The complete boot process is:
 
@@ -332,6 +346,16 @@ Conceptually:
 
 A TPM policy mismatch must not silently bypass LUKS security.
 Fallback behavior is determined by the configured LUKS/systemd policy.
+
+The enrolled token evaluates literal PCR 7/14/15 constraints together with a
+signed PCR 11 policy authorized by the UKI PCR public key. The kernel command
+line requests `tpm2-device=<configured-device>`, PCR measurement and PIN
+support. `tpm2-pin=yes` is intentionally always embedded, but a PIN is needed
+only when the selected token was enrolled with `TPM_USE_PIN=true`.
+
+Failure to satisfy this policy falls back to normal LUKS authentication; it
+does not authorize an unencrypted root. Password and recovery access are kept
+when adding or deliberately replacing TPM2 tokens.
 
 ## 11. Btrfs becomes available
 After successful LUKS unlocking:

@@ -1,87 +1,100 @@
 #!/usr/bin/env bash
+# Configuration variables are inherited from install-uki/setup.conf.
+# TPM policy variables are loaded dynamically from the installed configuration.
+# shellcheck disable=SC2153,SC2154
+
 set -Eeuo pipefail
+umask 077
 
-[[ $EUID -eq 0 ]] || {
-    echo "Run install-tpm as root." >&2
-    exit 1
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
+
+INSTALL_TPM_CONFIG=/etc/tpm.conf
+INSTALL_TPM_CMDLINE=/etc/kernel/cmdline
+
+install-tpm.validate_configuration() {
+	common.require_nonempty root_dev "${root_dev:-}"
+	[[ $root_dev != */* && $root_dev != *..* ]] || common.die "root_dev must be relative to /dev."
 }
 
-apt-get install -y \
-    systemd-cryptsetup \
-    cryptsetup-bin \
-    tpm2-tools \
-    tpm2-tss \
-    libtss2-esys-3.0.2-0t64 \
-    libtss2-mu-4.0.1-0t64 \
-    libtss2-rc0t64 \
-    libtss2-tcti-tabrmd0
+install-tpm.build_kernel_option() {
+	local tpm_device=$1
 
-luks_device=/dev/$root_dev
-
-#read -r -p "Physical LUKS2 device [/dev/nvme0n1p3]: " luks_device
-#luks_device="${luks_device:-/dev/nvme0n1p3}"
-
-[[ -b "$luks_device" ]] || {
-    echo "Invalid block device: $luks_device" >&2
-    exit 1
+	printf '%s\n' \
+		"rd.luks.options=tpm2-device=${tpm_device},tpm2-measure-pcr=yes,tpm2-pin=yes"
 }
 
-cryptsetup isLuks "$luks_device" || {
-    echo "The device does not contain a valid LUKS volume." >&2
-    exit 1
+install-tpm.merge_kernel_option() {
+	local cmdline=$1 option=$2 token
+	local -a tokens=()
+
+	for token in $cmdline; do
+		[[ $token == rd.luks.options=tpm2-device=* ]] || tokens+=("$token")
+	done
+	tokens+=("$option")
+	printf '%s\n' "${tokens[*]}"
 }
 
-[[ -r /etc/uki/keys/pcr-public.pem ]] || {
-    echo "Install the UKI component first. The PCR public key is missing." >&2
-    exit 1
+install-tpm.install_runtime() {
+	common.log_info "Install TPM configuration at $INSTALL_TPM_CONFIG"
+	install -d -m 0755 /etc/uki /usr/local/sbin
+	install -m 0644 "$repository_root/tpm/config/tpm.conf" "$INSTALL_TPM_CONFIG"
+	sed -i "s|^LUKS_DEVICE=.*|LUKS_DEVICE=\"/dev/${root_dev}\"|" "$INSTALL_TPM_CONFIG"
+	install -m 0755 "$repository_root/tpm/scripts/tpm-enroll" /usr/local/sbin/tpm-enroll
+	install -m 0755 "$repository_root/tpm/scripts/tpm-reseal" /usr/local/sbin/tpm-reseal
+	install -m 0755 "$repository_root/tpm/scripts/tpm-status" /usr/local/sbin/tpm-status
 }
 
-install -d -m 0755 /etc/uki
-install -d -m 0755 /usr/local/sbin
+install-tpm.write_boot_configuration() {
+	local option cmdline
+	# shellcheck source=/dev/null
+	source "$INSTALL_TPM_CONFIG"
+	option="$(install-tpm.build_kernel_option "$TPM_DEVICE")"
+	cmdline="$(<"$INSTALL_TPM_CMDLINE")"
+	install-tpm.merge_kernel_option "$cmdline" "$option" >"$INSTALL_TPM_CMDLINE"
+	chmod 0644 "$INSTALL_TPM_CMDLINE"
+	common.log_info "Configured initramfs TPM2 support and kernel option: $option"
+	cat >/etc/dracut.conf.d/99_tpm2.conf <<-'EOF'
+		add_dracutmodules+=" tpm2-tss crypt "
+	EOF
+}
 
-install \
-    -m 0644 \
-    "$repository_root/tpm/config/tpm.conf" \
-    /etc/tpm.conf
+install-tpm.print_summary() {
+	common.log_section "TPM integration summary"
+	common.log_summary_item "Status" "installed; enrollment not executed"
+	common.log_summary_item "LUKS device" "/dev/$root_dev"
+	common.log_summary_item "Configuration" "$INSTALL_TPM_CONFIG"
+	common.log_summary_item "PCR public key" "/etc/uki/keys/pcr-public.pem"
+	common.log_summary_item "Enrollment" "/usr/local/sbin/tpm-enroll"
+	common.log_summary_item "Destructive reseal" "tpm-reseal --wipe-all-tpm2"
+	common.log_warn "Verify a normal LUKS passphrase before TPM enrollment."
+	common.log_success "TPM integration installed without changing LUKS tokens"
+}
 
-sed -i \
-    "s|^LUKS_DEVICE=.*|LUKS_DEVICE=\"${luks_device}\"|" \
-    /etc/uki/tpm.conf
+install-tpm.run() {
+	local luks_device
+	common.require_root
+	install-tpm.validate_configuration
+	common.require_commands apt-get cryptsetup grep install sed
 
-install \
-    -m 0755 \
-    "$repository_root/tpm/scripts/tpm-enroll" \
-    /usr/local/sbin/tpm-enroll
+	common.log_section "TPM2 LUKS integration"
+	common.log_info "Install systemd cryptenroll and TPM2 runtime dependencies"
+	apt-get install -y systemd-cryptsetup cryptsetup-bin tpm2-tools tpm2-tss \
+		libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64 libtss2-tcti-tabrmd0
 
-install \
-    -m 0755 \
-    "$repository_root/tpm/scripts/tpm-reseal" \
-    /usr/local/sbin/tpm-reseal
+	luks_device="/dev/$root_dev"
+	[[ -b $luks_device ]] || common.die "Invalid block device: $luks_device"
+	cryptsetup isLuks "$luks_device" || common.die "Device is not a valid LUKS volume: $luks_device"
+	common.require_readable_file /etc/uki/keys/pcr-public.pem "UKI PCR public key"
+	common.require_readable_file "$INSTALL_TPM_CMDLINE" "UKI kernel command line"
 
-install \
-    -m 0755 \
-    "$repository_root/tpm/scripts/tpm-status" \
-    /usr/local/sbin/tpm-status
+	install-tpm.install_runtime
+	install-tpm.write_boot_configuration
+	install-tpm.print_summary
+}
 
-echo 'add_dracutmodules+=" tpm2-tss crypt "' > /etc/dracut.conf.d/99_tpm2.conf
-if grep -qE 'rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes,tpm2-pin=yes' /etc/kernel/cmdline; then
-    echo "The kernel command line already contains the TPM2 options."
-else
-    echo "Appending TPM2 options to the kernel command line."
-    echo "rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes,tpm2-pin=yes" >> /etc/kernel/cmdline
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	install-tpm.run
 fi
-
-echo
-echo "TPM support installed."
-echo
-echo "Verify a normal LUKS passphrase before enrollment:"
-echo "  cryptsetup open --test-passphrase ${luks_device}"
-echo
-echo "Then run:"
-echo "  /usr/local/sbin/tpm-enroll"
-echo
-echo "Dual-boot note:"
-echo "  tpm-enroll preserves existing TPM2 tokens by default."
-echo "  Keep TPM_LITERAL_PCRS=\"7\" unless PCR 14 was verified equal on both systems."
-
-

@@ -1,40 +1,42 @@
 #!/usr/bin/env bash
+
 set -Eeuo pipefail
 
-source /etc/tpm.conf
-
-if [[ "${1:-}" != "--wipe-all-tpm2" ]]; then
-    cat >&2 <<'EOF'
-Refusing to remove existing TPM2 enrollments.
-
-In a dual-boot configuration, use tpm-enroll to add a new token without
-removing the Ubuntu or Kali token.
-
-To intentionally remove every existing TPM2 enrollment and create one new
-enrollment, run:
-
-    tpm-reseal --wipe-all-tpm2
-EOF
-    exit 2
-fi
-
-temporary_config="$(mktemp)"
-trap 'rm -f "$temporary_config"' EXIT
-
-cp /etc/uki/tpm.conf "$temporary_config"
-
-sed -i \
-    's/^TPM_WIPE_EXISTING=.*/TPM_WIPE_EXISTING="yes"/' \
-    /etc/uki/tpm.conf
-
-restore_config() {
-    cp "$temporary_config" /etc/uki/tpm.conf
+tpm-reseal.die() {
+	printf 'ERROR: %s\n' "$*" >&2
+	exit 1
 }
 
-trap 'restore_config; rm -f "$temporary_config"' EXIT
+tpm-reseal.require_root() {
+	((EUID == 0)) || tpm-reseal.die "Must be run as root."
+}
 
-/usr/local/sbin/tpm-enroll
+tpm-reseal.run() {
+	tpm-reseal.require_root
+	[[ ${1:-} == --wipe-all-tpm2 ]] || {
+		cat >&2 <<-'EOF'
+			Refusing to remove existing TPM2 enrollments.
 
-restore_config
-trap - EXIT
-rm -f "$temporary_config"
+			This operation removes every systemd TPM2 token, including tokens
+			created by another installed operating system. It does not remove
+			password or recovery-key slots.
+
+			To continue intentionally, run:
+
+			    tpm-reseal --wipe-all-tpm2
+		EOF
+		return 2
+	}
+	(($# == 1)) || tpm-reseal.die "Usage: tpm-reseal --wipe-all-tpm2"
+	command -v tpm-enroll >/dev/null 2>&1 || tpm-reseal.die "Required command not found: tpm-enroll"
+	printf 'WARN: Destructive TPM2 token replacement explicitly requested.\n' >&2
+	tpm-reseal.enroll
+}
+
+tpm-reseal.enroll() {
+	tpm-enroll --wipe-existing-tpm2
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	tpm-reseal.run "$@"
+fi
