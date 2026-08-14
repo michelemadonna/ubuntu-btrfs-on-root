@@ -80,6 +80,8 @@ chmod 0644 /etc/kernel/entry-token
 cat > /etc/kernel/uki.conf << 'EOF'
     [UKI]
     PCRBanks=sha256
+    OSRelease=@/etc/os-release
+    Cmdline=@/etc/kernel/cmdline
 
     SecureBootSigningTool=sbsign
     SecureBootPrivateKey=/var/lib/sbctl/keys/db/db.key
@@ -91,6 +93,11 @@ cat > /etc/kernel/uki.conf << 'EOF'
     PCRPrivateKey=/etc/uki/keys/pcr-private.pem
     PCRPublicKey=/etc/uki/keys/pcr-public.pem
     Phases=enter-initrd
+
+    [PCRSignature:system]
+    Phases=enter-initrd:leave-initrd enter-initrd:leave-initrd:sysinit enter-initrd:leave-initrd:sysinit:ready
+    PCRPrivateKey=/etc/uki/keys/pcr-private.pem
+    PCRPublicKey=/etc/uki/keys/pcr-public.pem
 EOF
 chmod 600 /etc/kernel/uki.conf
 ln -sf \
@@ -116,7 +123,7 @@ fi
 chmod 0600 /etc/uki/keys/pcr-private.pem
 chmod 0644 /etc/uki/keys/pcr-public.pem
 
-echo "root=UUID=${btrfs_uuid} rootfstype=btrfs rootflags=${btrfs_options},subvol=${root_subvolume} rd.luks.uuid=luks-${luks_uuid} quiet splash" > /etc/kernel/cmdline
+echo "root=UUID=${btrfs_uuid} rootfstype=btrfs rootflags=${btrfs_options},subvol=${root_subvolume} rd.luks.uuid=luks-${luks_uuid} rd.shell=0 rd.emergency=halt quiet splash" > /etc/kernel/cmdline
 chmod 0644 /etc/kernel/cmdline
 
 if [[ $enable_tpm == "yes" ]]; then
