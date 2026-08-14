@@ -64,8 +64,8 @@ sudo apt install -y  git micro
 git clone https://github.com/michelemadonna/ubuntu-btrfs-on-root.git ~/ubuntu-btrfs-on-root
 cd ~/ubuntu-btrfs-on-root
 git checkout one-subvol-per-distro
-chmod a+x ubuntu-btrfs-root
-sudo ./ubuntu-btrfs-root
+chmod a+x setup.sh
+sudo ./setup.sh
 ```
 ## UKI installation
 

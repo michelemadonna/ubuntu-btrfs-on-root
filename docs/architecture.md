@@ -527,7 +527,7 @@ The installer is divided logically into phases.
 
 Example:
 
-    preflight (inside ./ubuntu-btrfs-root file executed from live environment)
+    preflight (inside ./setup.sh executed from live environment)
        |
        v
 	subvolume creation  (inside ./btrfs-root-setup/scripts/btrfs-subvol-setup script)
@@ -566,6 +566,12 @@ The common framework is responsible for cross-cutting behavior such as:
 - user input
 - configuration
 - dry-run behavior	
+
+The initial framework module is `lib/common.sh`. It provides logging, fatal
+error handling, privilege checks, and reusable configuration preconditions.
+It deliberately does not change shell options, so sourcing it cannot alter a
+caller's error-handling semantics.
+
 Domain-specific logic should not be placed in the generic logging or command
 execution layers.
 Example dependency direction:

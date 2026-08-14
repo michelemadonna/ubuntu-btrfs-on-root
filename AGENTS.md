@@ -106,6 +106,9 @@ New or modified scripts must:
 - use `local` for function-local variables
 - use meaningful function and variable names
 - keep functions focused on one responsibility
+- indent `cat` heredoc bodies and terminators with the surrounding code;
+  use `<<-` with tab indentation so the generated content does not contain
+  the source indentation
 
 Do not silence ShellCheck warnings without documenting why.
 
