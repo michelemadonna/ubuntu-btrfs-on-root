@@ -7,11 +7,6 @@ umask 077
     exit 1
 }
 
-repository_root="$(
-    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
-        pwd
-)"
-
 source $repository_root/setup.conf
 
 apt-get install -y \

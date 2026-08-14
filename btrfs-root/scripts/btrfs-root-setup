@@ -7,13 +7,8 @@ umask 077
     exit 1
 }
 
-repository_root="$(
-    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
-        pwd
-)"
-
 source $repository_root/setup.conf
 
-. ./btrfs-subvol-setup
-. ./luks-setup
-. ./fstab-setup
+. "$repository_root/btrfs-root/scripts/btrfs-subvol-setup"
+. "$repository_root/btrfs-root/scripts/luks-setup"
+. "$repository_root/btrfs-root/scripts/fstab-setup"

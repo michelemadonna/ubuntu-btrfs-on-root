@@ -6,11 +6,6 @@ set -Eeuo pipefail
     exit 1
 }
 
-repository_root="$(
-    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
-        pwd
-)"
-
 apt-get install -y \
     systemd-cryptsetup \
     cryptsetup-bin \

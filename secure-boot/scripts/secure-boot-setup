@@ -5,10 +5,6 @@ set -Eeuo pipefail
 script="${BASH_SOURCE[0]}"
 scriptname="$(basename "$script")"
 
-repository_root="$(
-    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
-        pwd
-)"
 
 source $repository_root/setup.conf
 

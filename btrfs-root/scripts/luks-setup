@@ -7,11 +7,6 @@ umask 077
     exit 1
 }
 
-repository_root="$(
-    cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
-        pwd
-)"
-
 source $repository_root/setup.conf
 
 echo -e "\e[32mINFO:\e[0mEncrypt $root_dev..."

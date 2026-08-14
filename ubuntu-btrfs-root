@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
+
 set -e
+
 
 # https://github.com/paadza/Ubuntu-encrypted-btrfs-with-and-home-subvolumes-swap-and-Timeshift
 # https://gist.github.com/TheHarold/27d87e9e027718a0f60db7ff04c4d104
@@ -22,10 +24,12 @@ scriptname="$(basename "$script")"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 script_dir_name="$(basename "$script_dir")"
 
-root_uuid="$(blkid --output export /dev/"$root_dev" | grep ^UUID=)"
+
 
 # shellcheck source=./setup.conf
 . "$script_dir/setup.conf"
+
+root_uuid="$(blkid --output export /dev/"$root_dev" | grep ^UUID=)"
 
 preparation() {
 	echo -e "\e[32mINFO:\e[0mPrepare"
@@ -323,7 +327,7 @@ fi
 # ------------------------------
 
 preparation
-. /btrfs-root/scripts/btrfs-root-setup
+. ./btrfs-root/scripts/btrfs-root-setup
 prepare_chroot
 chroot_and_mkinitramfs
 unmount_everything
