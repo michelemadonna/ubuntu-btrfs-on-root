@@ -180,7 +180,7 @@ Detailed installation and runtime flows are documented in
 The encrypted Btrfs filesystem uses:
 
 ```text
-@ubuntu/
+@$suite/
 ├── @           /
 ├── @home       /home
 ├── @cache      /var/cache
@@ -228,7 +228,7 @@ and are not offered as bootable roots.
 
 The generated crypttab identifies the LUKS container by UUID and enables
 discard. The root kernel command line identifies the same LUKS UUID and mounts
-`@ubuntu/@` using the configured Btrfs options.
+`@$suite/@` using the configured Btrfs options.
 
 ## Secure Boot modes
 
@@ -347,14 +347,49 @@ PINless. It allows a PIN to be enabled later without regenerating every UKI.
 
 ## UKI maintenance
 
-Kernel package hooks use systemd `kernel-install`, dracut and ukify. Generated
-UKIs are stored below `/boot/efi/EFI/Linux`. rEFInd makes the newest valid
-kernel the primary entry and exposes older valid kernels in a submenu.
+Installing a kernel package invokes the Debian post-install bridge at
+`/etc/kernel/postinst.d/zz-kernel-install`. Its repository source is
+`uki/hooks/kernel/postinst.d/debian-kernel-install-bridge`; setup installs that
+script as `/usr/local/libexec/debian-kernel-install-bridge` and creates two
+symlinks to it, one under `/etc/kernel/postinst.d/` and one under
+`/etc/kernel/postrm.d/`.
+
+The bridge is the compatibility adapter between Ubuntu/Debian kernel package
+hooks and systemd's UKI-oriented `kernel-install` lifecycle. It determines
+whether it was invoked through `postinst.d` or `postrm.d` from its invocation
+path. On installation it receives the kernel version and image path from the
+package, verifies that the image exists and replaces itself with:
+
+```text
+kernel-install add <kernel-version> /boot/vmlinuz-<kernel-version>
+```
+
+It does not build or sign an EFI file itself. Its role is to ensure every normal
+APT/dpkg kernel installation enters the configured `kernel-install` pipeline,
+which builds a dracut initramfs, lets ukify assemble the kernel, initramfs,
+command line and boot metadata into one UKI, adds the configured PCR signature,
+and signs the resulting PE/COFF executable with the Secure Boot db key. The
+signed file is written as
+`/boot/efi/EFI/Linux/<entry-token>-<kernel-version>.efi`.
+
+Removing a kernel invokes the corresponding post-removal bridge, which calls
+`kernel-install remove <kernel-version>`. This translates the dpkg removal event
+into the same systemd lifecycle. The UKI for that version is removed and the rEFInd
+configuration is regenerated. Both add and remove events rebuild the generated
+configuration atomically, so rEFInd never reads a partially written menu.
+
+The rEFInd hook discovers all remaining UKIs for the selected suite and sorts
+their kernel versions newest-first. The newest kernel is the main menu entry
+and is booted by default without opening any submenu. With that entry selected,
+press `Tab` in rEFInd to open its submenu and select one of the older installed
+kernels. Thus every installed kernel is represented: the newest by the main
+entry and all previous versions by submenu entries. Adding or removing a kernel
+automatically adds or removes the corresponding selectable EFI entry.
 
 To regenerate and validate UKIs for all installed kernels:
 
 ```bash
-sudo generate-uki
+sudo generate-uki --all
 ```
 
 The command validates the Secure Boot signature, required PE sections, embedded
@@ -397,6 +432,30 @@ error falls back to normal root boot. The optional menu PIN is an
 accidental-selection guard, not a cryptographic security boundary, and is not
 required for the current-system entry. It allows three attempts, accepts at most
 12 characters and is stored as a salted SHA-256 hash in the initramfs.
+
+The menu can be customized through `/etc/snapshot-menu.conf`:
+
+```bash
+PAGE_SIZE=20
+DESCRIPTION_MAX_LENGTH=24
+SNAPSHOT_TRIGGER="ALT+B"
+SNAPSHOT_TRIGGER_WINDOW_TICKS=50
+SNAPSHOT_TRIGGER_RESULT_TICKS=0
+```
+
+`PAGE_SIZE` sets the rows per page. `DESCRIPTION_MAX_LENGTH` limits displayed
+Snapper descriptions and is capped at 40 characters. `SNAPSHOT_TRIGGER` selects
+the early-boot key combination. The window and result values use 100 ms ticks:
+`50` gives a five-second invitation, while a result value of `0` adds no final
+delay. A zero trigger window hides the countdown but retains a short held-key
+probe. Page size and description length must be positive; timing values must be
+non-negative.
+
+The file is embedded into the initramfs. After editing it, regenerate all UKIs:
+
+```bash
+sudo generate-uki --all
+```
 
 ## Rescue system
 
@@ -463,3 +522,13 @@ limitations. Security and boot assumptions are listed in
 - [Boot and installation flow](docs/boot-flow.md)
 - [Security and boot invariants](docs/invariants.md)
 - [Testing strategy and limitations](docs/testing.md)
+
+## Security
+
+Security-sensitive issues should be reported privately according to
+[SECURITY.md](SECURITY.md), not through a public issue.
+
+## License
+
+This project is licensed under the GNU General Public License version 3.0 only
+(`GPL-3.0-only`). See [LICENSE](LICENSE) for the complete terms.

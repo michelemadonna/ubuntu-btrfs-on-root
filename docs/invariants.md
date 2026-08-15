@@ -38,18 +38,19 @@ boot and maintenance commands.
 
 ## Btrfs layout
 
-- The suite is `ubuntu`.
-- The container subvolume is `@ubuntu` and the active root is `@ubuntu/@`.
+- The suite is the selected release (`resolute` or `noble`), while `suite_type`
+  is the distribution family (`ubuntu`).
+- The container subvolume is `@$suite` and the active root is `@$suite/@`.
 - Suite containers are siblings directly below Btrfs top level `subvolid=5`, for
   example `@noble` and `@resolute`; they are never nested below `@ubuntu`.
 - Root snapshots reside under `@$suite/@/.snapshots`; home snapshots reside
   under `@$suite/@home/.snapshots`. Each suite has independent histories.
 - Early-boot snapshot discovery uses only the active suite's root snapshots;
   home snapshots are not boot targets.
-- Dedicated subvolumes are children of the distribution container:
-  `@ubuntu/@home`, `@ubuntu/@cache`, `@ubuntu/@log`, `@ubuntu/@tmp`,
-  `@ubuntu/@libvirt`, `@ubuntu/@docker` and `@ubuntu/@swap` by default.
-- The swap file remains `@ubuntu/@swap/swapfile` by default and is created as a
+- Dedicated subvolumes are children of the suite container:
+  `@$suite/@home`, `@$suite/@cache`, `@$suite/@log`, `@$suite/@tmp`,
+  `@$suite/@libvirt`, `@$suite/@docker` and `@$suite/@swap` by default.
+- The swap file remains `@$suite/@swap/swapfile` by default and is created as a
   4 GiB Btrfs swap file.
 - Additional suites such as `@noble` and `@resolute` require matching fstab,
   cmdline, UKI and rEFInd configuration.
@@ -98,8 +99,15 @@ boot and maintenance commands.
 
 - kernel-install uses the UKI layout, dracut initrds and ukify generation.
 - UKIs are installed below `/boot/efi/EFI/Linux`.
+- Kernel package post-install must call `kernel-install add` and produce a UKI
+  signed with the configured Secure Boot db identity; post-removal must call
+  `kernel-install remove` and remove the matching versioned UKI.
+- `debian-kernel-install-bridge` remains a thin lifecycle adapter installed once
+  under `/usr/local/libexec` and reached through both Debian hook symlinks. It
+  must forward the package version/image and propagate `kernel-install` failure
+  to APT/dpkg; it must not duplicate dracut, ukify or signing logic.
 - The embedded command line identifies the root LUKS UUID and Btrfs subvolume
-  `@ubuntu/@`.
+  `@$suite/@`.
 - The command line always includes
   `rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes,tpm2-pin=yes`, including
   PINless TPM configurations.
@@ -109,6 +117,9 @@ boot and maintenance commands.
   failure after reporting all attempted kernels.
 - rEFInd publishes the newest valid kernel as the main entry and older valid
   kernels as submenu entries using an atomic configuration update.
+- Kernel versions remain sorted newest-first. Normal rEFInd selection boots the
+  newest kernel; pressing `Tab` on that entry exposes every older installed
+  version. Add/remove events must keep the UKI inventory and submenu coherent.
 - `generate-uki` remains independent of the repository framework after
   installation.
 
@@ -144,6 +155,13 @@ boot and maintenance commands.
   boot.
 - The menu PIN is only an accidental-selection guard; it is not an encryption or
   authentication boundary, and current-system selection bypasses it.
+- `/etc/snapshot-menu.conf` owns the customizable menu defaults:
+  `PAGE_SIZE=20`, `DESCRIPTION_MAX_LENGTH=24`, `SNAPSHOT_TRIGGER="ALT+B"`,
+  `SNAPSHOT_TRIGGER_WINDOW_TICKS=50` and
+  `SNAPSHOT_TRIGGER_RESULT_TICKS=0`.
+- Page size and description length stay positive, description length is capped
+  at 40, and timing values are non-negative 100 ms ticks. Configuration changes
+  require UKI regeneration because the file is embedded in the initramfs.
 
 ## Framework and installed artifacts
 

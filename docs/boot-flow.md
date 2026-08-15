@@ -110,9 +110,24 @@ and the selected EFI executables are signed and verified during setup.
 ## UKI selection
 
 UKIs are stored as `/boot/efi/EFI/Linux/<entry-token>-<kernel-version>.efi`.
-The exact prefix is derived by the installed generator. The rEFInd hook sorts
-kernel versions in descending version order, makes the newest UKI the main
-entry, and exposes older valid UKIs in a submenu.
+The exact prefix is derived by the installed generator. Kernel package
+installation first invokes the repository-provided
+`debian-kernel-install-bridge`, installed through the
+`/etc/kernel/postinst.d/zz-kernel-install` symlink. The bridge validates and
+forwards the package's kernel version and image to `kernel-install add`; it does
+not construct the UKI itself. dracut constructs the initramfs, ukify
+assembles the UKI and PCR signature, and `sbsign` signs the EFI executable with
+the configured Secure Boot db identity. Package removal reaches the same bridge
+through `/etc/kernel/postrm.d/zz-kernel-install`; it forwards the version to
+`kernel-install remove`, which deletes the corresponding UKI.
+
+After either event, the rEFInd hook rescans the remaining UKIs and atomically
+regenerates the suite menu. Versions are sorted in descending version order.
+The newest UKI is the visible main entry and boots by default. When that entry
+is selected, pressing `Tab` opens its submenu, where every older installed
+kernel can be selected. Consequently every installed version is represented,
+while adding or removing a package adds or removes its corresponding EFI boot
+choice automatically.
 
 Each UKI embeds the kernel, initrd, command line, OS metadata, version, splash,
 PCR public key and PCR signature. The generator rejects artifacts that fail the
@@ -133,7 +148,7 @@ For a normal installed boot:
    devices.
 6. systemd/cryptsetup unlocks the LUKS root using an available method: TPM2 when
    enrolled and policy-valid, otherwise a retained password or recovery method.
-7. dracut mounts `@ubuntu/@` and switches to the installed system.
+7. dracut mounts `@$suite/@` and switches to the installed system.
 
 The kernel command line keeps
 `rd.luks.options=tpm2-device=auto,tpm2-measure-pcr=yes,tpm2-pin=yes` even when
@@ -160,6 +175,16 @@ metadata and descriptions, pagination and cancellation. Current defaults use
 TTY1, Alt+B, a five-second window, 20 entries per page and 24-character
 descriptions. Optional PIN protection allows three attempts and at most 12
 characters.
+
+These presentation and trigger defaults are stored in
+`/etc/snapshot-menu.conf` as `PAGE_SIZE=20`,
+`DESCRIPTION_MAX_LENGTH=24`, `SNAPSHOT_TRIGGER="ALT+B"`,
+`SNAPSHOT_TRIGGER_WINDOW_TICKS=50` and
+`SNAPSHOT_TRIGGER_RESULT_TICKS=0`. Timing ticks are 100 ms. Thus `50` provides
+the five-second invitation and `0` adds no final-result delay; a zero trigger
+window hides the countdown while retaining a short held-key probe. Because the
+configuration is embedded in the initramfs, edits take effect after
+`generate-uki --all` regenerates the UKIs.
 
 Use Up/Down or `j`/`k` to select, Left/Right or `h`/`l` to change page, Enter
 to boot and Ctrl+C to cancel snapshot selection and boot the current system.

@@ -182,7 +182,7 @@ real devices.
 - Treat `iter_time` as an Argon2id calibration target in milliseconds, not a
   fixed iteration count; assess both password-guessing cost and unlock latency
   before changing its default.
-- Keep the installed root at `@ubuntu/@` and check every consumer before
+- Keep the installed root at `@$suite/@` and check every consumer before
   changing any subvolume path.
 - Treat each suite as a top-level sibling container, such as `@noble` or
   `@resolute`; never document releases as nested below `@ubuntu`.
@@ -213,6 +213,17 @@ real devices.
   the canonical-path and containment checks intact.
 - UKIs, rEFInd, its selected drivers and fwupd executables in the trusted path
   must retain the signatures verified by the scripts.
+- Preserve the Debian kernel lifecycle integration: post-install delegates to
+  `kernel-install add` and must produce a db-signed, versioned UKI; post-removal
+  delegates to `kernel-install remove` and removes the matching UKI.
+- Keep `uki/hooks/kernel/postinst.d/debian-kernel-install-bridge` as a thin
+  compatibility adapter installed under `/usr/local/libexec` and symlinked from
+  both `/etc/kernel/postinst.d` and `/etc/kernel/postrm.d`. It detects the event
+  from its invocation path, forwards version/image arguments with `exec`, and
+  must not duplicate the UKI generation or signing implementation.
+- Preserve atomic rEFInd menu regeneration after kernel add/remove. Versions
+  are ordered newest-first, the newest kernel is the main/default entry, and
+  pressing `Tab` on it exposes every older installed kernel as submenu entries.
 
 ### TPM
 
@@ -235,6 +246,12 @@ real devices.
 - The input listener must release devices before cryptsetup needs console input.
 - Snapshot selection must happen before the real root mount and remain
   compatible with LUKS unlock.
+- Preserve `/etc/snapshot-menu.conf` customization. Defaults are
+  `PAGE_SIZE=20`, `DESCRIPTION_MAX_LENGTH=24`, `SNAPSHOT_TRIGGER="ALT+B"`,
+  `SNAPSHOT_TRIGGER_WINDOW_TICKS=50` and
+  `SNAPSHOT_TRIGGER_RESULT_TICKS=0`. Timing ticks are 100 ms, description width
+  is capped at 40, and edits require UKI regeneration because the file is
+  embedded in the initramfs.
 
 ## Destructive operations
 
@@ -305,3 +322,10 @@ A change is complete only after the affected flow and callers have been read,
 the smallest coherent implementation has been made, safe validation has passed,
 documentation has been reconciled with actual behavior, and the final diff has
 been reviewed for boot/security regressions and secret material.
+
+## License and vulnerability reports
+
+The repository is licensed under `GPL-3.0-only`; preserve `LICENSE` and do not
+introduce incompatible third-party material. Follow `SECURITY.md` for private
+vulnerability reporting and never place exploit details or secrets in a public
+issue.

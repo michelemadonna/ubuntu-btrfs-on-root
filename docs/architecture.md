@@ -119,19 +119,19 @@ conversion or entering the target chroot.
 ## Btrfs and LUKS subsystem
 
 `btrfs-root/scripts/btrfs-root-setup` transforms the Ubiquity filesystem. The
-suite name is `ubuntu`, so the root container is `@ubuntu` and the active root is
-`@ubuntu/@`.
+suite is the selected release, currently `resolute` or `noble`, so the container
+is `@$suite` and the active root is `@$suite/@`.
 
-The script snapshots the original top-level filesystem into `@ubuntu/@`, creates
-dedicated subvolumes inside `@ubuntu` and relocates data where required:
+The script snapshots the original top-level filesystem into `@$suite/@`, creates
+dedicated subvolumes inside `@$suite` and relocates data where required:
 
-- `@ubuntu/@home` for `/home`;
-- `@ubuntu/@cache` for `/var/cache`;
-- `@ubuntu/@log` for `/var/log`;
-- `@ubuntu/@tmp` for `/var/tmp`;
-- `@ubuntu/@libvirt` for `/var/lib/libvirt`;
-- `@ubuntu/@docker` for `/var/lib/docker`;
-- `@ubuntu/@swap` containing a 4 GiB Btrfs swap file.
+- `@$suite/@home` for `/home`;
+- `@$suite/@cache` for `/var/cache`;
+- `@$suite/@log` for `/var/log`;
+- `@$suite/@tmp` for `/var/tmp`;
+- `@$suite/@libvirt` for `/var/lib/libvirt`;
+- `@$suite/@docker` for `/var/lib/docker`;
+- `@$suite/@swap` containing a 4 GiB Btrfs swap file.
 
 Multiple suites are siblings directly below the Btrfs top level (`subvolid=5`),
 not children of `@ubuntu`. For example, `@noble/@` and `@resolute/@` can coexist,
@@ -242,6 +242,16 @@ initramfs, allows three attempts and has a maximum length of 12. It is an
 accidental-selection guard, not a cryptographic boundary; selecting the current
 system bypasses it.
 
+Presentation and trigger behavior come from `/etc/snapshot-menu.conf`, which is
+embedded in the initramfs. Defaults are `PAGE_SIZE=20`,
+`DESCRIPTION_MAX_LENGTH=24`, `SNAPSHOT_TRIGGER="ALT+B"`,
+`SNAPSHOT_TRIGGER_WINDOW_TICKS=50` and
+`SNAPSHOT_TRIGGER_RESULT_TICKS=0`. Page size is the number of displayed rows;
+description length is capped at 40 characters. Timing ticks are 100 ms, making
+the trigger window five seconds and adding no final-result delay. A zero window
+hides the countdown but retains a short held-key probe. Changes require
+`generate-uki --all` so every UKI embeds the updated configuration.
+
 ## UKI subsystem
 
 The UKI installer configures systemd kernel-install with `layout=uki`, dracut as
@@ -254,7 +264,7 @@ release metadata, a Plymouth-derived BMP splash and persistent RSA PCR keys
 below `/etc/uki/keys`. PCR signing covers the configured initrd phases. UKIs are
 written under `/boot/efi/EFI/Linux`.
 
-The kernel command line identifies both the LUKS UUID and `@ubuntu/@`, includes
+The kernel command line identifies both the LUKS UUID and `@$suite/@`, includes
 the configured Btrfs mount options, disables the dracut recovery shell, and uses
 quiet splash boot. TPM integration normalizes this option unconditionally:
 
@@ -263,11 +273,34 @@ quiet splash boot. TPM integration normalizes this option unconditionally:
 `tpm2-pin=yes` remains present even for PINless enrollment so enabling a PIN
 later does not require rebuilding all UKIs.
 
-Kernel package post-install and removal hooks delegate to `kernel-install`.
-After generation, `generate-uki` verifies the db signature, required PE sections,
-embedded kernel version and, when configured, snapshot-menu initramfs content.
-Invalid UKIs are removed. rEFInd configuration is regenerated atomically with
-the newest version as the primary entry and older versions in a submenu.
+`uki/hooks/kernel/postinst.d/debian-kernel-install-bridge` is installed at
+`/usr/local/libexec/debian-kernel-install-bridge` and symlinked as both
+`/etc/kernel/postinst.d/zz-kernel-install` and
+`/etc/kernel/postrm.d/zz-kernel-install`. It is an adapter, not a UKI generator:
+its invocation directory identifies the dpkg lifecycle event. For `postinst.d`
+it validates the kernel image supplied by the package and executes
+`kernel-install add <version> <kernel-image>`; for `postrm.d` it executes
+`kernel-install remove <version>`. `exec` replaces the bridge process, so the
+exit status returned to APT/dpkg is the result of `kernel-install` itself.
+
+With `layout=uki`, the add operation
+causes dracut to create the initramfs and ukify to assemble a single PE/COFF EFI
+executable containing the kernel, initramfs, command line and metadata. ukify
+adds the PCR policy signature and uses `sbsign` with the configured db private
+key and certificate, producing the signed
+`/boot/efi/EFI/Linux/<entry-token>-<version>.efi` artifact.
+
+The remove operation deletes that version's UKI. The final
+`99-refind-menu.install` hook runs for both
+add and remove events, rescans all remaining suite-prefixed UKIs, applies
+descending version sorting and atomically replaces the suite-specific rEFInd
+configuration. The newest version becomes the main/default entry. Selecting it
+and pressing `Tab` exposes the submenu entries for every older installed
+version; ordinary boot without entering the submenu launches the newest kernel.
+
+After explicit generation, `generate-uki` verifies the db signature, required
+PE sections, embedded kernel version and, when configured, snapshot-menu
+initramfs content. Invalid UKIs are removed.
 The hook reads `suite_type` from `/etc/kernel/refind-icon` to select
 `os_<suite_type>.png`, with a generic Linux icon fallback.
 

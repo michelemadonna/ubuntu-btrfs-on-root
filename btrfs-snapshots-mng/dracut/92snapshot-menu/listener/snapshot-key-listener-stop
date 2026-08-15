@@ -334,7 +334,9 @@ fi
 if [ -e "$MARKER" ]; then
 	snapshot-key-listener-stop.show_message "Snapshot menu ENABLED"
 else
-	snapshot-key-listener-stop.show_message "Snapshot menu not requested"
+	if [ "$result_ticks" -gt 0 ]; then
+		snapshot-key-listener-stop.show_message "Snapshot menu not requested"
+	fi
 fi
 
 if [ "$result_ticks" -gt 0 ]; then

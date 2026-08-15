@@ -32,6 +32,7 @@ uki-test.trim() {
 uki-test.artifact_contract() {
 	local generator="$repository_root/uki/scripts/generate-uki"
 	local menu_hook="$repository_root/uki/hooks/kernel/install.d/99-refind-menu.install"
+	local package_bridge="$repository_root/uki/hooks/kernel/postinst.d/debian-kernel-install-bridge"
 
 	rg -q '^[[:space:]]*\.linux' "$generator"
 	rg -q '\.pcrsig' "$generator"
@@ -40,6 +41,10 @@ uki-test.artifact_contract() {
 	rg -q 'refind-menu\.generate' "$menu_hook"
 	rg -q 'ICON_TOKEN_FILE="/etc/kernel/refind-icon"' "$menu_hook"
 	rg -q 'os_\$\{ICON_TOKEN\}\.png' "$menu_hook"
+	rg -q 'submenuentry' "$menu_hook"
+	rg -q 'add | remove' "$menu_hook"
+	rg -q 'kernel-install add "\$version" "\$kernel_image"' "$package_bridge"
+	rg -q 'kernel-install remove "\$version"' "$package_bridge"
 }
 
 uki-test.reject_invalid_artifact() {

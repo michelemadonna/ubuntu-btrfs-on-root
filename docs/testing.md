@@ -71,12 +71,19 @@ Prefer tests of deterministic transformations and decisions:
 - Secure Boot mode detection and enrollment ordering;
 - rEFInd path and configuration selection for direct and shim modes;
 - version ordering and UKI path generation;
+- kernel postinst/postrm delegation to `kernel-install add`/`remove`;
+- bridge dispatch based on its `postinst.d` or `postrm.d` invocation path,
+  kernel-image validation and propagation of the delegated exit status;
+- atomic rEFInd regeneration after both add and remove events, with the newest
+  version as the main entry and every older version in its submenu;
 - `suite_type` propagation and rEFInd distribution-icon fallback;
 - kernel command-line normalization, especially the single unconditional
   `tpm2-pin=yes` option;
 - TPM enrollment argv construction with and without replacement of TPM tokens;
 - TPM enrollment arguments for PINless and PIN-required modes;
 - snapshot discovery, compatibility filtering, pagination and fallback choices.
+- snapshot-menu configuration defaults and validation for page size,
+  description width, trigger chord and 100 ms trigger/result timing ticks;
 
 Mock host-facing tools such as:
 
@@ -98,7 +105,10 @@ artifacts include:
 - `/etc/kernel/install.conf`, entry token, ukify config and kernel command line;
 - `/etc/tpm.conf` and header-backup path construction;
 - rEFInd configuration and version ordering;
+- correspondence between installed kernel versions, signed UKI filenames and
+  generated main/submenu loader paths;
 - dracut module file list and systemd cryptsetup drop-in;
+- embedded `/etc/snapshot-menu.conf` values after UKI regeneration;
 - UKI PE sections, signature, embedded kernel version and extracted initramfs
   file list.
 
