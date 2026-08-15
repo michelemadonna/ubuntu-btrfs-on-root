@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+umask 077
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
+
+snapper-setup.configure_profile() {
+	local profile=$1
+	local mountpoint=$2
+
+	log.info "Create Snapper profile '$profile' for $mountpoint"
+	snapper -c "$profile" create-config "$mountpoint"
+	log.info "Enable timeline snapshots, sudo access and ACL synchronization for '$profile'"
+	snapper -c "$profile" set-config \
+		'TIMELINE_CREATE=yes' \
+		'ALLOW_GROUPS=sudo' \
+		'SYNC_ACL=yes'
+}
+
+snapper-setup.run() {
+	common.require_root
+	common.require_commands apt
+	log.section "Snapper installation"
+	log.info "Install Snapper and filesystem change monitoring"
+	apt install -y snapper inotify-tools
+	common.require_commands snapper
+
+	snapper-setup.configure_profile root /
+	snapper-setup.configure_profile home /home
+
+	log.info "Install Btrfs Assistant and maintenance integration without recommended packages"
+	apt --no-install-recommends -y install btrfs-assistant btrfsmaintenance
+	log.success "Snapper root and home profiles configured"
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	snapper-setup.run
+fi

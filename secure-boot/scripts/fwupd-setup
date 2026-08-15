@@ -1,0 +1,389 @@
+#!/usr/bin/env bash
+# Firmware state is provided by the orchestrator or detected at runtime.
+# shellcheck disable=SC2154
+
+set -Eeuo pipefail
+umask 077
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
+
+# ============================================================
+# Configuration
+# ============================================================
+
+ESP="${ESP:-/boot/efi}"
+FWUPD_CONF="${FWUPD_CONF:-/etc/fwupd/fwupd.conf}"
+
+SBCTL_KEYROOT="${SBCTL_KEYROOT:-/var/lib/sbctl/keys}"
+DB_KEY="$SBCTL_KEYROOT/db/db.key"
+DB_CERT="$SBCTL_KEYROOT/db/db.pem"
+
+SETUP_MODE="${SETUP_MODE:-}"
+SECURE_BOOT="${SECURE_BOOT:-}"
+
+FWUPD_EFI=""
+
+FWUPD_EFI_CANDIDATES=(
+	"/usr/libexec/fwupd/efi/fwupdx64.efi"
+	"/usr/lib/fwupd/efi/fwupdx64.efi"
+	"/usr/libexec/fwupd/efi/fwupd.efi"
+	"/usr/lib/fwupd/efi/fwupd.efi"
+)
+
+# ============================================================
+# Firmware helpers
+# ============================================================
+
+fwupd-setup.read_efi_uint8() {
+	local name="$1"
+	local file
+
+	file="$(
+		find /sys/firmware/efi/efivars \
+			-maxdepth 1 \
+			-name "${name}-*" \
+			-print \
+			-quit 2>/dev/null
+	)"
+
+	[[ -n "$file" ]] || return 1
+
+	#
+	# efivarfs:
+	#
+	# bytes 0..3 = variable attributes
+	# byte 4     = UINT8 value
+	#
+	od -An -j4 -N1 -t u1 "$file" |
+		tr -d '[:space:]'
+}
+
+fwupd-setup.detect_boot_mode() {
+	if [[ -f /etc/securebootmode.conf ]]; then
+		SETUP_MODE="$(</etc/securebootmode.conf)"
+	else
+		SETUP_MODE="$(
+			fwupd-setup.read_efi_uint8 SetupMode
+		)" || log.die "Cannot read UEFI SetupMode."
+	fi
+
+	if [[ -z "$SECURE_BOOT" ]]; then
+
+		SECURE_BOOT="$(
+			fwupd-setup.read_efi_uint8 SecureBoot 2>/dev/null ||
+				printf '0\n'
+		)"
+
+	fi
+
+	case "$SETUP_MODE" in
+	0 | 1)
+		;;
+	*)
+		log.die "Invalid SetupMode value: $SETUP_MODE"
+		;;
+	esac
+
+	case "$SECURE_BOOT" in
+	0 | 1)
+		;;
+	*)
+		SECURE_BOOT=0
+		;;
+	esac
+
+	log.info "Setup Mode: $SETUP_MODE"
+	log.info "Secure Boot: $SECURE_BOOT"
+}
+
+# ============================================================
+# Dependencies
+# ============================================================
+
+fwupd-setup.install_dependencies() {
+	export DEBIAN_FRONTEND=noninteractive
+
+	log.info "Install fwupd dependencies"
+
+	apt-get update
+
+	apt-get install -y \
+		fwupd \
+		efibootmgr \
+		sbsigntool \
+		findutils \
+		coreutils \
+		ca-certificates \
+		fwupd-unsigned
+
+	#
+	# Distribution-specific EFI companion packages.
+	#
+	apt-get install -y fwupd-efi || true
+	apt-get install -y fwupd-signed || true
+	apt-get install -y fwupd-unsigned || true
+}
+
+# ============================================================
+# Locate fwupd EFI binary
+# ============================================================
+
+fwupd-setup.find_fwupd_efi() {
+	local candidate
+
+	for candidate in "${FWUPD_EFI_CANDIDATES[@]}"; do
+
+		if [[ -f "$candidate" ]]; then
+			FWUPD_EFI="$candidate"
+			return 0
+		fi
+
+	done
+
+	FWUPD_EFI="$(
+		find \
+			/usr/lib \
+			/usr/libexec \
+			-type f \
+			\( \
+			-name 'fwupdx64.efi' \
+			-o \
+			-name 'fwupd.efi' \
+			\) \
+			-print \
+			-quit 2>/dev/null
+	)"
+
+	[[ -n "$FWUPD_EFI" ]]
+}
+
+# ============================================================
+# INI helper
+# ============================================================
+
+fwupd-setup.append_ini_value() {
+	local file="$1"
+	local key="$2"
+	local value="$3"
+	cat >>"$file" <<-EOL
+		$key=$value
+	EOL
+}
+
+fwupd-setup.disable_shim_for_mode() {
+	local setup_mode=$1
+
+	case $setup_mode in
+	1) printf 'true\n' ;;
+	0) printf 'false\n' ;;
+	*) return 1 ;;
+	esac
+}
+
+# ============================================================
+# Configure fwupd
+# ============================================================
+
+fwupd-setup.configure() {
+	local disable_shim
+
+	log.info "Configure fwupd in $FWUPD_CONF for ESP $ESP"
+
+	install -d -m 0755 "$(dirname "$FWUPD_CONF")"
+
+	[[ -e "$FWUPD_CONF" ]] ||
+		touch "$FWUPD_CONF"
+
+	#
+	# We do not use GRUB.
+	#
+
+	cat >"$FWUPD_CONF" <<-EOL
+		[uefi_capsule]
+	EOL
+
+	fwupd-setup.append_ini_value \
+		"$FWUPD_CONF" \
+		EnableGrubChainLoad \
+		false
+
+	#
+	# Explicit ESP.
+	#
+	fwupd-setup.append_ini_value \
+		"$FWUPD_CONF" \
+		OverrideESPMountPoint \
+		"$ESP"
+
+	#
+	# SetupMode=1:
+	#
+	#   our db key is or will be enrolled directly in firmware,
+	#   therefore fwupd.efi can be trusted directly.
+	#
+	# SetupMode=0:
+	#
+	#   our db key is trusted through MOK, therefore fwupd
+	#   must keep Shim in the Secure Boot chain.
+	#
+	disable_shim="$(fwupd-setup.disable_shim_for_mode "$SETUP_MODE")" ||
+		log.die "Invalid SetupMode value: $SETUP_MODE"
+	if [[ $disable_shim == true ]]; then
+		log.info "Select direct UEFI db trust for fwupd"
+	else
+		log.info "Select Shim + MOK trust for fwupd"
+	fi
+	fwupd-setup.append_ini_value \
+		"$FWUPD_CONF" \
+		DisableShimForSecureBoot \
+		"$disable_shim"
+}
+
+# ============================================================
+# Service
+# ============================================================
+
+fwupd-setup.configure_service() {
+	if command -v systemctl >/dev/null 2>&1; then
+
+		systemctl enable fwupd.service \
+			>/dev/null 2>&1 || true
+
+		systemctl restart fwupd.service \
+			>/dev/null 2>&1 || true
+
+	fi
+}
+
+# ============================================================
+# Metadata
+# ============================================================
+
+fwupd-setup.refresh_metadata() {
+	common.require_commands fwupdmgr
+
+	log.info "Refresh fwupd metadata"
+
+	fwupdmgr refresh --force || true
+}
+
+# ============================================================
+# Summary
+# ============================================================
+
+fwupd-setup.print_summary() {
+	local disable_shim
+	local trust_path
+
+	if [[ "$SETUP_MODE" == "1" ]]; then
+		disable_shim=true
+		trust_path="UEFI db -> fwupd.efi"
+	else
+		disable_shim=false
+		trust_path="UEFI -> Shim -> MOK -> fwupd.efi"
+	fi
+
+	log.section "fwupd setup summary"
+	log.summary_item "SetupMode" "$SETUP_MODE"
+	log.summary_item "SecureBoot" "$SECURE_BOOT"
+	log.summary_item "EFI executable" "$FWUPD_EFI"
+	log.summary_item "Configuration" "$FWUPD_CONF"
+	log.summary_item "Grub chainload" "disabled"
+	log.summary_item "Shim disabled" "$disable_shim"
+	log.summary_item "Trust path" "$trust_path"
+	log.info "Rendered fwupd uefi_capsule configuration follows"
+
+	grep \
+		-A20 \
+		'^\[uefi_capsule\]' \
+		"$FWUPD_CONF" || true
+
+	log.section "Post-summary validation"
+	log.info "Verify fwupd EFI signature with $DB_CERT"
+
+	sbverify --cert "$DB_CERT" "$FWUPD_EFI" ||
+		log.die "fwupd EFI signature verification failed: $FWUPD_EFI"
+	log.success "fwupd EFI signature verification passed"
+	log.section_end
+}
+
+# ============================================================
+# sbctl signing
+# ============================================================
+
+fwupd-setup.sign_efi() {
+	local file="$1"
+
+	[[ -f "$file" ]] ||
+		log.die "EFI file not found: $file"
+
+	log.info "Sign EFI executable with sbctl: $file"
+
+	sbctl sign \
+		--save \
+		"$file"
+}
+
+# ============================================================
+# Sign fwupd EFI with sbctl
+# ============================================================
+
+fwupd-setup.sign_fwupd_efi() {
+	log.info "Sign fwupd EFI with sbctl"
+	common.require_commands sbctl
+	common.require_readable_file "$DB_KEY" "db private key"
+	common.require_readable_file "$DB_CERT" "db certificate"
+	common.require_readable_file "$FWUPD_EFI" "fwupd EFI executable"
+
+	log.info "Selected fwupd EFI executable: $FWUPD_EFI"
+
+	fwupd-setup.sign_efi "$FWUPD_EFI"
+}
+
+# ============================================================
+# Main
+# ============================================================
+
+fwupd-setup.run() {
+	common.require_root
+
+	[[ -d /sys/firmware/efi ]] ||
+		log.die "System was not booted using UEFI."
+
+	case "$(uname -m)" in
+
+	x86_64 | amd64)
+		;;
+
+	*)
+		log.die "Only x86-64 UEFI is currently supported."
+		;;
+
+	esac
+
+	common.require_commands apt-get
+
+	fwupd-setup.detect_boot_mode
+
+	fwupd-setup.install_dependencies
+
+	common.require_commands fwupdmgr sbctl sbverify
+
+	if ! fwupd-setup.find_fwupd_efi; then
+		log.die "fwupd EFI companion executable was not found."
+	fi
+
+	fwupd-setup.configure
+
+	fwupd-setup.configure_service
+	fwupd-setup.refresh_metadata
+	fwupd-setup.sign_fwupd_efi
+	fwupd-setup.print_summary
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	fwupd-setup.run
+fi

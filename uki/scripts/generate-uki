@@ -1,0 +1,435 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+umask 077
+
+# ---------------------------------------------------------------------------
+# Standalone logging helpers
+# ---------------------------------------------------------------------------
+
+LOG_SECTION_ACTIVE=false
+LOG_SECTION_TITLE=""
+LOG_SECTION_COLOR=35
+LOG_SECTION_INDEX=0
+
+log.info() { printf '\033[1;36mℹ [INFO]\033[0m %s\n' "$*"; }
+log.warn() { printf '\033[1;33m⚠ [WARN]\033[0m %s\n' "$*" >&2; }
+log.error() { printf '\033[1;31m✖ [ERROR]\033[0m %s\n' "$*" >&2; }
+log.success() { printf '\033[1;32m✔ [SUCCESS]\033[0m %s\n' "$*"; }
+log.section() {
+	local -a colors=(35 34 36 33 32)
+	[[ $LOG_SECTION_ACTIVE == false ]] || log.section_end
+	LOG_SECTION_COLOR=${colors[LOG_SECTION_INDEX % ${#colors[@]}]}
+	LOG_SECTION_INDEX=$((LOG_SECTION_INDEX + 1))
+	LOG_SECTION_TITLE=$*
+	LOG_SECTION_ACTIVE=true
+	printf '\n\033[1;%sm╔══▶ BEGIN: %s\033[0m\n' "$LOG_SECTION_COLOR" "$LOG_SECTION_TITLE"
+}
+log.section_end() {
+	[[ $LOG_SECTION_ACTIVE == true ]] || return 0
+	printf '\033[1;%sm╚══■ END:   %s\033[0m\n' "$LOG_SECTION_COLOR" "$LOG_SECTION_TITLE"
+	LOG_SECTION_ACTIVE=false
+	LOG_SECTION_TITLE=""
+}
+log.summary_item() {
+	local label=$1 value=$2
+	printf '  \033[1;36m• %-22s\033[0m %s\n' "$label:" "$value"
+}
+log.die() {
+	local previous_status=$?
+	local message=${1:-Fatal error}
+	local command_error=${2:-}
+	local status=${3:-$previous_status}
+	[[ $status =~ ^[0-9]+$ ]] || status=1
+	log.section_end
+	log.error "$message"
+	((status == 0)) || log.error "Command exit status: $status"
+	[[ -z $command_error ]] || log.error "Command error: $command_error"
+	((status != 0)) || status=1
+	exit "$status"
+}
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+generate-uki.trim() {
+	local value="${1:-}"
+
+	value="${value#"${value%%[![:space:]]*}"}"
+	value="${value%"${value##*[![:space:]]}"}"
+
+	printf '%s' "$value"
+}
+
+PREFIX_FILE="/etc/kernel/entry-token"
+SNAPSHOT_MENU_CONFIG="/etc/snapshot-menu.conf"
+REFIND_MENU_HOOK="/usr/lib/kernel/install.d/99-refind-menu.install"
+
+generate-uki.usage() {
+	printf 'Usage: %s [--all | KERNEL_VERSION]\n' "${0##*/}" >&2
+	exit 2
+}
+
+generate-uki.reject_artifact() {
+	local uki=$1
+
+	if [[ -e $uki ]]; then
+		log.error "Rejecting invalid UKI artifact: $uki"
+		rm -f -- "$uki"
+	fi
+	if [[ -x $REFIND_MENU_HOOK ]]; then
+		"$REFIND_MENU_HOOK" remove
+	fi
+}
+
+generate-uki.run() {
+	[[ $EUID -eq 0 ]] || {
+		log.error "Run generate-uki as root."
+		return 1
+	}
+
+	(($# <= 1)) || generate-uki.usage
+
+	declare -a kernels=()
+
+	case "${1:-}" in
+	"")
+		kernels+=("/boot/vmlinuz-$(uname -r)")
+		;;
+	--all)
+		for kernel in /boot/vmlinuz-*; do
+			if [[ -f "$kernel" ]]; then
+				kernels+=("$kernel")
+			fi
+		done
+		;;
+	--*)
+		generate-uki.usage
+		;;
+	*)
+		kernels+=("/boot/vmlinuz-$1")
+		;;
+	esac
+
+	((${#kernels[@]} > 0)) || {
+		log.error "No installed kernels were found in /boot."
+		exit 1
+	}
+
+	[[ -r "${PREFIX_FILE}" ]] || return 0
+
+	PREFIX="$(generate-uki.trim "$(<"${PREFIX_FILE}")")"
+
+	[[ -n "${PREFIX}" ]] || return 0
+
+	declare -a uki_success=()
+	declare -a uki_failed=()
+
+	for kernel in "${kernels[@]}"; do
+		if [[ ! -f "$kernel" ]]; then
+			version="${kernel#/boot/vmlinuz-}"
+			log.error "Kernel image not found: ${kernel}"
+			uki_failed+=("${version}: kernel image missing")
+			continue
+		fi
+
+		version="${kernel#/boot/vmlinuz-}"
+		module_dir="/usr/lib/modules/${version}"
+		uki="/boot/efi/EFI/Linux/${PREFIX}-${version}.efi"
+
+		declare -a kernel_errors=()
+
+		log.section "Process kernel $version"
+
+		if [[ ! -d "$module_dir" ]]; then
+			log.warn "Kernel modules not found: ${module_dir}"
+			uki_failed+=("${version}: kernel modules missing")
+			continue
+		fi
+
+		log.info "Generate UKI for kernel $version"
+
+		if kernel-install add "$version" "$kernel"; then
+			log.success "kernel-install completed for $version"
+		else
+			log.error "kernel-install failed for $version"
+			kernel_errors+=("kernel-install failed")
+		fi
+
+		# ------------------------------------------------------------
+		# Check generated UKI
+		# ------------------------------------------------------------
+
+		if [[ ! -f "$uki" ]]; then
+			log.error "Generated UKI not found: ${uki}"
+			kernel_errors+=("generated UKI not found")
+			uki_failed+=(
+				"${version}: ${kernel_errors[*]}"
+			)
+
+			continue
+		fi
+
+		log.info "Generated UKI: ${uki}"
+
+		temporary_uki="$(mktemp --tmpdir "${PREFIX}-${version}.XXXXXX.efi")"
+
+		if cp -- "$uki" "$temporary_uki"; then
+			log.info "Created validation copy: ${temporary_uki}"
+		else
+			log.error "Unable to create temporary UKI copy"
+			kernel_errors+=("unable to create temporary UKI copy")
+			uki_failed+=(
+				"${version}: ${kernel_errors[*]}"
+			)
+			rm -f -- "$temporary_uki"
+			continue
+		fi
+
+		# ------------------------------------------------------------
+		# Secure Boot signature validation
+		# ------------------------------------------------------------
+
+		log.info "Validate Secure Boot signature"
+
+		if sbverify --cert /var/lib/sbctl/keys/db/db.pem "$temporary_uki"; then
+			log.success "sbverify verification passed"
+		else
+			log.error "sbverify verification failed"
+			kernel_errors+=("sbverify signature verification failed")
+		fi
+
+		if sbverify --list "$temporary_uki"; then
+			log.success "PE/COFF signature found"
+		else
+			log.error "Unable to validate PE/COFF signature"
+			kernel_errors+=("sbverify signature verification failed")
+		fi
+
+		# ------------------------------------------------------------
+		# PE section validation
+		# ------------------------------------------------------------
+
+		log.info "Inspect UKI sections"
+
+		if sections="$(objdump -h "$temporary_uki" 2>/dev/null)"; then
+
+			for section in \
+				.linux \
+				.initrd \
+				.cmdline \
+				.uname \
+				.pcrpkey \
+				.pcrsig \
+				.sbat; do
+				if grep -Fq "$section" <<<"$sections"; then
+					log.success "UKI section present: $section"
+				else
+					log.error "UKI section missing: $section"
+					kernel_errors+=("missing UKI section ${section}")
+				fi
+			done
+
+		else
+			log.error "Unable to inspect generated UKI"
+			kernel_errors+=("unable to inspect UKI sections")
+		fi
+
+		# ------------------------------------------------------------
+		# Validate embedded kernel version
+		# ------------------------------------------------------------
+
+		log.info "Validate embedded kernel version"
+
+		if embedded_uname="$(
+			objcopy \
+				--dump-section .uname=/dev/stdout \
+				"$temporary_uki" \
+				2>/dev/null |
+				tr -d '\0\n'
+		)"; then
+
+			if [[ "$embedded_uname" == "$version" ]]; then
+				log.success "Embedded kernel version: ${embedded_uname}"
+			else
+				log.error "Embedded kernel version '${embedded_uname}' does not match '${version}'"
+				kernel_errors+=(
+					"embedded kernel version mismatch (${embedded_uname})"
+				)
+			fi
+
+		else
+			log.error "Unable to extract embedded kernel version"
+			kernel_errors+=("unable to extract .uname section")
+		fi
+
+		# ------------------------------------------------------------
+		# Extract and validate initrd
+		# ------------------------------------------------------------
+
+		log.info "Extract embedded initrd"
+
+		work_directory="$(mktemp -d)"
+		if objcopy \
+			--dump-section ".initrd=${work_directory}/initrd" \
+			"$temporary_uki" \
+			2>/dev/null; then
+			log.success "Embedded initrd extracted"
+		else
+			log.error "Unable to extract embedded initrd"
+			kernel_errors+=("unable to extract embedded initrd")
+		fi
+
+		initrd="${work_directory}/initrd"
+
+		if [[ -s "$initrd" ]]; then
+
+			if initrd_listing="$(lsinitrd "$initrd" 2>/dev/null)"; then
+
+				if [[ -f "$SNAPSHOT_MENU_CONFIG" ]]; then
+					log.info "Validate snapshot menu inside initrd"
+
+					if grep -qE 'usr/libexec/snapshot-menu$' <<<"$initrd_listing"; then
+						log.success "Snapshot menu executable"
+					else
+						log.error "Snapshot menu executable missing"
+						kernel_errors+=("snapshot menu executable missing")
+					fi
+
+					if grep -qE 'etc/snapshot-menu\.conf$' <<<"$initrd_listing"; then
+						log.success "Snapshot menu configuration"
+					else
+						log.error "Snapshot menu configuration missing"
+						kernel_errors+=("snapshot menu configuration missing")
+					fi
+
+					if grep -qE \
+						'hooks/pre-mount/.+snapshot-menu-hook\.sh$' \
+						<<<"$initrd_listing"; then
+						log.success "Snapshot menu pre-mount hook"
+					else
+						log.error "Snapshot menu pre-mount hook missing"
+						kernel_errors+=("snapshot menu pre-mount hook missing")
+					fi
+
+					#if grep -qE \
+					#    'hooks/cmdline/.+01-snapshot-key-listener\.sh$' \
+					#    <<<"$initrd_listing"
+					#then
+					#    log.success "Snapshot menu cmdline hook"
+					#else
+					#    log.error "Snapshot menu cmdline hook missing"
+					#    kernel_errors+=("snapshot menu cmdline hook missing")
+					#fi
+
+					if grep -qE 'usr/libexec/snapshot-key-listener$' <<<"$initrd_listing"; then
+						log.success "Snapshot key listener"
+					else
+						log.error "Snapshot key listener missing"
+						kernel_errors+=("snapshot key listener missing")
+					fi
+
+					if grep -qE 'usr/libexec/snapshot-key-listener-stop$' <<<"$initrd_listing"; then
+						log.success "Snapshot key listener stop"
+					else
+						log.error "Snapshot key listener stop missing"
+						kernel_errors+=("snapshot key listener stop missing")
+					fi
+
+					if grep -qE 'etc/systemd/system/systemd-cryptsetup@\.service\.d/50-snapshot-key-listener-stop\.conf$' <<<"$initrd_listing"; then
+						log.success "Snapshot menu systemd key listener stopper configuration"
+					else
+						log.error "Snapshot menu systemd key listener stopper configuration missing"
+						kernel_errors+=("snapshot menu systemd key listener stopper configuration missing")
+					fi
+
+				else
+					log.info "Snapshot menu validation skipped: ${SNAPSHOT_MENU_CONFIG} not found"
+				fi
+
+			else
+				log.error "Unable to inspect embedded initrd"
+				kernel_errors+=("lsinitrd failed")
+			fi
+
+		else
+			log.error "Extracted initrd is empty or missing"
+			kernel_errors+=("embedded initrd is empty")
+		fi
+
+		# ------------------------------------------------------------
+		# Cleanup
+		# ------------------------------------------------------------
+
+		rm -f -- "$temporary_uki"
+		rm -rf -- "$work_directory"
+
+		# ------------------------------------------------------------
+		# Kernel result
+		# ------------------------------------------------------------
+
+		echo
+
+		if ((${#kernel_errors[@]} == 0)); then
+			log.success "UKI ${version} generated and validated successfully"
+			uki_success+=("$version")
+		else
+			log.warn "UKI ${version} completed with ${#kernel_errors[@]} error(s):"
+
+			for error in "${kernel_errors[@]}"; do
+				log.error "${error}"
+			done
+
+			uki_failed+=(
+				"${version}: $(
+					IFS='; '
+					echo "${kernel_errors[*]}"
+				)"
+			)
+			generate-uki.reject_artifact "$uki"
+		fi
+
+	done
+
+	# ==================================================================
+	# Final report
+	# ==================================================================
+
+	log.section "UKI build report"
+
+	log.summary_item "Successful" "${#uki_success[@]}"
+
+	for version in "${uki_success[@]}"; do
+		log.success "${version}"
+	done
+
+	echo
+	log.summary_item "Failed" "${#uki_failed[@]}"
+
+	for failure in "${uki_failed[@]}"; do
+		log.error "${failure}"
+	done
+
+	echo
+
+	if ((${#uki_failed[@]} == 0)); then
+		log.success "All UKIs were generated and validated successfully."
+	else
+		log.warn "${#uki_failed[@]} UKI(s) reported validation errors."
+	fi
+
+	log.section "Post-summary validation"
+	if ((${#uki_failed[@]} == 0 && ${#uki_success[@]} > 0)); then
+		log.success "Validated the final UKI report: every processed kernel succeeded"
+	else
+		log.error "Final UKI report validation failed: successful=${#uki_success[@]}, failed=${#uki_failed[@]}"
+	fi
+	log.section_end
+
+	((${#uki_failed[@]} == 0))
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	generate-uki.run "$@"
+fi

@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# Configuration variables are loaded from the runtime-selected setup.conf.
+# shellcheck disable=SC2154
+
+set -Eeuo pipefail
+umask 077
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
+
+# Runtime-derived paths allow direct execution and sourcing from setup.sh.
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
+# shellcheck disable=SC1090,SC1091
+source "${SETUP_CONFIG_FILE:-$repository_root/setup.conf}"
+# shellcheck disable=SC1090,SC1091
+source "$script_dir/btrfs-subvol-setup"
+# shellcheck disable=SC1090,SC1091
+source "$script_dir/luks-setup"
+# shellcheck disable=SC1090,SC1091
+source "$script_dir/fstab-setup"
+
+readonly ESP_FILESYSTEM_LABEL=ESP
+
+btrfs-root-setup.configure_esp_label() {
+	local efi_device="/dev/$efi_dev"
+	local filesystem_type
+	local applied_label
+
+	log.section "EFI System Partition label"
+	[[ -b $efi_device ]] || log.die "Configured EFI device is not a block device: $efi_device"
+	if findmnt -rn -S "$efi_device" >/dev/null 2>&1; then
+		log.die "EFI device must be unmounted before changing its label: $efi_device"
+	fi
+	filesystem_type="$(blkid -c /dev/null -s TYPE -o value "$efi_device")"
+	[[ $filesystem_type == vfat ]] || log.die "EFI device must contain a FAT filesystem; detected '$filesystem_type' on $efi_device."
+	log.info "Set FAT filesystem label $ESP_FILESYSTEM_LABEL on $efi_device"
+	fatlabel "$efi_device" "$ESP_FILESYSTEM_LABEL" || log.die "Unable to set EFI filesystem label on $efi_device."
+	applied_label="$(blkid -c /dev/null -s LABEL -o value "$efi_device")"
+	[[ $applied_label == "$ESP_FILESYSTEM_LABEL" ]] ||
+		log.die "EFI filesystem label validation failed: expected $ESP_FILESYSTEM_LABEL, found '$applied_label'."
+	log.success "EFI filesystem label validated as $ESP_FILESYSTEM_LABEL on $efi_device"
+}
+
+btrfs-root-setup.configured_subvolume_paths() {
+	local name
+
+	for name in @ @home @cache @log @tmp @libvirt @docker @swap; do
+		printf '%s/%s\n' "$root_sub_vol" "$name"
+	done
+}
+
+btrfs-root-setup.print_summary() {
+	local enlargement_status="disabled"
+	local subvolume_paths
+
+	if [[ $enlarge == yes ]]; then
+		enlargement_status="extended to available disk space"
+	fi
+	subvolume_paths="$(btrfs-root-setup.configured_subvolume_paths | paste -sd, -)"
+
+	log.section "Btrfs root setup summary"
+	log.summary_item "Status" "completed successfully"
+	log.summary_item "Source partition" "/dev/$root_dev"
+	log.summary_item "EFI partition" "/dev/$efi_dev (label $ESP_FILESYSTEM_LABEL)"
+	log.summary_item "LUKS format" "LUKS2 with Argon2id"
+	log.summary_item "Argon2id time target" "${iter_time} ms"
+	log.summary_item "LUKS mapper" "/dev/mapper/root"
+	log.summary_item "Keyslot reservation" "$keyslot_size"
+	log.summary_item "Partition enlargement" "$enlargement_status"
+	log.summary_item "Btrfs mount point" "$mp"
+	log.summary_item "Normal root" "$root_sub_vol/@"
+	log.summary_item "Subvolumes" "$subvolume_paths"
+	log.summary_item "Swapfile" "$root_sub_vol/@swap/swapfile ($swap_size)"
+	log.summary_item "crypttab" "$mp/etc/crypttab"
+	log.summary_item "fstab" "$mp/etc/fstab"
+	log.success "Btrfs root storage phase completed"
+}
+
+btrfs-root-setup.validate_result() {
+	local name
+	local path
+	local subvolume_listing
+	local efi_label
+
+	log.section "Post-summary validation"
+	cryptsetup isLuks "/dev/$root_dev" || log.die "Root partition is not a valid LUKS container after setup."
+	efi_label="$(blkid -c /dev/null -s LABEL -o value "/dev/$efi_dev")"
+	[[ $efi_label == "$ESP_FILESYSTEM_LABEL" ]] || log.die "EFI filesystem label is not $ESP_FILESYSTEM_LABEL after setup."
+	[[ -b /dev/mapper/root ]] || log.die "LUKS mapper /dev/mapper/root is unavailable after setup."
+	mountpoint -q "$mp" || log.die "Encrypted root is not mounted at $mp after setup."
+	for path in etc/crypttab etc/fstab; do
+		[[ -e $mp/$path ]] || log.die "Expected storage artifact is missing: $mp/$path"
+	done
+	subvolume_listing="$(btrfs subvolume list "$mp")"
+	for name in @ @home @cache @log @tmp @libvirt @docker @swap; do
+		grep -Fq "path $root_sub_vol/$name" <<<"$subvolume_listing" ||
+			log.die "Expected Btrfs subvolume is missing: $root_sub_vol/$name"
+	done
+	grep -Fq 'UUID=' "$mp/etc/crypttab" || log.die "crypttab does not contain the LUKS UUID mapping."
+	grep -Fq "subvol=$root_sub_vol/@" "$mp/etc/fstab" || log.die "fstab does not contain the configured root subvolume."
+	grep -Fq "subvol=$root_sub_vol/@swap" "$mp/etc/fstab" || log.die "fstab does not contain the configured swap subvolume."
+	grep -Fq '/swap/swapfile' "$mp/etc/fstab" || log.die "fstab does not contain the configured swapfile."
+	log.success "Validated LUKS container, mapper, root mount, swapfile, crypttab and fstab"
+	log.section_end
+}
+
+btrfs-root-setup.run() {
+	common.require_root
+	btrfs-subvol-setup.validate_configuration
+	luks-setup.validate_configuration
+	fstab-setup.validate_configuration
+	common.require_nonempty "efi_dev" "${efi_dev:-}"
+	[[ $efi_dev != /dev/* && $efi_dev != */* && $efi_dev != *..* ]] ||
+		log.die "efi_dev must be a safe device name relative to /dev."
+	common.require_commands btrfs mount mountpoint umount mv rm find cryptsetup lsblk tr blkid fatlabel findmnt grep sed paste
+	if [[ $enlarge == yes ]]; then
+		common.require_commands parted
+	fi
+
+	log.section "Btrfs root storage setup"
+	log.info "Configuration and required commands validated for /dev/$root_dev"
+	log.info "The storage phase will create subvolumes, encrypt the partition in place, and write target mount configuration"
+	btrfs-root-setup.configure_esp_label
+	btrfs-subvol-setup.run
+	luks-setup.run
+	fstab-setup.run
+	btrfs-root-setup.print_summary
+	btrfs-root-setup.validate_result
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	btrfs-root-setup.run
+fi

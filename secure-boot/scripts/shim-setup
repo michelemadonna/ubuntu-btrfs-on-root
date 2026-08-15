@@ -1,0 +1,379 @@
+#!/usr/bin/env bash
+# Configuration is supplied by secure-boot-setup and setup.conf.
+# shellcheck disable=SC2154
+
+set -Eeuo pipefail
+umask 077
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
+# shellcheck disable=SC1090,SC1091
+source "${SETUP_CONFIG_FILE:-$repository_root/setup.conf}"
+
+# ============================================================
+# Configuration
+# ============================================================
+
+SHIM_DIR="${SHIM_DIR:-/usr/local/lib/secureboot/shim}"
+
+SBCTL_KEYROOT="${SBCTL_KEYROOT:-/var/lib/sbctl/keys}"
+
+DB_CERT="${DB_CERT:-$SBCTL_KEYROOT/db/db.pem}"
+DB_CERT_DER="${DB_CERT_DER:-$SBCTL_KEYROOT/db/db.cer}"
+
+DEBIAN_SNAPSHOT="${DEBIAN_SNAPSHOT:-20260812}"
+DEBIAN_SUITE="${DEBIAN_SUITE:-unstable}"
+
+SNAPSHOT_URL="https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/"
+
+SETUP_MODE="${SETUP_MODE:-}"
+
+TMPROOT=""
+
+# ============================================================
+# UEFI and cleanup helpers
+# ============================================================
+
+shim-setup.read_efi_uint8() {
+	local name="$1"
+	local file
+
+	file="$(
+		find /sys/firmware/efi/efivars \
+			-maxdepth 1 \
+			-name "${name}-*" \
+			-print \
+			-quit 2>/dev/null
+	)"
+
+	[[ -n "$file" ]] || return 1
+
+	od -An -j4 -N1 -t u1 "$file" |
+		tr -d '[:space:]'
+}
+
+shim-setup.cleanup() {
+	[[ -z "${TMPROOT:-}" ]] ||
+		rm -rf "$TMPROOT"
+}
+
+# ============================================================
+# Dependencies
+# ============================================================
+
+shim-setup.install_dependencies() {
+	export DEBIAN_FRONTEND=noninteractive
+
+	apt-get update
+
+	apt-get install -y \
+		ca-certificates \
+		openssl \
+		mokutil \
+		sbsigntool \
+		dpkg-dev \
+		findutils \
+		coreutils
+
+	#
+	# Try distro Shim first.
+	#
+	if ! dpkg-query -W -f='${Status}' shim-signed \
+		2>/dev/null |
+		grep -q 'install ok installed'; then
+
+		log.info "Try the distribution shim-signed package"
+
+		apt-get install -y shim-signed || true
+	fi
+}
+
+# ============================================================
+# DER certificate
+# ============================================================
+
+shim-setup.create_der_certificate() {
+	[[ -f "$DB_CERT" ]] ||
+		log.die "Missing sbctl db certificate: $DB_CERT"
+
+	if [[ -f "$DB_CERT_DER" &&
+		"$DB_CERT_DER" -nt "$DB_CERT" ]]; then
+		return
+	fi
+
+	log.info "Create DER certificate for MOK at $DB_CERT_DER"
+
+	openssl x509 \
+		-in "$DB_CERT" \
+		-outform DER \
+		-out "$DB_CERT_DER"
+
+	chmod 0644 "$DB_CERT_DER"
+}
+
+# ============================================================
+# Local Shim
+# ============================================================
+
+shim-setup.install_local_shim() {
+	local shim=""
+	local mm=""
+	local candidate
+
+	for candidate in \
+		/usr/lib/shim/shimx64.efi.signed.latest \
+		/usr/lib/shim/shimx64.efi.signed \
+		/usr/lib/shim/shimx64.efi.dualsigned; do
+		if [[ -f "$candidate" ]]; then
+			shim="$candidate"
+			break
+		fi
+	done
+
+	for candidate in \
+		/usr/lib/shim/mmx64.efi.signed \
+		/usr/lib/shim/mmx64.efi; do
+		if [[ -f "$candidate" ]]; then
+			mm="$candidate"
+			break
+		fi
+	done
+
+	[[ -n "$shim" && -n "$mm" ]] ||
+		return 1
+
+	install -d -m 0755 "$SHIM_DIR"
+
+	install -m 0644 \
+		"$shim" \
+		"$SHIM_DIR/shimx64.efi"
+
+	install -m 0644 \
+		"$mm" \
+		"$SHIM_DIR/mmx64.efi"
+
+	return 0
+}
+
+# ============================================================
+# Debian Snapshot fallback
+# ============================================================
+
+shim-setup.download_debian_shim() {
+	local lists
+	local archives
+	local sources
+	local root
+	local shim
+	local mm
+
+	TMPROOT="$(mktemp -d /tmp/shim-snapshot.XXXXXX)"
+
+	lists="$TMPROOT/lists"
+	archives="$TMPROOT/archives"
+	sources="$TMPROOT/sources.list"
+	root="$TMPROOT/root"
+
+	mkdir -p \
+		"$lists/partial" \
+		"$archives/partial" \
+		"$root"
+
+	if [[ -r /usr/share/keyrings/debian-archive-keyring.gpg ]]; then
+
+		cat >"$sources" <<-EOF
+			deb [check-valid-until=no signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] $SNAPSHOT_URL $DEBIAN_SUITE main
+		EOF
+
+	else
+
+		#
+		# Try to obtain Debian archive keys without polluting
+		# the permanent sources.
+		#
+		apt-get install -y debian-archive-keyring || true
+
+		if [[ -r /usr/share/keyrings/debian-archive-keyring.gpg ]]; then
+
+			cat >"$sources" <<-EOF
+				deb [check-valid-until=no signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] $SNAPSHOT_URL $DEBIAN_SUITE main
+			EOF
+
+		else
+
+			log.die "Debian archive keyring unavailable; refusing an unverified Snapshot repository."
+
+		fi
+	fi
+
+	shim-setup.apt_snapshot() {
+		apt-get \
+			-o "Dir::Etc::sourcelist=$sources" \
+			-o "Dir::Etc::sourceparts=-" \
+			-o "Dir::State::lists=$lists" \
+			-o "Dir::Cache::archives=$archives" \
+			-o "Acquire::Check-Valid-Until=false" \
+			"$@"
+	}
+
+	log.info "Update temporary Debian Snapshot metadata from $SNAPSHOT_URL"
+
+	shim-setup.apt_snapshot update
+
+	log.info "Download Shim from Debian Snapshot suite $DEBIAN_SUITE"
+
+	shim-setup.apt_snapshot \
+		--download-only \
+		--reinstall \
+		-y \
+		install \
+		shim-signed \
+		shim-helpers-amd64-signed
+
+	while IFS= read -r -d '' deb; do
+		dpkg-deb -x "$deb" "$root"
+
+	done < <(
+		find "$archives" \
+			-type f \
+			-name '*.deb' \
+			-print0
+	)
+
+	shim="$(
+		find "$root/usr/lib/shim" \
+			-maxdepth 1 \
+			-type f \
+			\( \
+			-name 'shimx64.efi.signed.latest' \
+			-o \
+			-name 'shimx64.efi.signed' \
+			-o \
+			-name 'shimx64.efi.dualsigned' \
+			\) \
+			-print \
+			-quit
+	)"
+
+	mm="$(
+		find "$root/usr/lib/shim" \
+			-maxdepth 1 \
+			-type f \
+			\( \
+			-name 'mmx64.efi.signed' \
+			-o \
+			-name 'mmx64.efi' \
+			\) \
+			-print \
+			-quit
+	)"
+
+	[[ -n "$shim" ]] ||
+		log.die "Signed Shim not found in Debian package."
+
+	[[ -n "$mm" ]] ||
+		log.die "MokManager not found in Debian package."
+
+	install -d -m 0755 "$SHIM_DIR"
+
+	install -m 0644 \
+		"$shim" \
+		"$SHIM_DIR/shimx64.efi"
+
+	install -m 0644 \
+		"$mm" \
+		"$SHIM_DIR/mmx64.efi"
+}
+
+# ============================================================
+# Verification
+# ============================================================
+
+shim-setup.verify_shim() {
+	[[ -f "$SHIM_DIR/shimx64.efi" ]] ||
+		log.die "Shim is missing."
+
+	[[ -f "$SHIM_DIR/mmx64.efi" ]] ||
+		log.die "MokManager is missing."
+
+	sbverify \
+		--list \
+		"$SHIM_DIR/shimx64.efi" \
+		>/dev/null ||
+		log.die "Cannot verify Shim PE signature."
+
+	sbverify \
+		--list \
+		"$SHIM_DIR/mmx64.efi" \
+		>/dev/null ||
+		log.die "Cannot verify MokManager PE signature."
+}
+
+# ============================================================
+# MOK
+# ============================================================
+
+shim-setup.mok_is_enrolled_or_pending() {
+	LC_ALL=C mokutil --test-key "$DB_CERT_DER" 2>&1 |
+		grep -Eq 'is already enrolled|is already in the enrollment request'
+}
+
+shim-setup.enroll_mok() {
+	if shim-setup.mok_is_enrolled_or_pending; then
+		log.info "sbctl db certificate is already enrolled or pending as MOK"
+		return
+	fi
+
+	common.require_nonempty "mok_pin" "${mok_pin:-}"
+	log.info "Request MOK enrollment for $DB_CERT_DER; the PIN is supplied through standard input and is never logged"
+
+	printf '%s\n%s\n' "$mok_pin" "$mok_pin" | mokutil --import "$DB_CERT_DER"
+
+	log.warn "Complete the MOK enrollment at the next reboot"
+}
+
+# ============================================================
+# Main
+# ============================================================
+
+shim-setup.run() {
+	common.require_root
+	trap shim-setup.cleanup EXIT
+
+	if [[ -z "$SETUP_MODE" ]]; then
+		SETUP_MODE="$(shim-setup.read_efi_uint8 SetupMode)"
+	fi
+
+	if [[ "$SETUP_MODE" == "1" ]]; then
+		log.info "SetupMode=1; Shim/MOK is not required"
+		return
+	fi
+
+	shim-setup.install_dependencies
+	common.require_commands dpkg-query find grep install mktemp mokutil openssl sbverify
+
+	shim-setup.create_der_certificate
+
+	if shim-setup.install_local_shim; then
+
+		log.info "Use Shim installed by the distribution"
+
+	else
+
+		log.info "shim-signed unavailable in current distribution"
+		log.info "Fall back to pinned Debian Snapshot $DEBIAN_SNAPSHOT"
+
+		shim-setup.download_debian_shim
+	fi
+
+	shim-setup.verify_shim
+	shim-setup.enroll_mok
+
+	log.success "Shim and MokManager prepared in $SHIM_DIR"
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	shim-setup.run
+fi

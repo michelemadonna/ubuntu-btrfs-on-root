@@ -1,0 +1,219 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
+
+readonly SOURCE_DIR="${SOURCE_DIR:-/cdrom}"
+readonly TARGET_DEV="${TARGET_DEV:-/dev/sda1}"
+readonly TARGET_LABEL="${TARGET_LABEL:-UBUNTU_LIVE}"
+readonly RESERVE_MIB="${RESERVE_MIB:-256}"
+readonly MIN_PERSISTENCE_MIB="${MIN_PERSISTENCE_MIB:-512}"
+readonly MIN_RESCUE_MIB="${MIN_RESCUE_MIB:-7168}"
+readonly FAT32_MAX_FILE_MIB=4095
+
+rescue_mount_dir=""
+
+install-rescue-live.cleanup() {
+	local status=$?
+
+	sync || true
+	if [[ -n $rescue_mount_dir ]] && mountpoint -q "$rescue_mount_dir"; then
+		umount "$rescue_mount_dir" || true
+	fi
+	[[ -z $rescue_mount_dir ]] || rmdir "$rescue_mount_dir" 2>/dev/null || true
+	exit "$status"
+}
+
+install-rescue-live.validate_integer() {
+	local name=$1 value=$2
+	[[ $value =~ ^[0-9]+$ ]] || log.die "$name must be a non-negative integer."
+}
+
+install-rescue-live.validate_configuration() {
+	install-rescue-live.validate_integer RESERVE_MIB "$RESERVE_MIB"
+	install-rescue-live.validate_integer MIN_PERSISTENCE_MIB "$MIN_PERSISTENCE_MIB"
+	install-rescue-live.validate_integer MIN_RESCUE_MIB "$MIN_RESCUE_MIB"
+	((MIN_RESCUE_MIB >= 7168)) || log.die "MIN_RESCUE_MIB must be at least 7168 MiB."
+	[[ $TARGET_LABEL =~ ^[A-Za-z0-9_-]{1,11}$ ]] ||
+		log.die "TARGET_LABEL must be a valid FAT label of at most 11 characters."
+}
+
+install-rescue-live.calculate_rescue_mib() {
+	local source_size_mib=$1
+	local required_mib=$((source_size_mib + RESERVE_MIB))
+
+	((required_mib < MIN_RESCUE_MIB)) && required_mib=$MIN_RESCUE_MIB
+	printf '%s\n' "$required_mib"
+}
+
+install-rescue-live.patch_grub_config() {
+	local grub_file=$1
+
+	sed -E -i.bak \
+		'/^[[:space:]]*linux(efi)?[[:space:]].*\/casper\/vmlinuz/ {
+		    /(^|[[:space:]])persistent([[:space:]]|$)/! {
+		        s/[[:space:]]+---/ persistent ---/
+		        t persistent_added
+		        s/$/ persistent/
+		        :persistent_added
+		    }
+		}' "$grub_file"
+	rm -f -- "${grub_file}.bak"
+}
+
+install-rescue-live.confirm_destruction() {
+	local disk=$1
+	local rescue_size_mib=$2
+	local persistence_mib=$3
+	local confirmation
+
+	cat <<-EOF
+
+		WARNING: THE PARTITION TABLE ON $disk WILL BE MODIFIED.
+		ALL DATA IN THE CURRENT $TARGET_DEV RANGE WILL BE DESTROYED.
+
+		Source: $SOURCE_DIR
+		Rescue FAT:  $TARGET_DEV, $rescue_size_mib MiB, label $TARGET_LABEL
+		Writable:    new ext4 partition, $persistence_mib MiB, label writable
+		Mode:        UEFI Ubuntu live system with partition-backed persistence
+
+	EOF
+	read -r -p "Type the exact device name ($TARGET_DEV) to continue: " confirmation
+	[[ $confirmation == "$TARGET_DEV" ]] || log.die "Confirmation failed; nothing was changed."
+}
+
+install-rescue-live.partition_path_by_label() {
+	local disk=$1
+	local partition_listing
+
+	partition_listing="$(lsblk -nrpo PATH,PARTLABEL "$disk")"
+	awk '$2 == "writable" { print $1; exit }' <<<"$partition_listing"
+}
+
+install-rescue-live.validate_source_files() {
+	local oversized_file
+
+	oversized_file="$(find "$SOURCE_DIR" -type f -size +${FAT32_MAX_FILE_MIB}M -print -quit)"
+	[[ -z $oversized_file ]] || log.die "Source file exceeds the FAT32 limit: $oversized_file"
+}
+
+install-rescue-live.run() {
+	local source_dev source_size_mib target_size_mib required_size_mib rescue_size_mib persistence_mib
+	local actual_rescue_mib actual_writable_mib
+	local parent_name disk partition_number table_type sector_size start_sector original_sectors
+	local rescue_sectors new_end_sector writable_start_sector original_end_sector writable_dev
+	local relative_path grub_file
+	local -a grub_files=() grub_paths=()
+
+	common.require_root
+	install-rescue-live.validate_configuration
+	common.require_commands awk blkid blockdev du find findmnt grep lsblk mkfs.ext4 mkfs.vfat mount mountpoint parted partprobe rm rsync sed sync tr udevadm umount xargs
+	[[ -d $SOURCE_DIR/casper ]] || log.die "$SOURCE_DIR is not an Ubuntu live medium: casper/ is missing."
+	[[ -b $TARGET_DEV ]] || log.die "$TARGET_DEV is not a block device."
+	[[ $(lsblk -ndo TYPE "$TARGET_DEV") == part ]] || log.die "$TARGET_DEV must be a partition, not a whole disk."
+	source_dev="$(findmnt -no SOURCE --target "$SOURCE_DIR" 2>/dev/null || true)"
+	source_dev="${source_dev%%\[*}"
+	[[ $source_dev != "$TARGET_DEV" ]] || log.die "Source and target are the same device."
+	target_size_mib=$(($(blockdev --getsize64 "$TARGET_DEV") / 1024 / 1024))
+	install-rescue-live.validate_source_files
+	read -r source_size_mib _ < <(du -sm "$SOURCE_DIR")
+	rescue_size_mib="$(install-rescue-live.calculate_rescue_mib "$source_size_mib")"
+	required_size_mib=$((rescue_size_mib + MIN_PERSISTENCE_MIB))
+	((target_size_mib >= required_size_mib)) ||
+		log.die "$TARGET_DEV is ${target_size_mib} MiB; at least ${required_size_mib} MiB are required for a ${rescue_size_mib} MiB rescue filesystem and persistence."
+	persistence_mib=$((target_size_mib - rescue_size_mib))
+	parent_name="$(lsblk -ndo PKNAME "$TARGET_DEV" | tr -d '[:space:]')"
+	partition_number="$(lsblk -ndo PARTN "$TARGET_DEV" | tr -d '[:space:]')"
+	common.require_nonempty "Rescue parent disk" "$parent_name"
+	common.require_nonempty "Rescue partition number" "$partition_number"
+	disk="/dev/$parent_name"
+	table_type="$(parted -m "$disk" print | awk -F: 'NR == 2 { print $6 }')"
+	[[ $table_type == gpt ]] || log.die "Rescue partition splitting currently requires a GPT disk: $disk"
+	[[ -z $(install-rescue-live.partition_path_by_label "$disk") ]] ||
+		log.die "A partition with GPT name 'writable' already exists on $disk."
+	sector_size="$(blockdev --getss "$disk")"
+	start_sector="$(lsblk -ndo START "$TARGET_DEV" | tr -d '[:space:]')"
+	original_sectors="$(blockdev --getsz "$TARGET_DEV")"
+	rescue_sectors=$((rescue_size_mib * 1024 * 1024 / sector_size))
+	new_end_sector=$((start_sector + rescue_sectors - 1))
+	writable_start_sector=$((new_end_sector + 1))
+	original_end_sector=$((start_sector + original_sectors - 1))
+	install-rescue-live.confirm_destruction "$disk" "$rescue_size_mib" "$persistence_mib"
+
+	trap install-rescue-live.cleanup EXIT
+	trap 'log.die "Rescue installation failed at line $LINENO."' ERR
+	if findmnt -rn -S "$TARGET_DEV" >/dev/null 2>&1; then
+		log.info "Unmount mounted rescue target $TARGET_DEV"
+		umount "$TARGET_DEV"
+	fi
+
+	log.section "Rescue partition split"
+	log.info "Shrink partition $partition_number on $disk to $rescue_size_mib MiB"
+	log.warn "Confirm the partition shrink to parted after the exact-device safety confirmation succeeded"
+	LC_ALL=C parted ---pretend-input-tty "$disk" unit s resizepart "$partition_number" "${new_end_sector}s" <<-'EOF'
+		Yes
+	EOF
+	log.info "Create GPT partition 'writable' from sector $writable_start_sector through $original_end_sector"
+	parted --script "$disk" unit s mkpart writable ext4 "${writable_start_sector}s" "${original_end_sector}s"
+	partprobe "$disk"
+	udevadm settle
+	writable_dev="$(install-rescue-live.partition_path_by_label "$disk")"
+	[[ -n $writable_dev && -b $writable_dev ]] || log.die "Unable to discover the new writable partition on $disk."
+	log.info "Format $writable_dev as ext4 with label writable"
+	mkfs.ext4 -F -L writable "$writable_dev"
+	log.success "Created FAT rescue range and ext4 writable partition"
+
+	log.section "Rescue live-system creation"
+	log.info "Format $TARGET_DEV as FAT32 with label $TARGET_LABEL"
+	mkfs.vfat -F 32 -n "$TARGET_LABEL" "$TARGET_DEV"
+	rescue_mount_dir="$(mktemp -d /tmp/ubuntu-live.XXXXXX)"
+	mount "$TARGET_DEV" "$rescue_mount_dir"
+
+	log.info "Copy Ubuntu live medium from $SOURCE_DIR to $TARGET_DEV"
+	rsync -rltD --info=progress2 --no-links --no-owner --no-group --no-perms \
+		--exclude=/writable "$SOURCE_DIR/" "$rescue_mount_dir/"
+
+	for relative_path in boot/grub/grub.cfg boot/grub/loopback.cfg; do
+		grub_file="$rescue_mount_dir/$relative_path"
+		[[ -f $grub_file ]] || continue
+		install-rescue-live.patch_grub_config "$grub_file"
+		grub_files+=("$relative_path")
+		grub_paths+=("$grub_file")
+	done
+	((${#grub_files[@]} > 0)) || log.die "No supported GRUB configuration was found."
+	grep -Eqs '^[[:space:]]*linux(efi)?[[:space:]].*/casper/vmlinuz.*[[:space:]]persistent([[:space:]]|$)' \
+		"${grub_paths[@]}" || log.die "Could not enable persistence in the GRUB configuration."
+
+	sync
+
+	log.section "Rescue system summary"
+	log.summary_item "Status" "completed successfully"
+	log.summary_item "Source" "$SOURCE_DIR"
+	log.summary_item "Rescue partition" "$TARGET_DEV ($rescue_size_mib MiB)"
+	log.summary_item "Filesystem label" "$TARGET_LABEL"
+	log.summary_item "Writable partition" "$writable_dev ($persistence_mib MiB, ext4)"
+	log.summary_item "Modified GRUB files" "${grub_files[*]}"
+	log.success "Persistent Ubuntu rescue system created"
+
+	log.section "Post-summary validation"
+	actual_rescue_mib=$(($(blockdev --getsize64 "$TARGET_DEV") / 1024 / 1024))
+	actual_writable_mib=$(($(blockdev --getsize64 "$writable_dev") / 1024 / 1024))
+	((actual_rescue_mib >= rescue_size_mib)) || log.die "Resized rescue partition is smaller than ${rescue_size_mib} MiB."
+	((actual_writable_mib >= MIN_PERSISTENCE_MIB)) || log.die "Writable partition is smaller than ${MIN_PERSISTENCE_MIB} MiB."
+	[[ $(blkid -c /dev/null -s TYPE -o value "$TARGET_DEV") == vfat ]] || log.die "Rescue target is not FAT after creation."
+	[[ $(blkid -c /dev/null -s LABEL -o value "$TARGET_DEV") == "$TARGET_LABEL" ]] || log.die "Rescue filesystem label does not match $TARGET_LABEL."
+	[[ $(blkid -c /dev/null -s TYPE -o value "$writable_dev") == ext4 ]] || log.die "Writable partition is not ext4."
+	[[ $(blkid -c /dev/null -s LABEL -o value "$writable_dev") == writable ]] || log.die "Writable partition label is not 'writable'."
+	grep -Eqs '^[[:space:]]*linux(efi)?[[:space:]].*/casper/vmlinuz.*[[:space:]]persistent([[:space:]]|$)' \
+		"${grub_paths[@]}" || log.die "Rescue GRUB persistence validation failed."
+	log.success "Validated rescue FAT filesystem, ext4 writable partition and GRUB configuration"
+	log.section_end
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	install-rescue-live.run
+fi

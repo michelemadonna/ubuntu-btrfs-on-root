@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Configuration variables are loaded from the runtime-selected setup.conf.
+# shellcheck disable=SC2154
+
+set -Eeuo pipefail
+umask 077
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
+
+# Runtime-derived paths allow direct execution and sourcing from setup.sh.
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
+# shellcheck disable=SC1090,SC1091
+source "${SETUP_CONFIG_FILE:-$repository_root/setup.conf}"
+
+btrfs-subvol-setup.validate_configuration() {
+	common.require_nonempty "root_dev" "${root_dev:-}"
+	common.require_nonempty "mp" "${mp:-}"
+	common.require_nonempty "root_sub_vol" "${root_sub_vol:-}"
+	common.require_nonempty "swap_size" "${swap_size:-}"
+
+	[[ $root_dev != /dev/* ]] ||
+		log.die "root_dev must be configured without the /dev/ prefix."
+	[[ $mp == /* && $mp != / ]] ||
+		log.die "mp must be an absolute path other than /."
+	[[ $root_sub_vol != /* && $root_sub_vol != *..* ]] ||
+		log.die "root_sub_vol must be a safe relative Btrfs path."
+}
+
+btrfs-subvol-setup.move_directory_contents() (
+	local source_directory=$1
+	local destination_directory=$2
+	local -a entries=()
+
+	shopt -s dotglob nullglob
+	entries=("$source_directory"/*)
+
+	if ((${#entries[@]} == 0)); then
+		log.info "No existing files to move from $source_directory"
+		return
+	fi
+
+	log.info "Move ${#entries[@]} entries from $source_directory to $destination_directory"
+	mv -- "${entries[@]}" "$destination_directory"
+)
+
+btrfs-subvol-setup.create_data_subvolume() {
+	local name=$1
+	local path="$root_sub_vol/$name"
+
+	log.info "Create Btrfs subvolume $path"
+	btrfs subvolume create "$path"
+}
+
+btrfs-subvol-setup.run() {
+	local source_device="/dev/$root_dev"
+	local copied_root="$root_sub_vol/@"
+
+	log.section "Btrfs subvolume layout"
+	log.info "Mount source Btrfs filesystem $source_device at $mp"
+	mount "$source_device" "$mp"
+	cd "$mp"
+
+	log.info "Create distribution container subvolume $root_sub_vol"
+	btrfs subvolume create "$root_sub_vol"
+	log.info "Snapshot the installed filesystem into $copied_root"
+	btrfs subvolume snapshot . "$copied_root"
+
+	log.info "Remove nested installer subvolume copy $copied_root/$root_sub_vol"
+	rm -Rf -- "${copied_root:?}/${root_sub_vol:?}"
+
+	btrfs-subvol-setup.create_data_subvolume "@home"
+	btrfs-subvol-setup.move_directory_contents "$copied_root/home" "$root_sub_vol/@home"
+	btrfs-subvol-setup.create_data_subvolume "@cache"
+	btrfs-subvol-setup.move_directory_contents "$copied_root/var/cache" "$root_sub_vol/@cache"
+	btrfs-subvol-setup.create_data_subvolume "@log"
+	btrfs-subvol-setup.move_directory_contents "$copied_root/var/log" "$root_sub_vol/@log"
+	btrfs-subvol-setup.create_data_subvolume "@tmp"
+	btrfs-subvol-setup.create_data_subvolume "@libvirt"
+	btrfs-subvol-setup.create_data_subvolume "@docker"
+	btrfs-subvol-setup.create_data_subvolume "@swap"
+
+	log.info "Create Btrfs swapfile $root_sub_vol/@swap/swapfile with size $swap_size"
+	btrfs filesystem mkswapfile \
+		--size "$swap_size" \
+		"$root_sub_vol/@swap/swapfile"
+
+	log.info "Remove the original top-level installation files after snapshotting"
+	find . -maxdepth 1 ! -name '@*' ! -name . -exec rm -Rf -- {} \;
+
+	cd /
+	log.info "Unmount source filesystem from $mp"
+	umount "$mp"
+	log.info "Mount normal root subvolume $copied_root at $mp"
+	mount "$source_device" -o "subvol=$copied_root" "$mp"
+	log.success "Btrfs subvolume layout created"
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	common.require_root
+	btrfs-subvol-setup.validate_configuration
+	btrfs-subvol-setup.run
+fi

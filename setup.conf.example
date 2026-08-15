@@ -1,0 +1,21 @@
+# shellcheck shell=bash
+
+export root_dev="sda3"
+export efi_dev="sda2"
+export mp="/mnt/root"
+export rescue_dev="sda1"
+export keyslot_size="32m"
+export iter_time="3000"
+export enlarge=no
+export swap_size="4G"
+export btrfs_options="defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1" #lsm=landlock,lockdown,yama,integrity,apparmor,bpf audit=1 audit_backlog_limit=256
+export suite="resolute"
+export suite_type="ubuntu"
+export PASSPHRASE="password"
+export pre_download="yes"
+export root_sub_vol="@$suite"
+export enable_tpm="yes"
+export snapshot_menu="yes"
+export snapshot_menu_pin="yes"
+export snapshot_menu_pin_value="123456"
+export mok_pin="123456"

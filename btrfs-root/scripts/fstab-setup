@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Configuration variables are loaded from the runtime-selected setup.conf.
+# shellcheck disable=SC2154
+
+set -Eeuo pipefail
+umask 077
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
+
+# Runtime-derived paths allow direct execution and sourcing from setup.sh.
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
+# shellcheck disable=SC1090,SC1091
+source "${SETUP_CONFIG_FILE:-$repository_root/setup.conf}"
+
+fstab-setup.validate_configuration() {
+	common.require_nonempty "root_dev" "${root_dev:-}"
+	common.require_nonempty "mp" "${mp:-}"
+	common.require_nonempty "root_sub_vol" "${root_sub_vol:-}"
+	common.require_nonempty "btrfs_options" "${btrfs_options:-}"
+
+	[[ $root_dev != /dev/* ]] ||
+		log.die "root_dev must be configured without the /dev/ prefix."
+	[[ $mp == /* && $mp != / ]] ||
+		log.die "mp must be an absolute path other than /."
+	[[ $root_sub_vol != /* && $root_sub_vol != *..* ]] ||
+		log.die "root_sub_vol must be a safe relative Btrfs path."
+}
+
+fstab-setup.build_entries() {
+	local options=$1
+	local subvolume_root=$2
+
+	cat <<-EOF
+		/dev/mapper/root /home             btrfs ${options},subvol=${subvolume_root}/@home 0 2
+		/dev/mapper/root /var/log          btrfs ${options},subvol=${subvolume_root}/@log 0 0
+		/dev/mapper/root /var/cache        btrfs ${options},subvol=${subvolume_root}/@cache 0 0
+		/dev/mapper/root /tmp              btrfs ${options},subvol=${subvolume_root}/@tmp 0 0
+		/dev/mapper/root /var/lib/libvirt/ btrfs defaults,ssd,discard=async,noatime,space_cache=v2,subvol=${subvolume_root}/@libvirt 0 0
+		/dev/mapper/root /var/lib/docker   btrfs defaults,ssd,discard=async,noatime,compress=zstd:1,subvol=${subvolume_root}/@docker 0 0
+		/dev/mapper/root /swap             btrfs defaults,noatime,subvol=${subvolume_root}/@swap 0 0
+		/swap/swapfile none                swap  defaults,pri=10 0 0
+	EOF
+}
+
+fstab-setup.build_root_entry() {
+	local options=$1
+	local subvolume_root=$2
+
+	printf '/dev/mapper/root / btrfs %s,subvol=%s/@ 0 1\n' \
+		"$options" "$subvolume_root"
+}
+
+fstab-setup.run() {
+	local fstab_file="$mp/etc/fstab"
+	local root_entry
+
+	log.section "Persistent Btrfs mounts"
+	common.require_readable_file "$fstab_file" "Target fstab"
+	root_entry="$(fstab-setup.build_root_entry "$btrfs_options" "$root_sub_vol")"
+
+	log.info "Replace the installer root entry in $fstab_file with the encrypted mapper and normal root subvolume"
+	if ! grep -Eq '^.* / btrfs defaults 0 1$' "$fstab_file"; then
+		log.die "Expected installer Btrfs root entry not found in $fstab_file; refusing to create an ambiguous root mount."
+	fi
+	sed -i \
+		"s|^.* / btrfs defaults 0 1\$|$root_entry|" \
+		"$fstab_file"
+
+	log.info "Append mounts for home, log, cache, temporary data, virtualization, containers, and swap"
+	fstab-setup.build_entries "$btrfs_options" "$root_sub_vol" >>"$fstab_file"
+	log.info "Configured root entry: $root_entry"
+	log.success "Persistent Btrfs and swap mounts written to $fstab_file"
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	common.require_root
+	fstab-setup.validate_configuration
+	fstab-setup.run
+fi
