@@ -41,15 +41,10 @@ secure-boot-setup.read_efi_uint8() {
 secure-boot-setup.detect_firmware_state() {
 	local state_file=/etc/securebootmode.conf
 
-	if [[ -f $state_file ]]; then
-		SETUP_MODE="$(<"$state_file")"
-		log.info "Read cached UEFI SetupMode=$SETUP_MODE from $state_file"
-	else
-		SETUP_MODE="$(secure-boot-setup.read_efi_uint8 SetupMode)" ||
-			log.die "Cannot read UEFI SetupMode."
-		log.info "Persist detected UEFI SetupMode=$SETUP_MODE to $state_file"
-		printf '%s\n' "$SETUP_MODE" >"$state_file"
-	fi
+	SETUP_MODE="$(secure-boot-setup.read_efi_uint8 SetupMode)" ||
+		log.die "Cannot read current UEFI SetupMode."
+	log.info "Refresh detected UEFI SetupMode=$SETUP_MODE in $state_file"
+	printf '%s\n' "$SETUP_MODE" >"$state_file"
 
 	SECURE_BOOT="$(secure-boot-setup.read_efi_uint8 SecureBoot 2>/dev/null || printf '0\n')"
 	case $SETUP_MODE in
@@ -60,17 +55,57 @@ secure-boot-setup.detect_firmware_state() {
 	0 | 1) ;;
 	*) log.die "Invalid SecureBoot value: $SECURE_BOOT" ;;
 	esac
+	if [[ $SETUP_MODE == 1 ]]; then
+		secure_boot_mode=setup
+	elif [[ $SECURE_BOOT == 1 ]]; then
+		secure_boot_mode=enabled
+	else
+		secure_boot_mode=disabled
+	fi
+	export secure_boot_mode
 	export SETUP_MODE SECURE_BOOT
 }
 
 secure-boot-setup.trust_path() {
-	local setup_mode=$1
+	local enrollment_method=$1
 
-	case $setup_mode in
-	1) printf 'direct\n' ;;
-	0) printf 'shim-mok\n' ;;
+	case $enrollment_method in
+	sbctl) printf 'direct-sbctl\n' ;;
+	mok) printf 'shim-mok\n' ;;
 	*) return 1 ;;
 	esac
+}
+
+secure-boot-setup.copy_public_certificates() {
+	local destination="$ESP/EFI/keys"
+	local certificate destination_file
+	local -a certificates=(
+		"$SBCTL_KEYROOT/PK/PK.pem"
+		"$SBCTL_KEYROOT/KEK/KEK.pem"
+		"$SBCTL_KEYROOT/db/db.pem"
+	)
+
+	[[ -f $DB_CERT_DER ]] && certificates+=("$DB_CERT_DER")
+	install -d -m 0755 "$destination"
+	if find "$destination" -mindepth 1 -maxdepth 1 ! -type f -print -quit | grep -q .; then
+		log.die "Public certificate directory contains an unexpected non-file entry: $destination"
+	fi
+	if find "$destination" -maxdepth 1 -type f \
+		! -name PK.pem ! -name KEK.pem ! -name db.pem ! -name db.cer \
+		-print -quit | grep -q .; then
+		log.die "Public certificate directory contains an unexpected file: $destination"
+	fi
+	log.info "Copy public Secure Boot certificates to $destination; private keys are explicitly excluded"
+	for certificate in "${certificates[@]}"; do
+		common.require_readable_file "$certificate" "Public Secure Boot certificate"
+		destination_file="$destination/$(basename -- "$certificate")"
+		install -m 0644 "$certificate" "$destination_file"
+		cmp -s "$certificate" "$destination_file" || log.die "Copied certificate validation failed: $destination_file"
+	done
+	if find "$destination" -maxdepth 1 -type f \( -name '*.key' -o -name '*.auth' -o -name '*.esl' \) -print -quit | grep -q .; then
+		log.die "Private or enrollment key material was found in public certificate directory $destination."
+	fi
+	log.success "Public Secure Boot certificates are available in $destination"
 }
 
 secure-boot-setup.run_phase() {
@@ -86,20 +121,25 @@ secure-boot-setup.run_phase() {
 secure-boot-setup.print_summary() {
 	local trust_path
 
-	trust_path="$(secure-boot-setup.trust_path "$SETUP_MODE")"
+	trust_path="$(secure-boot-setup.trust_path "$secure_boot_enrollment")"
 	log.section "Secure Boot setup summary"
 	log.summary_item "Status" "completed successfully"
 	log.summary_item "SetupMode" "$SETUP_MODE"
 	log.summary_item "SecureBoot" "$SECURE_BOOT"
+	log.summary_item "Configured state snapshot" "$secure_boot_mode"
+	log.summary_item "Enrollment method" "$secure_boot_enrollment"
 	log.summary_item "Trust path" "$trust_path"
 	log.summary_item "Signing key root" "$SBCTL_KEYROOT"
 	log.summary_item "ESP" "$ESP"
+	log.summary_item "Public certificates" "$ESP/EFI/keys"
 	log.summary_item "Shim directory" "$SHIM_DIR"
 	log.summary_item "rEFInd" "$ESP/EFI/refind"
 	log.success "Secure Boot configuration completed"
 
-	if [[ $SETUP_MODE == 0 ]]; then
+	if [[ $secure_boot_enrollment == mok ]]; then
 		log.warn "Complete the pending MOK enrollment at the next reboot if requested"
+	elif [[ $SETUP_MODE != 1 ]]; then
+		log.warn "sbctl firmware enrollment was not possible because firmware was not in Setup Mode"
 	fi
 }
 
@@ -109,7 +149,7 @@ secure-boot-setup.validate_result() {
 	log.section "Post-summary validation"
 	common.require_readable_file "$SBCTL_KEYROOT/db/db.pem" "Secure Boot db certificate"
 	common.require_readable_file "$SBCTL_KEYROOT/db/db.key" "Secure Boot db private key"
-	if [[ $SETUP_MODE == 0 ]]; then
+	if [[ $secure_boot_enrollment == mok ]]; then
 		loader="$ESP/EFI/refind/grubx64.efi"
 		common.require_readable_file "$ESP/EFI/refind/shimx64.efi" "Shim loader"
 		common.require_readable_file "$ESP/EFI/refind/mmx64.efi" "MokManager"
@@ -117,6 +157,13 @@ secure-boot-setup.validate_result() {
 		loader="$ESP/EFI/refind/refind_x64.efi"
 	fi
 	common.require_readable_file "$loader" "Repository-signed rEFInd loader"
+	for certificate in PK.pem KEK.pem db.pem; do
+		common.require_readable_file "$ESP/EFI/keys/$certificate" "Copied public Secure Boot certificate"
+	done
+	[[ ! -e $ESP/EFI/keys/db.key ]] || log.die "Private db key must not be copied to the ESP."
+	if [[ $secure_boot_enrollment == mok ]]; then
+		common.require_readable_file "$ESP/EFI/keys/db.cer" "Copied public MOK DER certificate"
+	fi
 	sbverify --cert "$SBCTL_KEYROOT/db/db.pem" "$loader" >/dev/null || log.die "rEFInd post-summary signature validation failed: $loader"
 	log.success "Validated Secure Boot keys, selected trust-path loaders and rEFInd signature"
 	log.section_end
@@ -124,13 +171,15 @@ secure-boot-setup.validate_result() {
 
 secure-boot-setup.run() {
 	common.require_root
-	common.require_commands apt-get find od tr uname
+	common.require_commands apt-get basename cmp find grep install od tr uname
 	[[ -d /sys/firmware/efi ]] ||
 		log.die "System was not booted in UEFI mode."
 	case $(uname -m) in
 	x86_64 | amd64) ;;
 	*) log.die "Only x86-64 UEFI is currently supported." ;;
 	esac
+	[[ ${secure_boot_enrollment:-} == sbctl || ${secure_boot_enrollment:-} == mok ]] ||
+		log.die "secure_boot_enrollment must be sbctl or mok."
 
 	log.section "Secure Boot preflight"
 	log.info "Install base packages required for firmware-state discovery"
@@ -139,16 +188,20 @@ secure-boot-setup.run() {
 	apt-get install -y ca-certificates findutils coreutils
 	secure-boot-setup.detect_firmware_state
 	log.info "Detected SetupMode=$SETUP_MODE and SecureBoot=$SECURE_BOOT"
-	log.info "Selected trust path: $(secure-boot-setup.trust_path "$SETUP_MODE")"
+	log.info "User-selected trust path: $(secure-boot-setup.trust_path "$secure_boot_enrollment")"
+	if [[ $secure_boot_enrollment == sbctl && $SETUP_MODE != 1 ]]; then
+		log.warn "Firmware is not in Setup Mode; sbctl enrollment cannot be completed. Continue with key creation and signing only."
+	fi
 
 	secure-boot-setup.run_phase \
 		"Secure Boot key management" "$script_dir/sbctl-setup"
-	if [[ $SETUP_MODE == 0 ]]; then
+	if [[ $secure_boot_enrollment == mok ]]; then
 		secure-boot-setup.run_phase \
 			"Shim and MOK preparation" "$script_dir/shim-setup"
 	else
-		log.info "Skip Shim/MOK preparation because SetupMode=1 selects direct firmware trust"
+		log.info "Skip Shim/MOK preparation because the user selected sbctl enrollment"
 	fi
+	secure-boot-setup.copy_public_certificates
 	secure-boot-setup.run_phase \
 		"rEFInd installation and signing" "$script_dir/refind-setup"
 	secure-boot-setup.run_phase \

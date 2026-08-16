@@ -22,16 +22,72 @@ setup.write_config_value() {
 	printf 'export %s=%q\n' "$name" "$value" >>"$file"
 }
 
+setup.mounted_device() {
+	local mountpoint_path=$1
+	local source
+
+	source="$(findmnt -rn -M "$mountpoint_path" -o SOURCE 2>/dev/null || true)"
+	source=${source%%\[*}
+	[[ $source == /dev/* ]] || return 1
+	readlink -f -- "$source"
+}
+
+setup.minimum_rescue_size_mib() {
+	local source_directory=${1:-/cdrom}
+	local source_size_mib=0
+
+	if [[ -d $source_directory ]]; then
+		read -r source_size_mib _ < <(du -sm -- "$source_directory")
+	fi
+	if ((source_size_mib + 256 > 7168)); then
+		printf '%s\n' "$((source_size_mib + 256 + 512))"
+	else
+		printf '7680\n'
+	fi
+}
+
+setup.device_size_mib() {
+	local device=$1
+	printf '%s\n' "$(($(blockdev --getsize64 "$device") / 1024 / 1024))"
+}
+
+setup.read_efi_uint8() {
+	local name=$1
+	local file
+
+	file="$(find /sys/firmware/efi/efivars -maxdepth 1 -name "${name}-*" -print -quit 2>/dev/null)"
+	[[ -n $file ]] || return 1
+	od -An -j4 -N1 -t u1 "$file" | tr -d '[:space:]'
+}
+
+setup.detect_secure_boot_mode() {
+	local setup_mode secure_boot
+
+	setup_mode="$(setup.read_efi_uint8 SetupMode 2>/dev/null || true)"
+	secure_boot="$(setup.read_efi_uint8 SecureBoot 2>/dev/null || true)"
+	if [[ $setup_mode == 1 ]]; then
+		printf 'setup\n'
+	elif [[ $secure_boot == 1 ]]; then
+		printf 'enabled\n'
+	elif [[ $secure_boot == 0 ]]; then
+		printf 'disabled\n'
+	else
+		printf 'unknown\n'
+	fi
+}
+
 setup.generate_configuration() {
 	local config_file=$1
-	local disk default_disk root_path efi_path rescue_path name type size detail confirmation config_mode config_name
-	local root_dev=sda3 efi_dev=sda2 rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu
-	local PASSPHRASE=password mok_pin=123456
+	local disk default_disk root_path efi_path boot_path rescue_path name type size detail confirmation config_mode config_name
+	local detected_root_path detected_efi_path detected_boot_path boot_default reuse_boot_as_rescue=no install_rescue=yes
+	local minimum_rescue_mib boot_size_mib
+	local root_dev=sda3 efi_dev=sda2 boot_dev='' rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu
+	local PASSPHRASE=password mok_pin='' secure_boot_enrollment=sbctl secure_boot_mode EXPERIMENTAL_SBCTL_APPEND=false
 	local pre_download=yes enable_tpm=yes snapshot_menu=yes enlarge=no snapshot_menu_pin=yes snapshot_menu_pin_value=123456
 	local mp=/mnt/root keyslot_size=32m btrfs_options='defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1'
-	local -a disk_items=() partition_items=() efi_items=() rescue_items=()
+	local -a disk_items=() partition_items=() efi_items=() boot_items=() rescue_items=()
 
-	common.require_commands bash grep lsblk mktemp mv stat
+	common.require_commands bash blockdev du find findmnt grep lsblk mktemp mv od readlink stat tr
 	[[ -r $TUI_INPUT_DEVICE ]] || log.die "Interactive terminal is unavailable: $TUI_INPUT_DEVICE"
 	log.section "Guided setup.conf creation"
 	log.warn "This procedure is intended only for a freshly installed Ubuntu system created from the live environment."
@@ -39,6 +95,25 @@ setup.generate_configuration() {
 	log.info "The wizard is using the built-in supported defaults."
 
 	log.section "Storage configuration"
+	detected_root_path="$(setup.mounted_device /target || true)"
+	detected_efi_path="$(setup.mounted_device /target/boot/efi || true)"
+	detected_boot_path="$(setup.mounted_device /target/boot || true)"
+	if [[ -n $detected_root_path ]]; then
+		root_dev=${detected_root_path#/dev/}
+		mp=/target
+		log.info "Detected installed root $detected_root_path mounted at /target"
+	fi
+	if [[ -n $detected_efi_path ]]; then
+		efi_dev=${detected_efi_path#/dev/}
+		log.info "Detected EFI System Partition $detected_efi_path mounted at /target/boot/efi"
+	fi
+	if [[ -n $detected_boot_path && $detected_boot_path != "$detected_root_path" ]]; then
+		boot_dev=${detected_boot_path#/dev/}
+		log.info "Detected separate boot partition $detected_boot_path mounted at /target/boot"
+	else
+		detected_boot_path=""
+		log.info "No separate /boot mount detected; boot_dev remains optional"
+	fi
 	while read -r name type size detail; do
 		[[ $type == disk ]] || continue
 		disk_items+=("$name|$name $size ${detail:-unknown model}")
@@ -61,16 +136,46 @@ setup.generate_configuration() {
 	done
 	efi_path="$(tui.select_one "Select the EFI System Partition" "/dev/$efi_dev" "${efi_items[@]}")" ||
 		log.die "Invalid EFI partition selection."
+	boot_items+=("none|No separate /boot partition")
 	for detail in "${partition_items[@]}"; do
-		[[ ${detail%%|*} == "$root_path" || ${detail%%|*} == "$efi_path" ]] || rescue_items+=("$detail")
+		[[ ${detail%%|*} == "$root_path" || ${detail%%|*} == "$efi_path" ]] || boot_items+=("$detail")
 	done
-	rescue_path="$(tui.select_one "Select the oversized partition reserved for rescue" "/dev/$rescue_dev" "${rescue_items[@]}")" ||
-		log.die "Invalid rescue partition selection."
+	boot_default=${detected_boot_path:-none}
+	boot_path="$(tui.select_one "Select the optional separate /boot partition" "$boot_default" "${boot_items[@]}")" ||
+		log.die "Invalid boot partition selection."
+	[[ $boot_path != none ]] || boot_path=""
+
+	install_rescue="$(tui.toggle "Create the persistent rescue system" "$install_rescue")" ||
+		log.die "Invalid rescue-system toggle."
+	if [[ $install_rescue == yes && -n $boot_path ]]; then
+		minimum_rescue_mib="$(setup.minimum_rescue_size_mib /cdrom)"
+		boot_size_mib="$(setup.device_size_mib "$boot_path")"
+		if ((boot_size_mib >= minimum_rescue_mib)); then
+			log.info "$boot_path is large enough for the live system and writable persistence; suggested rescue target"
+			reuse_boot_as_rescue="$(tui.toggle "Use $boot_path as the rescue partition after copying /boot into Btrfs" yes)" ||
+				log.die "Invalid boot-partition reuse toggle."
+		else
+			log.info "$boot_path is ${boot_size_mib} MiB; rescue reuse requires at least ${minimum_rescue_mib} MiB"
+		fi
+	fi
+
+	if [[ $install_rescue == no ]]; then
+		rescue_path=""
+	elif [[ $reuse_boot_as_rescue == yes ]]; then
+		rescue_path=$boot_path
+	else
+		for detail in "${partition_items[@]}"; do
+			[[ ${detail%%|*} == "$root_path" || ${detail%%|*} == "$efi_path" || ${detail%%|*} == "$boot_path" ]] || rescue_items+=("$detail")
+		done
+		rescue_path="$(tui.select_one "Select the oversized partition reserved for rescue" "/dev/$rescue_dev" "${rescue_items[@]}")" ||
+			log.die "Invalid rescue partition selection."
+	fi
 	swap_size="$(tui.input "Btrfs swapfile size" "$swap_size")"
 	[[ $swap_size =~ ^[1-9][0-9]*[KMGTP]$ ]] || log.die "Swap size must use a value such as 4G."
 
 	root_dev=${root_path#/dev/}
 	efi_dev=${efi_path#/dev/}
+	boot_dev=${boot_path#/dev/}
 	rescue_dev=${rescue_path#/dev/}
 
 	log.section "Distribution configuration"
@@ -82,12 +187,25 @@ setup.generate_configuration() {
 	[[ $suite_type =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Distribution icon identifier is invalid."
 
 	log.section "Encryption and boot security"
+	secure_boot_mode="$(setup.detect_secure_boot_mode)"
+	log.info "Current Secure Boot firmware state: $secure_boot_mode"
+	if [[ $secure_boot_mode != setup ]]; then
+		log.warn "Firmware is not in Setup Mode; sbctl can create and use signing keys, but direct firmware enrollment cannot be completed now."
+	fi
+	secure_boot_enrollment="$(tui.select_one "Select the Secure Boot enrollment method" "$secure_boot_enrollment" \
+		'sbctl|Direct firmware enrollment with sbctl' \
+		'mok|Shim and Machine Owner Key enrollment')" || log.die "Invalid Secure Boot enrollment method."
+	if [[ $secure_boot_enrollment == sbctl && $secure_boot_mode != setup ]]; then
+		log.warn "sbctl was selected while firmware is not in Setup Mode; configuration will continue without automatic firmware enrollment."
+	fi
 	iter_time="$(tui.input "Argon2id time target in milliseconds" "$iter_time")"
 	PASSPHRASE="$(tui.password "Initial LUKS passphrase" "$PASSPHRASE")"
-	mok_pin="$(tui.password "MOK enrollment PIN" "$mok_pin")"
+	if [[ $secure_boot_enrollment == mok ]]; then
+		mok_pin="$(tui.password "MOK enrollment PIN" 123456)"
+		[[ -n $mok_pin ]] || log.die "MOK PIN cannot be empty."
+	fi
 	[[ $iter_time =~ ^[1-9][0-9]*$ ]] || log.die "Argon2id time target must be a positive integer."
 	[[ -n $PASSPHRASE ]] || log.die "LUKS passphrase cannot be empty."
-	[[ -n $mok_pin ]] || log.die "MOK PIN cannot be empty."
 
 	log.section "Optional features"
 	pre_download="$(tui.toggle "Pre-download target packages" "$pre_download")" || log.die "Invalid pre-download toggle."
@@ -108,8 +226,10 @@ setup.generate_configuration() {
 	chmod 0600 "$temporary_config"
 	setup.write_config_value "$temporary_config" root_dev "$root_dev"
 	setup.write_config_value "$temporary_config" efi_dev "$efi_dev"
+	setup.write_config_value "$temporary_config" boot_dev "$boot_dev"
 	setup.write_config_value "$temporary_config" mp "$mp"
 	setup.write_config_value "$temporary_config" rescue_dev "$rescue_dev"
+	setup.write_config_value "$temporary_config" install_rescue "$install_rescue"
 	setup.write_config_value "$temporary_config" keyslot_size "$keyslot_size"
 	setup.write_config_value "$temporary_config" iter_time "$iter_time"
 	setup.write_config_value "$temporary_config" enlarge "$enlarge"
@@ -117,6 +237,9 @@ setup.generate_configuration() {
 	setup.write_config_value "$temporary_config" btrfs_options "$btrfs_options"
 	setup.write_config_value "$temporary_config" suite "$suite"
 	setup.write_config_value "$temporary_config" suite_type "$suite_type"
+	setup.write_config_value "$temporary_config" secure_boot_mode "$secure_boot_mode"
+	setup.write_config_value "$temporary_config" secure_boot_enrollment "$secure_boot_enrollment"
+	setup.write_config_value "$temporary_config" EXPERIMENTAL_SBCTL_APPEND "$EXPERIMENTAL_SBCTL_APPEND"
 	setup.write_config_value "$temporary_config" PASSPHRASE "$PASSPHRASE"
 	setup.write_config_value "$temporary_config" pre_download "$pre_download"
 	setup.write_config_value "$temporary_config" root_sub_vol "@$suite"
@@ -133,12 +256,17 @@ setup.generate_configuration() {
 	log.summary_item "Disk" "$disk"
 	log.summary_item "Root" "$root_path"
 	log.summary_item "ESP" "$efi_path"
-	log.summary_item "Rescue" "$rescue_path"
+	log.summary_item "Separate boot" "${boot_path:-none}"
+	log.summary_item "Create rescue" "$install_rescue"
+	log.summary_item "Rescue" "${rescue_path:-not configured}"
+	log.summary_item "Boot reused for rescue" "$reuse_boot_as_rescue"
 	log.summary_item "Mount point" "$mp"
 	log.summary_item "LUKS header space" "$keyslot_size"
 	log.summary_item "Btrfs options" "$btrfs_options"
 	log.summary_item "Suite" "$suite"
 	log.summary_item "Distribution icon" "$suite_type"
+	log.summary_item "Detected Secure Boot mode" "$secure_boot_mode"
+	log.summary_item "Secure Boot enrollment" "$secure_boot_enrollment"
 	log.summary_item "Argon2id target" "${iter_time} ms"
 	log.summary_item "Swap size" "$swap_size"
 	log.summary_item "Enlarge root" "$enlarge"
@@ -154,7 +282,7 @@ setup.generate_configuration() {
 	bash -n "$config_file" || log.die "Generated configuration contains invalid Bash syntax: $config_file"
 	config_mode=$(stat -c '%a' "$config_file")
 	[[ $config_mode == 600 ]] || log.die "Generated configuration permissions are $config_mode; expected 600."
-	for config_name in root_dev efi_dev mp rescue_dev keyslot_size iter_time enlarge swap_size btrfs_options suite suite_type \
+	for config_name in root_dev efi_dev boot_dev mp rescue_dev install_rescue keyslot_size iter_time enlarge swap_size btrfs_options suite suite_type secure_boot_mode secure_boot_enrollment EXPERIMENTAL_SBCTL_APPEND \
 		PASSPHRASE pre_download root_sub_vol enable_tpm snapshot_menu snapshot_menu_pin snapshot_menu_pin_value mok_pin; do
 		grep -q "^export ${config_name}=" "$config_file" ||
 			log.die "Generated configuration is missing required value: $config_name"
@@ -182,15 +310,37 @@ setup.load_configuration() {
 
 	common.require_nonempty "root_dev" "${root_dev:-}"
 	common.require_nonempty "efi_dev" "${efi_dev:-}"
-	common.require_nonempty "rescue_dev" "${rescue_dev:-}"
 	common.require_nonempty "mp" "${mp:-}"
 	common.require_nonempty "root_sub_vol" "${root_sub_vol:-}"
 	common.require_nonempty "suite" "${suite:-}"
 	common.require_nonempty "pre_download" "${pre_download:-}"
-	[[ $rescue_dev != */* && $rescue_dev != *..* ]] ||
-		log.die "rescue_dev must be a device name relative to /dev."
-	[[ $rescue_dev != "$root_dev" && $rescue_dev != "$efi_dev" ]] ||
-		log.die "rescue_dev must be distinct from root_dev and efi_dev."
+	common.require_nonempty "secure_boot_mode" "${secure_boot_mode:-}"
+	common.require_nonempty "secure_boot_enrollment" "${secure_boot_enrollment:-}"
+	[[ $secure_boot_mode == setup || $secure_boot_mode == enabled || $secure_boot_mode == disabled || $secure_boot_mode == unknown ]] ||
+		log.die "secure_boot_mode must be setup, enabled, disabled, or unknown."
+	[[ $secure_boot_enrollment == sbctl || $secure_boot_enrollment == mok ]] ||
+		log.die "secure_boot_enrollment must be sbctl or mok."
+	install_rescue=${install_rescue:-yes}
+	[[ $install_rescue == yes || $install_rescue == no ]] || log.die "install_rescue must be yes or no."
+	EXPERIMENTAL_SBCTL_APPEND=${EXPERIMENTAL_SBCTL_APPEND:-false}
+	[[ $EXPERIMENTAL_SBCTL_APPEND == true || $EXPERIMENTAL_SBCTL_APPEND == false ]] ||
+		log.die "EXPERIMENTAL_SBCTL_APPEND must be true or false."
+	if [[ $secure_boot_enrollment == mok ]]; then
+		common.require_nonempty "mok_pin" "${mok_pin:-}"
+	fi
+	boot_dev=${boot_dev:-}
+	[[ -z $boot_dev || ($boot_dev != */* && $boot_dev != *..*) ]] ||
+		log.die "boot_dev must be empty or a device name relative to /dev."
+	[[ -z $boot_dev || ($boot_dev != "$root_dev" && $boot_dev != "$efi_dev") ]] ||
+		log.die "boot_dev must be distinct from root_dev and efi_dev."
+	rescue_dev=${rescue_dev:-}
+	if [[ $install_rescue == yes || $setup_action == install-rescue-live ]]; then
+		common.require_nonempty "rescue_dev" "$rescue_dev"
+		[[ $rescue_dev != */* && $rescue_dev != *..* ]] ||
+			log.die "rescue_dev must be a device name relative to /dev."
+		[[ $rescue_dev != "$root_dev" && $rescue_dev != "$efi_dev" ]] ||
+			log.die "rescue_dev must be distinct from root_dev and efi_dev."
+	fi
 }
 
 setup.show_help() {
@@ -241,11 +391,20 @@ setup.parse_arguments() {
 }
 
 setup.prepare_target() {
-	log.info "Prepare installation target"
-	umount /target/boot/efi
-	umount /target/cdrom
-	umount /target
-	mkdir "$mp"
+	log.section "Installed target preflight"
+	common.require_commands mountpoint umount
+	[[ -d $mp ]] || log.die "Configured target mount point does not exist: $mp"
+	mountpoint -q "$mp" || log.die "Configured target is not mounted: $mp"
+	log.info "Preserve the existing target mount at $mp; storage scripts will consume it in place"
+	if mountpoint -q /target/cdrom; then
+		log.info "Unmount the live-medium bind mount from /target/cdrom"
+		umount /target/cdrom || log.die "Unable to unmount /target/cdrom."
+		log.success "Unmounted /target/cdrom"
+	else
+		log.info "/target/cdrom is not mounted; no unmount is required"
+	fi
+	log.success "Installed target is mounted and ready for validation"
+	log.section_end
 }
 
 setup.install_rescue_system() {
@@ -425,11 +584,15 @@ setup.main() {
 	"$repository_root/btrfs-root/scripts/btrfs-root-setup"
 	setup.prepare_chroot
 	setup.run_inner_installation
-	setup.install_rescue_system
-	setup.unmount_everything
+	if [[ $install_rescue == yes ]]; then
+		setup.install_rescue_system
+	else
+		log.info "Persistent rescue-system creation was not requested"
+	fi
+	setup.restore_chroot_files
 	cleanup_required=false
 	trap - EXIT
-	log.info "Finished"
+	log.info "Finished; target filesystems and the root mapper remain mounted"
 }
 
 setup.main "$@"

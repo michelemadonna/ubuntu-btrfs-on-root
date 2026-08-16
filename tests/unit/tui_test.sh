@@ -51,12 +51,33 @@ tui-test.toggles() {
 }
 
 tui-test.generated_config_contract() {
+	local prepare_target_body
+
 	rg -q 'setup\.generate_configuration' "$repository_root/setup.sh"
 	if rg -q 'source .*setup\.conf\.example' "$repository_root/setup.sh"; then
 		printf 'setup.sh must not depend on setup.conf.example\n' >&2
 		return 1
 	fi
-	rg -q 'local root_dev=sda3 efi_dev=sda2 rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu' "$repository_root/setup.sh"
+	rg -q "local root_dev=sda3 efi_dev=sda2 boot_dev='' rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu" "$repository_root/setup.sh"
+	rg -q 'setup\.mounted_device /target' "$repository_root/setup.sh"
+	rg -q 'setup\.mounted_device /target/boot/efi' "$repository_root/setup.sh"
+	rg -q 'setup\.mounted_device /target/boot' "$repository_root/setup.sh"
+	rg -q 'setup\.write_config_value "\$temporary_config" boot_dev "\$boot_dev"' "$repository_root/setup.sh"
+	rg -q 'setup\.write_config_value "\$temporary_config" secure_boot_mode "\$secure_boot_mode"' "$repository_root/setup.sh"
+	rg -q 'setup\.write_config_value "\$temporary_config" secure_boot_enrollment "\$secure_boot_enrollment"' "$repository_root/setup.sh"
+	rg -q 'setup\.write_config_value "\$temporary_config" install_rescue "\$install_rescue"' "$repository_root/setup.sh"
+	rg -q 'setup\.write_config_value "\$temporary_config" EXPERIMENTAL_SBCTL_APPEND "\$EXPERIMENTAL_SBCTL_APPEND"' "$repository_root/setup.sh"
+	rg -q 'Select the Secure Boot enrollment method' "$repository_root/setup.sh"
+	rg -q 'Use .* as the rescue partition after copying /boot into Btrfs' "$repository_root/setup.sh"
+	prepare_target_body="$(awk '/^setup\.prepare_target\(\)/,/^}/' "$repository_root/setup.sh")"
+	[[ $prepare_target_body == *'mountpoint -q /target/cdrom'* ]] || return 1
+	[[ $prepare_target_body == *'umount /target/cdrom'* ]] || return 1
+	if grep -Fq "umount \"\$mp\"" <<<"$prepare_target_body"; then
+		return 1
+	fi
+	if awk '/^setup\.main\(\)/,/^}/' "$repository_root/setup.sh" | rg -q '^\s*setup\.unmount_everything$'; then
+		return 1
+	fi
 	rg -q 'setup\.write_config_value "\$temporary_config" mp "\$mp"' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" keyslot_size "\$keyslot_size"' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" btrfs_options "\$btrfs_options"' "$repository_root/setup.sh"

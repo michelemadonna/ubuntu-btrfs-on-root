@@ -29,21 +29,27 @@ partitioning. Create this default layout:
 
 | Device | Ubiquity configuration | Purpose after setup |
 | --- | --- | --- |
-| `/dev/sda1` | reserve for the rescue system | FAT32 live Ubuntu rescue system with persistence |
+| `/dev/sda1` | optional reserve for the rescue system | FAT32 live Ubuntu rescue system with persistence when enabled |
 | `/dev/sda2` | FAT32 EFI System Partition mounted at `/boot/efi` | label `ESP`; rEFInd, shim when needed, fwupd and signed UKIs |
 | `/dev/sda3` | unencrypted Btrfs mounted at `/` | LUKS2-encrypted Ubuntu Btrfs root |
 
-The partition initially assigned to `/dev/sda1` must be large enough for a rescue
+An installation may also have a separate `/boot` partition. Ubiquity must leave
+it mounted at `/target/boot`; the wizard detects it as `boot_dev`. Setup copies
+its contents into the encrypted `@$suite/@/boot`, removes the obsolete `/boot`
+entry from fstab and preserves the old partition unless it is explicitly
+selected for reuse as the rescue target.
+
+When rescue creation is enabled, its selected partition must be large enough for a rescue
 FAT filesystem of at least 7168 MiB plus at least 512 MiB of persistence. Setup
 shrinks `/dev/sda1` to the larger of 7168 MiB or the live-medium size plus a
 256 MiB reserve. It creates a new GPT partition in the released trailing range,
-formats it ext4 and labels it `writable`. With the documented three-partition
+formats it ext4 and labels it `writable`. With the documented default
 input layout, that new partition normally receives number 4.
 
 All persistent data belonging to the installed operating system—including
 root, home, logs, caches, containers and swap—lives inside the LUKS2 container.
 The ESP is the only unencrypted partition in the normal installed-system boot
-chain. `/dev/sda1` is a separate, deliberately unencrypted rescue environment,
+chain. When created, `/dev/sda1` is a separate, deliberately unencrypted rescue environment,
 not part of the installed system's FDE boundary.
 
 Do not ask Ubiquity to encrypt `/dev/sda3`: the setup performs an in-place LUKS2
@@ -54,6 +60,8 @@ session. The scripts expect:
 
 - the installed system mounted at `/target`;
 - its ESP mounted at `/target/boot/efi`;
+- its optional separate boot partition mounted at `/target/boot`, when that
+  path exists; its absence is supported;
 - the live medium mounted at `/cdrom`;
 - x86-64 UEFI firmware and working network access.
 
@@ -82,8 +90,15 @@ into `setup.sh`; the wizard does not depend on `setup.conf.example` being
 present. Inputs are grouped into storage, distribution, encryption
 and boot security, and optional-feature sections. The wizard first lists block
 devices, then lists only the partitions belonging to the selected device for
-root selection. ESP and oversized rescue partitions are
-selected from the remaining partitions. `suite` is a single selection limited
+root selection. When `/target`, `/target/boot/efi` and an exact separate
+`/target/boot` mount exist, their source devices are offered as defaults for
+`root_dev`, `efi_dev` and `boot_dev`, and `mp` becomes `/target`. Initial target
+preparation preserves those mounts. Rescue creation has its own toggle. When
+enabled, an adequately sized `boot_dev` is suggested as the default rescue
+target after its files are migrated. If no boot partition exists or the user
+declines its reuse, the wizard asks for another partition. When rescue is
+disabled, no rescue partition is requested and `rescue_dev` remains empty.
+`suite` is a single selection limited
 to `resolute` or `noble`; `suite_type` is a single selection currently limited
 to `ubuntu`. Every `yes`/`no` setting is presented as a toggle and normalized to
 one of those two literal values. Secrets use hidden input. The generated file is
@@ -100,7 +115,7 @@ The wizard deliberately does not ask for `mp`, `keyslot_size` or
 `btrfs_options`; it writes their current supported values directly:
 
 ```text
-mp=/mnt/root
+mp=/mnt/root # automatically /target when Ubiquity's target is mounted
 keyslot_size=32m
 btrfs_options=defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1
 ```
@@ -111,10 +126,15 @@ Important current options are:
 | --- | --- | --- |
 | `root_dev` | `sda3` | physical Btrfs root that will be encrypted |
 | `efi_dev` | `sda2` | EFI System Partition |
+| `boot_dev` | empty | optional separate boot partition migrated into encrypted root |
 | `rescue_dev` | `sda1` | partition that setup will reformat for rescue |
+| `install_rescue` | `yes` | create the persistent rescue system during the main setup |
 | `mp` | `/mnt/root` | target mount point used during conversion |
 | `suite` | `resolute` | UKI token and Btrfs distribution container; produces `@resolute/@` |
 | `suite_type` | `ubuntu` | distribution icon name used by rEFInd, such as `os_ubuntu.png` |
+| `secure_boot_mode` | detected | temporary firmware-state snapshot: `setup`, `enabled`, `disabled` or `unknown` |
+| `secure_boot_enrollment` | `sbctl` | explicit trust-path choice: `sbctl` or `mok` |
+| `EXPERIMENTAL_SBCTL_APPEND` | `false` | opt into the experimental partial/append preservation of existing EFI trust material |
 | `btrfs_options` | repository default | mount options embedded in fstab and the UKI command line |
 | `swap_size` | `4G` | Btrfs swap-file size |
 | `iter_time` | `3000` | Argon2id PBKDF calibration target in milliseconds |
@@ -124,7 +144,7 @@ Important current options are:
 | `snapshot_menu_pin` | `yes` | require its PIN for snapshot selection |
 | `enable_tpm` | `yes` | install TPM integration; it does not enroll a token |
 
-`PASSPHRASE`, `snapshot_menu_pin_value` and `mok_pin` must not be logged or
+`PASSPHRASE`, `snapshot_menu_pin_value` and a configured `mok_pin` must not be logged or
 committed with real values.
 
 `iter_time` is passed to `cryptsetup reencrypt --iter-time`. Despite its name,
@@ -157,19 +177,24 @@ last reported state. These checks do not replace a real reboot test.
 
 The main flow performs these operations:
 
-1. creates `@$suite/@` and the dedicated Btrfs data subvolumes;
-2. creates a Btrfs swap file;
-3. encrypts `/dev/sda3` in place as LUKS2 and mounts it as
+1. verifies that the configured root device is Btrfs and mounted at `mp`;
+2. creates `@$suite/@` and the dedicated Btrfs data subvolumes;
+3. when `boot_dev` is set, copies it into `@$suite/@/boot`, unmounts it and
+   removes its obsolete `/boot` fstab entry;
+4. creates a Btrfs swap file;
+5. encrypts `/dev/sda3` in place as LUKS2 and mounts it as
    `/dev/mapper/root`;
-4. generates the target fstab and crypttab configuration;
-5. enters the installed system in a mount-isolated chroot;
-6. configures Secure Boot, rEFInd and fwupd;
-7. installs Snapper and the optional early-boot snapshot selector;
-8. configures kernel-install, dracut and ukify, then generates and verifies UKIs;
-9. installs TPM support when enabled, without enrolling LUKS automatically;
-10. splits the reserved rescue range, creates the ext4 `writable` partition and
-    copies the live system to the resized FAT rescue partition;
-11. unmounts the target and closes the temporary LUKS mapping.
+6. generates the target fstab and crypttab configuration;
+7. enters the installed system in a mount-isolated chroot;
+8. configures Secure Boot, rEFInd and fwupd;
+9. installs Snapper and the optional early-boot snapshot selector;
+10. configures kernel-install, dracut and ukify, then generates and verifies UKIs;
+11. installs TPM support when enabled, without enrolling LUKS automatically;
+12. when requested, splits the selected rescue range, creates the ext4
+    `writable` partition and copies the live system to the resized FAT rescue
+    partition;
+13. restores temporary chroot files while leaving target mounts and the root
+    mapper available for inspection or subsequent live-session work.
 
 Detailed installation and runtime flows are documented in
 [docs/architecture.md](docs/architecture.md) and
@@ -232,39 +257,53 @@ discard. The root kernel command line identifies the same LUKS UUID and mounts
 
 ## Secure Boot modes
 
-Setup detects the current firmware state and selects one of two paths.
+The wizard detects the current firmware state and stores it temporarily as
+`secure_boot_mode`: `setup`, `enabled`, `disabled` or `unknown`. The user then
+explicitly selects `secure_boot_enrollment=sbctl` or `mok`; firmware state never
+silently changes that choice.
 
 ### Firmware in Setup Mode
 
-sbctl creates or reuses local PK, KEK and db keys. Setup enrolls db, then KEK,
-and PK last while retaining supported Microsoft and firmware certificates.
+sbctl creates or reuses local PK, KEK and db keys. The default enrollment is
+`sbctl enroll-keys --microsoft`.
 rEFInd and the participating EFI executables are signed and verified with the
 local db key.
 
-This path is used only when the firmware reports `SetupMode=1`, meaning no
+Direct enrollment can complete only when firmware reports `SetupMode=1`, meaning no
 active Platform Key is enforcing the current Secure Boot policy. Its advantage
 is a direct, locally controlled chain without an additional shim layer. It also
 allows sbctl to track and sign local EFI artifacts consistently. Its trade-offs
 are that firmware trust is changed, key backup becomes the administrator's
 responsibility, and a firmware reset or lost private key requires deliberate
-recovery. Enrollment order is db, KEK and finally PK so enforcement is enabled
-only after the subordinate databases are ready.
+recovery. The older explicit db, KEK and PK partial ordering and preservation
+logic is available only with `EXPERIMENTAL_SBCTL_APPEND=true`.
+
+The user may still select `sbctl` while Secure Boot is enabled or disabled but
+not in Setup Mode. Setup emits a non-blocking warning, creates the keys, signs
+the EFI artifacts and continues, but does not enroll PK/KEK/db and does not
+switch to MOK automatically. With Secure Boot enabled, the resulting direct
+loader will not be trusted until the db identity is enrolled deliberately.
 
 ### Firmware already in User Mode
 
-Setup does not replace existing firmware platform keys. It installs a shim/MOK
+When the user selects MOK, setup does not replace firmware platform keys. It installs a shim/MOK
 path and imports the local db certificate with `mokutil`. On the next reboot,
 complete the MOK enrollment in MokManager using the configured `mok_pin`.
 
-This path is used when firmware reports `SetupMode=0`: an existing Platform Key
-already enforces User Mode, so setup leaves the firmware PK/KEK/db databases
-untouched. Its advantage is compatibility with an existing OEM or Microsoft
+The MOK path can be prepared whether Secure Boot is currently enabled or
+disabled. The wizard asks for `mok_pin` only after MOK is selected. Its
+advantage is compatibility with an existing OEM or Microsoft
 trust setup and no replacement of firmware ownership keys. Its disadvantages
 are the extra shim layer, a mandatory interactive MOK enrollment on reboot, and
 the need to keep shim/MokManager and the MOK-authorized signing certificate
 consistent. sbctl still creates the local signing keys and signs repository EFI
 artifacts, but those signatures reach firmware trust through shim and MOK rather
 than direct db enrollment.
+
+For both choices, setup copies only public certificates to
+`/boot/efi/EFI/keys`: `PK.pem`, `KEK.pem`, `db.pem` and, when generated for MOK,
+`db.cer`. It logs this operation and rejects private keys or unexpected content
+in that directory. Private signing keys remain under `/var/lib/sbctl/keys`.
 
 The repository includes `refind_themes.zip`, which the rEFInd setup expects at
 the repository root.
@@ -462,6 +501,12 @@ sudo generate-uki --all
 The rescue partition is a persistent copy of the Ubuntu live environment. It is
 intended for recovery when the installed boot chain or encrypted root needs
 repair.
+
+Creation during the main flow is optional through `install_rescue`. If enabled,
+the wizard suggests a sufficiently large `boot_dev`; the requirement is the
+larger of 7168 MiB or live-source size plus 256 MiB, plus at least 512 MiB for
+`writable`. Declining that suggestion—or having no separate boot—opens the
+normal rescue-partition selector.
 
 Its persistence filesystem is a separate ext4 partition labelled `writable`,
 created from the space released when the original rescue partition is shrunk.

@@ -22,6 +22,40 @@ source "$script_dir/fstab-setup"
 
 readonly ESP_FILESYSTEM_LABEL=ESP
 
+btrfs-root-setup.validate_mounted_device() {
+	local mountpoint_path=$1
+	local expected_device=$2
+	local description=$3
+	local mounted_source
+
+	mountpoint -q "$mountpoint_path" || log.die "$description is not mounted at $mountpoint_path."
+	mounted_source="$(findmnt -rn -M "$mountpoint_path" -o SOURCE 2>/dev/null || true)"
+	mounted_source=${mounted_source%%\[*}
+	[[ -n $mounted_source && $(readlink -f -- "$mounted_source") == "$(readlink -f -- "$expected_device")" ]] ||
+		log.die "$description mount mismatch at $mountpoint_path: expected $expected_device, found '${mounted_source:-none}'."
+}
+
+btrfs-root-setup.prepare_existing_mounts() {
+	local efi_mount="$mp/boot/efi"
+	local boot_mount="$mp/boot"
+
+	btrfs-subvol-setup.validate_source_filesystem
+	if mountpoint -q "$efi_mount"; then
+		btrfs-root-setup.validate_mounted_device "$efi_mount" "/dev/$efi_dev" "EFI System Partition"
+	else
+		log.die "EFI System Partition /dev/$efi_dev must already be mounted at $efi_mount."
+	fi
+
+	if [[ -n ${boot_dev:-} ]]; then
+		btrfs-root-setup.validate_mounted_device "$boot_mount" "/dev/$boot_dev" "Separate boot partition"
+	elif mountpoint -q "$boot_mount"; then
+		log.die "$boot_mount is a separate mount but boot_dev is not configured."
+	fi
+
+	log.info "Unmount the existing ESP mount at $efi_mount before relabelling"
+	umount "$efi_mount"
+}
+
 btrfs-root-setup.configure_esp_label() {
 	local efi_device="/dev/$efi_dev"
 	local filesystem_type
@@ -52,10 +86,14 @@ btrfs-root-setup.configured_subvolume_paths() {
 
 btrfs-root-setup.print_summary() {
 	local enlargement_status="disabled"
+	local boot_status="none"
 	local subvolume_paths
 
 	if [[ $enlarge == yes ]]; then
 		enlargement_status="extended to available disk space"
+	fi
+	if [[ -n ${boot_dev:-} ]]; then
+		boot_status="/dev/$boot_dev"
 	fi
 	subvolume_paths="$(btrfs-root-setup.configured_subvolume_paths | paste -sd, -)"
 
@@ -63,6 +101,8 @@ btrfs-root-setup.print_summary() {
 	log.summary_item "Status" "completed successfully"
 	log.summary_item "Source partition" "/dev/$root_dev"
 	log.summary_item "EFI partition" "/dev/$efi_dev (label $ESP_FILESYSTEM_LABEL)"
+	log.summary_item "Separate boot" "$boot_status"
+	[[ -n ${boot_dev:-} ]] && log.summary_item "Boot migration" "/dev/$boot_dev -> $root_sub_vol/@/boot"
 	log.summary_item "LUKS format" "LUKS2 with Argon2id"
 	log.summary_item "Argon2id time target" "${iter_time} ms"
 	log.summary_item "LUKS mapper" "/dev/mapper/root"
@@ -101,6 +141,12 @@ btrfs-root-setup.validate_result() {
 	grep -Fq "subvol=$root_sub_vol/@" "$mp/etc/fstab" || log.die "fstab does not contain the configured root subvolume."
 	grep -Fq "subvol=$root_sub_vol/@swap" "$mp/etc/fstab" || log.die "fstab does not contain the configured swap subvolume."
 	grep -Fq '/swap/swapfile' "$mp/etc/fstab" || log.die "fstab does not contain the configured swapfile."
+	if [[ -n ${boot_dev:-} ]]; then
+		[[ -n $(find "$mp/boot" -mindepth 1 -print -quit) ]] || log.die "Migrated /boot content is missing from the encrypted root."
+		if awk '$2 == "/boot" { found=1 } END { exit !found }' "$mp/etc/fstab"; then
+			log.die "Obsolete separate /boot mount remains in fstab after migration."
+		fi
+	fi
 	log.success "Validated LUKS container, mapper, root mount, swapfile, crypttab and fstab"
 	log.section_end
 }
@@ -111,9 +157,14 @@ btrfs-root-setup.run() {
 	luks-setup.validate_configuration
 	fstab-setup.validate_configuration
 	common.require_nonempty "efi_dev" "${efi_dev:-}"
+	boot_dev=${boot_dev:-}
 	[[ $efi_dev != /dev/* && $efi_dev != */* && $efi_dev != *..* ]] ||
 		log.die "efi_dev must be a safe device name relative to /dev."
-	common.require_commands btrfs mount mountpoint umount mv rm find cryptsetup lsblk tr blkid fatlabel findmnt grep sed paste
+	[[ -z $boot_dev || ($boot_dev != */* && $boot_dev != *..*) ]] ||
+		log.die "boot_dev must be empty or a device name relative to /dev."
+	[[ -z $boot_dev || ($boot_dev != "$root_dev" && $boot_dev != "$efi_dev") ]] ||
+		log.die "boot_dev must be distinct from root_dev and efi_dev."
+	common.require_commands awk btrfs cmp cp install mktemp mount mountpoint umount mv rm find cryptsetup lsblk tr blkid fatlabel findmnt grep readlink sed paste sync
 	if [[ $enlarge == yes ]]; then
 		common.require_commands parted
 	fi
@@ -121,6 +172,7 @@ btrfs-root-setup.run() {
 	log.section "Btrfs root storage setup"
 	log.info "Configuration and required commands validated for /dev/$root_dev"
 	log.info "The storage phase will create subvolumes, encrypt the partition in place, and write target mount configuration"
+	btrfs-root-setup.prepare_existing_mounts
 	btrfs-root-setup.configure_esp_label
 	btrfs-subvol-setup.run
 	luks-setup.run

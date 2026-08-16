@@ -174,11 +174,11 @@ fwupd-setup.append_ini_value() {
 }
 
 fwupd-setup.disable_shim_for_mode() {
-	local setup_mode=$1
+	local enrollment_method=$1
 
-	case $setup_mode in
-	1) printf 'true\n' ;;
-	0) printf 'false\n' ;;
+	case $enrollment_method in
+	sbctl) printf 'true\n' ;;
+	mok) printf 'false\n' ;;
 	*) return 1 ;;
 	esac
 }
@@ -219,18 +219,18 @@ fwupd-setup.configure() {
 		"$ESP"
 
 	#
-	# SetupMode=1:
+	# User-selected sbctl path:
 	#
 	#   our db key is or will be enrolled directly in firmware,
 	#   therefore fwupd.efi can be trusted directly.
 	#
-	# SetupMode=0:
+	# User-selected MOK path:
 	#
 	#   our db key is trusted through MOK, therefore fwupd
 	#   must keep Shim in the Secure Boot chain.
 	#
-	disable_shim="$(fwupd-setup.disable_shim_for_mode "$SETUP_MODE")" ||
-		log.die "Invalid SetupMode value: $SETUP_MODE"
+	disable_shim="$(fwupd-setup.disable_shim_for_mode "$secure_boot_enrollment")" ||
+		log.die "Invalid Secure Boot enrollment method: $secure_boot_enrollment"
 	if [[ $disable_shim == true ]]; then
 		log.info "Select direct UEFI db trust for fwupd"
 	else
@@ -278,7 +278,7 @@ fwupd-setup.print_summary() {
 	local disable_shim
 	local trust_path
 
-	if [[ "$SETUP_MODE" == "1" ]]; then
+	if [[ "$secure_boot_enrollment" == sbctl ]]; then
 		disable_shim=true
 		trust_path="UEFI db -> fwupd.efi"
 	else
@@ -289,6 +289,7 @@ fwupd-setup.print_summary() {
 	log.section "fwupd setup summary"
 	log.summary_item "SetupMode" "$SETUP_MODE"
 	log.summary_item "SecureBoot" "$SECURE_BOOT"
+	log.summary_item "Enrollment method" "$secure_boot_enrollment"
 	log.summary_item "EFI executable" "$FWUPD_EFI"
 	log.summary_item "Configuration" "$FWUPD_CONF"
 	log.summary_item "Grub chainload" "disabled"

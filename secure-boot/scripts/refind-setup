@@ -337,11 +337,11 @@ refind-setup.sign_efi() {
 }
 
 refind-setup.repository_signed_loader_path() {
-	local setup_mode=$1
+	local enrollment_method=$1
 
-	case $setup_mode in
-	0) printf '%s/grubx64.efi\n' "$REFIND_EFI" ;;
-	1) printf '%s/refind_x64.efi\n' "$REFIND_EFI" ;;
+	case $enrollment_method in
+	mok) printf '%s/grubx64.efi\n' "$REFIND_EFI" ;;
+	sbctl) printf '%s/refind_x64.efi\n' "$REFIND_EFI" ;;
 	*) return 1 ;;
 	esac
 }
@@ -352,8 +352,8 @@ refind-setup.repository_signed_loader_path() {
 
 refind-setup.verify() {
 	local refind=""
-	if [[ "$SETUP_MODE" == "0" ]]; then
-		refind="$(refind-setup.repository_signed_loader_path "$SETUP_MODE")"
+	if [[ "$secure_boot_enrollment" == mok ]]; then
+		refind="$(refind-setup.repository_signed_loader_path "$secure_boot_enrollment")"
 
 		[[ -f "$REFIND_EFI/mmx64.efi" ]] ||
 			log.die "MokManager missing from rEFInd directory."
@@ -362,7 +362,7 @@ refind-setup.verify() {
 		[[ -f "$refind" ]] ||
 			log.die "Shim-chain rEFInd loader missing: $refind"
 	else
-		refind="$(refind-setup.repository_signed_loader_path "$SETUP_MODE")"
+		refind="$(refind-setup.repository_signed_loader_path "$secure_boot_enrollment")"
 
 		[[ -f "$REFIND_EFI/refind_x64.efi" ]] ||
 			log.die "rEFInd EFI binary missing from rEFInd directory."
@@ -381,11 +381,11 @@ refind-setup.verify() {
 refind-setup.sign_refind() {
 	local refind
 
-	refind="$(refind-setup.repository_signed_loader_path "$SETUP_MODE")" ||
-		log.die "Invalid SetupMode value: $SETUP_MODE"
+	refind="$(refind-setup.repository_signed_loader_path "$secure_boot_enrollment")" ||
+		log.die "Invalid Secure Boot enrollment method: $secure_boot_enrollment"
 
 	refind-setup.sign_efi "$refind"
-	if [[ "$SETUP_MODE" == "1" ]]; then
+	if [[ "$secure_boot_enrollment" == sbctl ]]; then
 		refind-setup.sign_efi "$REFIND_EFI/../BOOT/BOOTX64.EFI"
 	fi
 
@@ -427,18 +427,18 @@ refind-setup.run() {
 		)" || log.die "Cannot read UEFI SetupMode."
 	fi
 
-	case "$SETUP_MODE" in
+	case "$secure_boot_enrollment" in
 
-	1)
+	sbctl)
 		refind-setup.install_direct
 		;;
 
-	0)
+	mok)
 		refind-setup.install_with_shim
 		;;
 
 	*)
-		log.die "Invalid SetupMode value: $SETUP_MODE"
+		log.die "Invalid Secure Boot enrollment method: $secure_boot_enrollment"
 		;;
 	esac
 

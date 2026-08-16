@@ -346,11 +346,6 @@ shim-setup.run() {
 		SETUP_MODE="$(shim-setup.read_efi_uint8 SetupMode)"
 	fi
 
-	if [[ "$SETUP_MODE" == "1" ]]; then
-		log.info "SetupMode=1; Shim/MOK is not required"
-		return
-	fi
-
 	shim-setup.install_dependencies
 	common.require_commands dpkg-query find grep install mktemp mokutil openssl sbverify
 
