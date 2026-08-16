@@ -20,7 +20,7 @@ tui.password() {
 	local default=${2:-}
 	local value='' character masked_default input_fd
 
-	masked_default="$(printf '%*s' "${#default}" '' | tr ' ' '*')"
+	masked_default=$default #"$(printf '%*s' "${#default}" '' | tr ' ' '*')"
 	printf '%s [default: %s]: ' "$prompt" "${masked_default:-none}" >&2
 	exec {input_fd}<"$TUI_INPUT_DEVICE"
 	while IFS= read -r -s -n 1 -u "$input_fd" character; do
