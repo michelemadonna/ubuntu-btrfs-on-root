@@ -102,7 +102,7 @@ rEFInd, selected drivers, fwupd EFI files and UKIs are signed with the local db
 identity and verified. Direct mode installs signed rEFInd at the fallback path;
 MOK mode boots it through shim. `refind_themes.zip` is a required repository
 artifact. The cleanup in `refind-setup` removes only validated EFI child trees
-containing a regular `grubefi_x64.efi`.
+containing a regular `grubx64.efi`.
 
 ## Snapshot subsystem
 

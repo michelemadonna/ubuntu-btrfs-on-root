@@ -68,7 +68,7 @@ producer and consumer before altering one.
 - rEFInd, selected drivers, fwupd and every accepted UKI retain verified db
   signatures.
 - EFI cleanup remains contained to validated immediate child trees containing a
-  regular file named exactly `grubefi_x64.efi`.
+  regular file named exactly `grubx64.efi`.
 
 ## UKI lifecycle
 
