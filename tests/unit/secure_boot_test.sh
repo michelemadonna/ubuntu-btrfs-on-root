@@ -110,10 +110,18 @@ secure-boot-test.test_public_certificate_copy() {
 	rm -rf -- "$test_root"
 }
 
+secure-boot-test.test_sbctl_enrollment_contract() {
+	local script="$repository_root/secure-boot/scripts/sbctl-setup"
+
+	rg -q '^\s*sbctl enroll-keys --microsoft$' "$script" || secure-boot-test.fail "standard sbctl enrollment command is missing"
+	rg -q 'EXPERIMENTAL_SBCTL_APPEND != true' "$script" || secure-boot-test.fail "experimental append guard is missing"
+}
+
 secure-boot-test.test_trust_path
 secure-boot-test.test_refind_loader_path
 secure-boot-test.test_remove_grubefi_directories
 secure-boot-test.test_fwupd_trust_mode
 secure-boot-test.test_summary_has_no_secret
 secure-boot-test.test_public_certificate_copy
+secure-boot-test.test_sbctl_enrollment_contract
 printf 'Secure Boot helper tests passed.\n'

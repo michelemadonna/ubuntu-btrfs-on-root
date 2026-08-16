@@ -29,7 +29,7 @@ partitioning. Create this default layout:
 
 | Device | Ubiquity configuration | Purpose after setup |
 | --- | --- | --- |
-| `/dev/sda1` | reserve for the rescue system | FAT32 live Ubuntu rescue system with persistence |
+| `/dev/sda1` | optional reserve for the rescue system | FAT32 live Ubuntu rescue system with persistence when enabled |
 | `/dev/sda2` | FAT32 EFI System Partition mounted at `/boot/efi` | label `ESP`; rEFInd, shim when needed, fwupd and signed UKIs |
 | `/dev/sda3` | unencrypted Btrfs mounted at `/` | LUKS2-encrypted Ubuntu Btrfs root |
 
@@ -39,17 +39,17 @@ its contents into the encrypted `@$suite/@/boot`, removes the obsolete `/boot`
 entry from fstab and preserves the old partition unless it is explicitly
 selected for reuse as the rescue target.
 
-The partition initially assigned to `/dev/sda1` must be large enough for a rescue
+When rescue creation is enabled, its selected partition must be large enough for a rescue
 FAT filesystem of at least 7168 MiB plus at least 512 MiB of persistence. Setup
 shrinks `/dev/sda1` to the larger of 7168 MiB or the live-medium size plus a
 256 MiB reserve. It creates a new GPT partition in the released trailing range,
-formats it ext4 and labels it `writable`. With the documented three-partition
+formats it ext4 and labels it `writable`. With the documented default
 input layout, that new partition normally receives number 4.
 
 All persistent data belonging to the installed operating system—including
 root, home, logs, caches, containers and swap—lives inside the LUKS2 container.
 The ESP is the only unencrypted partition in the normal installed-system boot
-chain. `/dev/sda1` is a separate, deliberately unencrypted rescue environment,
+chain. When created, `/dev/sda1` is a separate, deliberately unencrypted rescue environment,
 not part of the installed system's FDE boundary.
 
 Do not ask Ubiquity to encrypt `/dev/sda3`: the setup performs an in-place LUKS2
@@ -93,11 +93,12 @@ devices, then lists only the partitions belonging to the selected device for
 root selection. When `/target`, `/target/boot/efi` and an exact separate
 `/target/boot` mount exist, their source devices are offered as defaults for
 `root_dev`, `efi_dev` and `boot_dev`, and `mp` becomes `/target`. Initial target
-preparation preserves those mounts. ESP, optional boot and oversized rescue
-partitions are selected from the remaining partitions. If the boot partition
-is large enough, the wizard offers to reuse it for rescue after copying its
-files; accepting sets `rescue_dev=boot_dev` and authorizes its later destructive
-rescue formatting. `suite` is a single selection limited
+preparation preserves those mounts. Rescue creation has its own toggle. When
+enabled, an adequately sized `boot_dev` is suggested as the default rescue
+target after its files are migrated. If no boot partition exists or the user
+declines its reuse, the wizard asks for another partition. When rescue is
+disabled, no rescue partition is requested and `rescue_dev` remains empty.
+`suite` is a single selection limited
 to `resolute` or `noble`; `suite_type` is a single selection currently limited
 to `ubuntu`. Every `yes`/`no` setting is presented as a toggle and normalized to
 one of those two literal values. Secrets use hidden input. The generated file is
@@ -127,11 +128,13 @@ Important current options are:
 | `efi_dev` | `sda2` | EFI System Partition |
 | `boot_dev` | empty | optional separate boot partition migrated into encrypted root |
 | `rescue_dev` | `sda1` | partition that setup will reformat for rescue |
+| `install_rescue` | `yes` | create the persistent rescue system during the main setup |
 | `mp` | `/mnt/root` | target mount point used during conversion |
 | `suite` | `resolute` | UKI token and Btrfs distribution container; produces `@resolute/@` |
 | `suite_type` | `ubuntu` | distribution icon name used by rEFInd, such as `os_ubuntu.png` |
 | `secure_boot_mode` | detected | temporary firmware-state snapshot: `setup`, `enabled`, `disabled` or `unknown` |
 | `secure_boot_enrollment` | `sbctl` | explicit trust-path choice: `sbctl` or `mok` |
+| `EXPERIMENTAL_SBCTL_APPEND` | `false` | opt into the experimental partial/append preservation of existing EFI trust material |
 | `btrfs_options` | repository default | mount options embedded in fstab and the UKI command line |
 | `swap_size` | `4G` | Btrfs swap-file size |
 | `iter_time` | `3000` | Argon2id PBKDF calibration target in milliseconds |
@@ -187,9 +190,11 @@ The main flow performs these operations:
 9. installs Snapper and the optional early-boot snapshot selector;
 10. configures kernel-install, dracut and ukify, then generates and verifies UKIs;
 11. installs TPM support when enabled, without enrolling LUKS automatically;
-12. splits the reserved rescue range, creates the ext4 `writable` partition and
-    copies the live system to the resized FAT rescue partition;
-13. unmounts the target and closes the temporary LUKS mapping.
+12. when requested, splits the selected rescue range, creates the ext4
+    `writable` partition and copies the live system to the resized FAT rescue
+    partition;
+13. restores temporary chroot files while leaving target mounts and the root
+    mapper available for inspection or subsequent live-session work.
 
 Detailed installation and runtime flows are documented in
 [docs/architecture.md](docs/architecture.md) and
@@ -259,8 +264,8 @@ silently changes that choice.
 
 ### Firmware in Setup Mode
 
-sbctl creates or reuses local PK, KEK and db keys. Setup enrolls db, then KEK,
-and PK last while retaining supported Microsoft and firmware certificates.
+sbctl creates or reuses local PK, KEK and db keys. The default enrollment is
+`sbctl enroll-keys --microsoft`.
 rEFInd and the participating EFI executables are signed and verified with the
 local db key.
 
@@ -270,8 +275,8 @@ is a direct, locally controlled chain without an additional shim layer. It also
 allows sbctl to track and sign local EFI artifacts consistently. Its trade-offs
 are that firmware trust is changed, key backup becomes the administrator's
 responsibility, and a firmware reset or lost private key requires deliberate
-recovery. Enrollment order is db, KEK and finally PK so enforcement is enabled
-only after the subordinate databases are ready.
+recovery. The older explicit db, KEK and PK partial ordering and preservation
+logic is available only with `EXPERIMENTAL_SBCTL_APPEND=true`.
 
 The user may still select `sbctl` while Secure Boot is enabled or disabled but
 not in Setup Mode. Setup emits a non-blocking warning, creates the keys, signs
@@ -496,6 +501,12 @@ sudo generate-uki --all
 The rescue partition is a persistent copy of the Ubuntu live environment. It is
 intended for recovery when the installed boot chain or encrypted root needs
 repair.
+
+Creation during the main flow is optional through `install_rescue`. If enabled,
+the wizard suggests a sufficiently large `boot_dev`; the requirement is the
+larger of 7168 MiB or live-source size plus 256 MiB, plus at least 512 MiB for
+`writable`. Declining that suggestion—or having no separate boot—opens the
+normal rescue-partition selector.
 
 Its persistence filesystem is a separate ext4 partition labelled `writable`,
 created from the space released when the original rescue partition is shrunk.

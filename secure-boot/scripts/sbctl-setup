@@ -29,6 +29,7 @@ DB_CERT="${DB_CERT:-$SBCTL_KEYROOT/db/db.pem}"
 
 PRESERVE_MICROSOFT="${PRESERVE_MICROSOFT:-true}"
 PRESERVE_FIRMWARE_DEFAULTS="${PRESERVE_FIRMWARE_DEFAULTS:-true}"
+EXPERIMENTAL_SBCTL_APPEND="${EXPERIMENTAL_SBCTL_APPEND:-false}"
 
 SETUP_MODE="${SETUP_MODE:-}"
 
@@ -366,6 +367,14 @@ sbctl-setup.enroll_if_setup_mode() {
 	fi
 
 	log.info "SetupMode=1; prepare EFI variables for direct enrollment"
+	if [[ $EXPERIMENTAL_SBCTL_APPEND != true ]]; then
+		log.info "Enroll Secure Boot keys with the standard Microsoft certificate set"
+		sbctl enroll-keys --microsoft
+		log.success "Direct firmware Secure Boot enrollment completed"
+		return
+	fi
+
+	log.warn "EXPERIMENTAL_SBCTL_APPEND=true; preserve and append the existing EFI trust material with the experimental partial-enrollment flow"
 
 	#
 	# Make sure we attempt to restore protection even if
@@ -404,6 +413,8 @@ sbctl-setup.enroll_if_setup_mode() {
 
 sbctl-setup.run() {
 	common.require_root
+	[[ $EXPERIMENTAL_SBCTL_APPEND == true || $EXPERIMENTAL_SBCTL_APPEND == false ]] ||
+		log.die "EXPERIMENTAL_SBCTL_APPEND must be true or false."
 
 	sbctl-setup.install_dependencies
 	common.require_commands awk basename chattr find grep lsattr sbctl

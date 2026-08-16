@@ -1,186 +1,120 @@
 # Testing
 
-## Scope and safety boundary
+This document owns validation procedure, evidence labels and the external-tool
+inventory. Tests must not mutate workstation disks, firmware, MOK or TPM state.
 
-The repository changes partitioning, filesystems, LUKS metadata, firmware keys,
-MOK state and TPM tokens. Normal development validation must not execute those
-operations against the workstation or an unintended disk.
+## Routine validation
 
-Testing is divided into:
+For every changed shell source, including extensionless commands and dracut
+hooks:
 
-1. static validation of shell source;
-2. non-privileged unit tests using mocks and fixtures;
-3. inspection of generated configuration and UKI/initramfs artifacts;
-4. destructive integration and boot testing in an explicitly prepared machine
-   or disposable virtual environment.
+```bash
+bash -n <file>
+shellcheck -x <file>
+shfmt -d <file>
+```
 
-Only the first three categories are safe for routine agent execution. Passing
-them does not prove that the installed system boots or that firmware, MOK, LUKS
-or TPM operations succeed on hardware.
+Run relevant tests directly from the repository root:
 
-## Current automated tests
+```bash
+for test_file in tests/unit/*_test.sh; do
+    bash "$test_file"
+done
+```
 
-The `tests/unit/` directory contains subsystem-oriented shell tests:
+Then run `git diff --check`, inspect the full diff and search for credentials,
+private keys and unintended device paths.
 
-- `common_test.sh` for shared framework behavior;
-- `btrfs_root_test.sh` for storage logic;
-- `rescue_test.sh` for rescue sizing and configuration behavior;
-- `secure_boot_test.sh` for Secure Boot logic;
-- `snapshot_management_test.sh` for snapshot-menu behavior;
-- `tpm_test.sh` for TPM argument/configuration logic;
-- `uki_test.sh` for UKI behavior.
+`tests/validate.sh` is not authoritative: its root calculation currently walks
+above this repository, it selects only `*.sh`, misses extensionless commands and
+does not execute the unit tests.
 
-Run the relevant tests directly with Bash from the repository root. They are
-intended to avoid privileged host modification through test doubles and
-fixtures. Inspect a test before running it if its implementation has changed.
+## Unit-test coverage
 
-`tests/validate.sh` is not a complete validation entry point in its current
-form. Its repository-root calculation ascends beyond this repository when run
-from `tests/`, it only discovers files matching `*.sh`, and its unit-test calls
-are commented out. Consequently it misses extensionless production commands
-and must not be used as evidence that the whole repository passed validation.
+| Test | Current focus |
+| --- | --- |
+| `common_test.sh` | framework and logging |
+| `tui_test.sh` | prompts, defaults and generated configuration contract |
+| `btrfs_root_test.sh` | subvolume paths, fstab and storage summaries |
+| `rescue_test.sh` | sizing, persistence and optional orchestration |
+| `secure_boot_test.sh` | trust-path selection, certificate export and sbctl contract |
+| `snapshot_management_test.sh` | menu configuration and fallback behavior |
+| `uki_test.sh` | command line, UKI and kernel-hook behavior |
+| `tpm_test.sh` | TPM configuration and enrollment argv |
 
-## Static validation
+Prefer fixtures and command doubles for transformations, path selection,
+configuration rendering, ordering and failure propagation. Never require root
+for logic that can be isolated.
 
-For every changed shell file, including scripts without a `.sh` suffix and
-dracut `.install`/hook files where applicable, run:
+## Artifact checks
 
-    bash -n <file>
-    shellcheck <file>
-    shfmt -d <file>
+Safe checks may inspect temporary or prebuilt artifacts:
 
-Do not construct the file list from `*.sh` alone. Use the tracked executable
-inventory and shebangs so that commands such as `setup.sh`, `generate-uki`, TPM
-commands, subsystem setup commands and dracut hooks are included.
+- fstab, crypttab and generated `setup.conf`;
+- rescue GRUB/loopback configuration and sizing calculations;
+- public ESP certificates and absence of private material;
+- kernel-install, ukify, TPM and snapshot-menu configuration;
+- rEFInd ordering and UKI filename correspondence;
+- UKI signature, PE sections, embedded version and initramfs file list.
 
-Sourced libraries should be parsed independently, but their runtime behavior
-must also be tested through a controlled caller because shell options and traps
-are inherited from that caller.
+Post-summary validation may inspect current artifacts, but must not enroll keys,
+alter tokens, delete snapshots or modify firmware.
 
-## Unit-test targets
+## External tools used by production scripts
 
-Prefer tests of deterministic transformations and decisions:
+This inventory is derived from current `require_commands` checks and direct
+invocations. Shell builtins are omitted; common POSIX/coreutils text and file
+commands are grouped.
 
-- setup configuration validation and device-name construction;
-- mounted-target discovery and preservation for root, ESP and optional boot;
-- TUI default handling, hidden input, single/multiple selection, normalized
-  `yes`/`no` toggles and generated configuration contract;
-- `log.*` output channels, formatting and fatal-exit behavior;
-- rescue source/destination sizing and FAT32/persistence limits;
-- rescue GPT split calculations and the partition-backed `writable` contract;
-- Btrfs source-type preflight, subvolume and fstab/crypttab model generation;
-- separate-boot copying, `/boot` fstab removal without removing `/boot/efi`,
-  and rescue-reuse size and confirmation decisions;
-- Secure Boot mode detection and enrollment ordering;
-- explicit sbctl/MOK selection independent of detected firmware state,
-  non-blocking sbctl warnings outside Setup Mode and MOK-only PIN prompting;
-- public-certificate ESP copying with private-key and unexpected-file rejection;
-- rEFInd path and configuration selection for direct and shim modes;
-- version ordering and UKI path generation;
-- kernel postinst/postrm delegation to `kernel-install add`/`remove`;
-- bridge dispatch based on its `postinst.d` or `postrm.d` invocation path,
-  kernel-image validation and propagation of the delegated exit status;
-- atomic rEFInd regeneration after both add and remove events, with the newest
-  version as the main entry and every older version in its submenu;
-- `suite_type` propagation and rEFInd distribution-icon fallback;
-- kernel command-line normalization, especially the single unconditional
-  `tpm2-pin=yes` option;
-- TPM enrollment argv construction with and without replacement of TPM tokens;
-- TPM enrollment arguments for PINless and PIN-required modes;
-- snapshot discovery, compatibility filtering, pagination and fallback choices.
-- snapshot-menu configuration defaults and validation for page size,
-  description width, trigger chord and 100 ms trigger/result timing ticks;
+| Area | Tools |
+| --- | --- |
+| Base/orchestration | Bash, `apt`, `apt-get`, `awk`, `coreutils`, `find`, `grep`, `sed`, `util-linux`, `unshare` |
+| Storage | `btrfs`, `cryptsetup`, `blkid`, `blockdev`, `findmnt`, `lsblk`, `mount`, `umount`, `fatlabel`, `parted` |
+| Rescue | `du`, `mkfs.ext4`, `mkfs.vfat`, `partprobe`, `rsync`, `udevadm`, `xargs` |
+| Secure Boot | `sbctl`, `sbverify`, `sbsign`, `mokutil`, `openssl`, `chattr`, `lsattr`, `dpkg-query`, `debconf-set-selections`, `efibootmgr`, `refind-install`, `unzip` |
+| Firmware updates | `fwupdmgr`, `systemctl` when available |
+| Snapshot/initramfs | `snapper`, `dracut`, `dialog`, `gcc`, `sha256sum`, dracut `getarg`, optional `plymouth` |
+| UKI/kernel | `kernel-install`, `ukify`, `lsinitrd`, `objcopy`, `objdump`, `python3` |
+| TPM | `systemd-cryptenroll`, `cryptsetup` |
+| Dependency fallback | `git`, `curl`, Go toolchain, `jq`, `file` |
 
-Mock host-facing tools such as:
+Package names installed/pre-downloaded by setup include providers such as
+`dosfstools`, `e2fsprogs`, `sbsigntool`, `systemd-ukify`, `tpm2-tools`,
+`tpm2-tss`, `refind`, `fwupd`, `snapper`, `inotify-tools`, `dracut` and build
+dependencies.
+Availability still depends on the selected Ubuntu suite and fallback paths.
 
-- `lsblk`, `findmnt`, `blkid`, `parted` and `btrfs`;
-- `cryptsetup` and `systemd-cryptenroll`;
-- `sbctl`, `mokutil`, `bootctl` and EFI-variable reads;
-- `snapper`, `dracut`, `ukify`, `kernel-install` and `sbsign`;
-- TPM utilities and input-device discovery.
+## Development tools used for repository validation
 
-Tests must never require root merely to validate pure logic.
+- `bash` for parsing and unit tests;
+- ShellCheck for static shell analysis;
+- shfmt for formatting conformance;
+- ripgrep (`rg`) for complete file/text discovery;
+- Git for status, diff and whitespace validation.
 
-## Artifact validation
+## Destructive integration test
 
-Generated configuration can be checked safely in a temporary tree. Relevant
-artifacts include:
+Use only a disposable UEFI VM or explicitly allocated hardware. Reproduce the
+post-Ubiquity live-session state, use non-production credentials and exercise:
 
-- fstab and crypttab entries;
-- rescue GRUB and loopback entries with one `persistent` option;
-- `/etc/kernel/install.conf`, entry token, ukify config and kernel command line;
-- `/etc/tpm.conf` and header-backup path construction;
-- rEFInd configuration and version ordering;
-- correspondence between installed kernel versions, signed UKI filenames and
-  generated main/submenu loader paths;
-- dracut module file list and systemd cryptsetup drop-in;
-- embedded `/etc/snapshot-menu.conf` values after UKI regeneration;
-- UKI PE sections, signature, embedded kernel version and extracted initramfs
-  file list.
+1. Btrfs conversion, separate-boot migration and LUKS password recovery;
+2. optional rescue disabled, separate rescue, and accepted/declined boot reuse;
+3. both Secure Boot paths, including sbctl outside Setup Mode and MOK reboot;
+4. kernel install/removal and rEFInd newest/submenu behavior;
+5. explicit TPM enrollment, policy-valid unlock and recovery fallback;
+6. normal boot, selector cancellation and compatible read-only snapshot boot;
+7. rescue boot and persistence when installed;
+8. successful setup leaving target mounts and mapper open.
 
-Artifact tests may inspect or extract a prebuilt sample. They must not install
-it into the workstation ESP, sign with production private keys, enroll a key or
-modify EFI variables.
+The environment must tolerate partition formatting, in-place encryption and
+firmware/MOK changes. Static and mocked tests cannot establish bootability.
 
-Every operational setup summary is followed by a safe post-summary validation
-of artifacts that exist at that point. These checks validate items such as
-mounts, generated configuration, executable hooks and signatures; they do not
-prove a successful reboot or authorize destructive enrollment tests.
+## Reporting evidence
 
-## Required destructive integration environment
-
-End-to-end testing needs a dedicated UEFI-capable target that mirrors the real
-workflow:
-
-1. boot an Ubuntu live image in UEFI mode;
-2. use Ubiquity manual partitioning;
-3. create `/dev/sda1` for rescue, `/dev/sda2` as the FAT32 ESP and `/dev/sda3`
-   as the unencrypted Btrfs root;
-   optionally add a separate `/boot` to test migration and, only on a disposable
-   target, its explicitly confirmed rescue reuse;
-4. finish installation and remain in the live session;
-5. supply non-production setup credentials and the required
-   `refind_themes.zip` artifact included at the repository root;
-6. run setup and preserve complete non-secret logs;
-7. reboot through the applicable direct-firmware or shim/MOK path;
-8. validate password recovery before and after TPM enrollment;
-9. enroll TPM explicitly, then test policy-valid unlock and recovery fallback;
-10. test normal boot, Alt+B cancellation, current-system selection and a
-    compatible read-only snapshot with ephemeral writes;
-11. boot the rescue partition and verify persistence separately.
-
-Use disposable virtual disks or hardware intentionally allocated to the test.
-The test destroys the rescue partition, transforms the root partition and may
-modify firmware or MOK state. TPM behavior may require a virtual TPM or a
-dedicated physical target.
-
-## Failure and recovery checks
-
-Integration testing should also exercise controlled failures:
-
-- incorrect setup device mapping must fail before destructive execution;
-- a non-Btrfs root, mismatched mount source or configured-but-unmounted boot
-  partition must fail before subvolume creation;
-- insufficient rescue capacity and oversized FAT32 source files must fail;
-- an unavailable signing key or invalid EFI signature must prevent artifact
-  acceptance;
-- a UKI missing a required section or snapshot initramfs component must be
-  removed and reported as failed;
-- invalid TPM policy must fall back to retained password/recovery access;
-- a snapshot without the running kernel modules must be rejected;
-- snapshot listener/menu failures must continue with normal boot;
-- interrupted setup must leave logs sufficient to identify the completed phase
-  without displaying credentials.
-
-## Reporting
-
-Validation reports must label results precisely:
-
-- **verified**: directly observed in the stated test environment;
-- **statically validated**: syntax, lint or formatting check passed;
-- **unit tested**: mocked/non-privileged behavior passed;
-- **inferred**: follows from code inspection but was not executed;
+- **verified**: directly observed in the stated environment;
+- **statically validated**: syntax/lint/format check passed;
+- **unit tested**: non-privileged test passed;
+- **inferred**: follows from code inspection only;
 - **not tested**: requires destructive hardware, firmware or reboot testing.
 
-Never summarize static success as proof of a bootable system. Record skipped
-tools, unavailable dependencies and every destructive path that was not run.
+Report unavailable tools and skipped destructive paths explicitly.

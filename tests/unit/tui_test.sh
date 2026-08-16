@@ -65,12 +65,17 @@ tui-test.generated_config_contract() {
 	rg -q 'setup\.write_config_value "\$temporary_config" boot_dev "\$boot_dev"' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" secure_boot_mode "\$secure_boot_mode"' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" secure_boot_enrollment "\$secure_boot_enrollment"' "$repository_root/setup.sh"
+	rg -q 'setup\.write_config_value "\$temporary_config" install_rescue "\$install_rescue"' "$repository_root/setup.sh"
+	rg -q 'setup\.write_config_value "\$temporary_config" EXPERIMENTAL_SBCTL_APPEND "\$EXPERIMENTAL_SBCTL_APPEND"' "$repository_root/setup.sh"
 	rg -q 'Select the Secure Boot enrollment method' "$repository_root/setup.sh"
-	rg -q 'Reuse .* as the rescue partition after copying /boot into Btrfs' "$repository_root/setup.sh"
+	rg -q 'Use .* as the rescue partition after copying /boot into Btrfs' "$repository_root/setup.sh"
 	prepare_target_body="$(awk '/^setup\.prepare_target\(\)/,/^}/' "$repository_root/setup.sh")"
 	[[ $prepare_target_body == *'mountpoint -q /target/cdrom'* ]] || return 1
 	[[ $prepare_target_body == *'umount /target/cdrom'* ]] || return 1
 	if grep -Fq "umount \"\$mp\"" <<<"$prepare_target_body"; then
+		return 1
+	fi
+	if awk '/^setup\.main\(\)/,/^}/' "$repository_root/setup.sh" | rg -q '^\s*setup\.unmount_everything$'; then
 		return 1
 	fi
 	rg -q 'setup\.write_config_value "\$temporary_config" mp "\$mp"' "$repository_root/setup.sh"

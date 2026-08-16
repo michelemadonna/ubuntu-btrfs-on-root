@@ -79,10 +79,10 @@ setup.detect_secure_boot_mode() {
 setup.generate_configuration() {
 	local config_file=$1
 	local disk default_disk root_path efi_path boot_path rescue_path name type size detail confirmation config_mode config_name
-	local detected_root_path detected_efi_path detected_boot_path boot_default reuse_boot_as_rescue=no
+	local detected_root_path detected_efi_path detected_boot_path boot_default reuse_boot_as_rescue=no install_rescue=yes
 	local minimum_rescue_mib boot_size_mib
 	local root_dev=sda3 efi_dev=sda2 boot_dev='' rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu
-	local PASSPHRASE=password mok_pin='' secure_boot_enrollment=sbctl secure_boot_mode
+	local PASSPHRASE=password mok_pin='' secure_boot_enrollment=sbctl secure_boot_mode EXPERIMENTAL_SBCTL_APPEND=false
 	local pre_download=yes enable_tpm=yes snapshot_menu=yes enlarge=no snapshot_menu_pin=yes snapshot_menu_pin_value=123456
 	local mp=/mnt/root keyslot_size=32m btrfs_options='defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1'
 	local -a disk_items=() partition_items=() efi_items=() boot_items=() rescue_items=()
@@ -145,18 +145,23 @@ setup.generate_configuration() {
 		log.die "Invalid boot partition selection."
 	[[ $boot_path != none ]] || boot_path=""
 
-	if [[ -n $boot_path ]]; then
+	install_rescue="$(tui.toggle "Create the persistent rescue system" "$install_rescue")" ||
+		log.die "Invalid rescue-system toggle."
+	if [[ $install_rescue == yes && -n $boot_path ]]; then
 		minimum_rescue_mib="$(setup.minimum_rescue_size_mib /cdrom)"
 		boot_size_mib="$(setup.device_size_mib "$boot_path")"
 		if ((boot_size_mib >= minimum_rescue_mib)); then
-			reuse_boot_as_rescue="$(tui.toggle "Reuse $boot_path as the rescue partition after copying /boot into Btrfs" no)" ||
+			log.info "$boot_path is large enough for the live system and writable persistence; suggested rescue target"
+			reuse_boot_as_rescue="$(tui.toggle "Use $boot_path as the rescue partition after copying /boot into Btrfs" yes)" ||
 				log.die "Invalid boot-partition reuse toggle."
 		else
 			log.info "$boot_path is ${boot_size_mib} MiB; rescue reuse requires at least ${minimum_rescue_mib} MiB"
 		fi
 	fi
 
-	if [[ $reuse_boot_as_rescue == yes ]]; then
+	if [[ $install_rescue == no ]]; then
+		rescue_path=""
+	elif [[ $reuse_boot_as_rescue == yes ]]; then
 		rescue_path=$boot_path
 	else
 		for detail in "${partition_items[@]}"; do
@@ -224,6 +229,7 @@ setup.generate_configuration() {
 	setup.write_config_value "$temporary_config" boot_dev "$boot_dev"
 	setup.write_config_value "$temporary_config" mp "$mp"
 	setup.write_config_value "$temporary_config" rescue_dev "$rescue_dev"
+	setup.write_config_value "$temporary_config" install_rescue "$install_rescue"
 	setup.write_config_value "$temporary_config" keyslot_size "$keyslot_size"
 	setup.write_config_value "$temporary_config" iter_time "$iter_time"
 	setup.write_config_value "$temporary_config" enlarge "$enlarge"
@@ -233,6 +239,7 @@ setup.generate_configuration() {
 	setup.write_config_value "$temporary_config" suite_type "$suite_type"
 	setup.write_config_value "$temporary_config" secure_boot_mode "$secure_boot_mode"
 	setup.write_config_value "$temporary_config" secure_boot_enrollment "$secure_boot_enrollment"
+	setup.write_config_value "$temporary_config" EXPERIMENTAL_SBCTL_APPEND "$EXPERIMENTAL_SBCTL_APPEND"
 	setup.write_config_value "$temporary_config" PASSPHRASE "$PASSPHRASE"
 	setup.write_config_value "$temporary_config" pre_download "$pre_download"
 	setup.write_config_value "$temporary_config" root_sub_vol "@$suite"
@@ -250,7 +257,8 @@ setup.generate_configuration() {
 	log.summary_item "Root" "$root_path"
 	log.summary_item "ESP" "$efi_path"
 	log.summary_item "Separate boot" "${boot_path:-none}"
-	log.summary_item "Rescue" "$rescue_path"
+	log.summary_item "Create rescue" "$install_rescue"
+	log.summary_item "Rescue" "${rescue_path:-not configured}"
 	log.summary_item "Boot reused for rescue" "$reuse_boot_as_rescue"
 	log.summary_item "Mount point" "$mp"
 	log.summary_item "LUKS header space" "$keyslot_size"
@@ -274,7 +282,7 @@ setup.generate_configuration() {
 	bash -n "$config_file" || log.die "Generated configuration contains invalid Bash syntax: $config_file"
 	config_mode=$(stat -c '%a' "$config_file")
 	[[ $config_mode == 600 ]] || log.die "Generated configuration permissions are $config_mode; expected 600."
-	for config_name in root_dev efi_dev boot_dev mp rescue_dev keyslot_size iter_time enlarge swap_size btrfs_options suite suite_type secure_boot_mode secure_boot_enrollment \
+	for config_name in root_dev efi_dev boot_dev mp rescue_dev install_rescue keyslot_size iter_time enlarge swap_size btrfs_options suite suite_type secure_boot_mode secure_boot_enrollment EXPERIMENTAL_SBCTL_APPEND \
 		PASSPHRASE pre_download root_sub_vol enable_tpm snapshot_menu snapshot_menu_pin snapshot_menu_pin_value mok_pin; do
 		grep -q "^export ${config_name}=" "$config_file" ||
 			log.die "Generated configuration is missing required value: $config_name"
@@ -302,7 +310,6 @@ setup.load_configuration() {
 
 	common.require_nonempty "root_dev" "${root_dev:-}"
 	common.require_nonempty "efi_dev" "${efi_dev:-}"
-	common.require_nonempty "rescue_dev" "${rescue_dev:-}"
 	common.require_nonempty "mp" "${mp:-}"
 	common.require_nonempty "root_sub_vol" "${root_sub_vol:-}"
 	common.require_nonempty "suite" "${suite:-}"
@@ -313,6 +320,11 @@ setup.load_configuration() {
 		log.die "secure_boot_mode must be setup, enabled, disabled, or unknown."
 	[[ $secure_boot_enrollment == sbctl || $secure_boot_enrollment == mok ]] ||
 		log.die "secure_boot_enrollment must be sbctl or mok."
+	install_rescue=${install_rescue:-yes}
+	[[ $install_rescue == yes || $install_rescue == no ]] || log.die "install_rescue must be yes or no."
+	EXPERIMENTAL_SBCTL_APPEND=${EXPERIMENTAL_SBCTL_APPEND:-false}
+	[[ $EXPERIMENTAL_SBCTL_APPEND == true || $EXPERIMENTAL_SBCTL_APPEND == false ]] ||
+		log.die "EXPERIMENTAL_SBCTL_APPEND must be true or false."
 	if [[ $secure_boot_enrollment == mok ]]; then
 		common.require_nonempty "mok_pin" "${mok_pin:-}"
 	fi
@@ -321,10 +333,14 @@ setup.load_configuration() {
 		log.die "boot_dev must be empty or a device name relative to /dev."
 	[[ -z $boot_dev || ($boot_dev != "$root_dev" && $boot_dev != "$efi_dev") ]] ||
 		log.die "boot_dev must be distinct from root_dev and efi_dev."
-	[[ $rescue_dev != */* && $rescue_dev != *..* ]] ||
-		log.die "rescue_dev must be a device name relative to /dev."
-	[[ $rescue_dev != "$root_dev" && $rescue_dev != "$efi_dev" ]] ||
-		log.die "rescue_dev must be distinct from root_dev and efi_dev."
+	rescue_dev=${rescue_dev:-}
+	if [[ $install_rescue == yes || $setup_action == install-rescue-live ]]; then
+		common.require_nonempty "rescue_dev" "$rescue_dev"
+		[[ $rescue_dev != */* && $rescue_dev != *..* ]] ||
+			log.die "rescue_dev must be a device name relative to /dev."
+		[[ $rescue_dev != "$root_dev" && $rescue_dev != "$efi_dev" ]] ||
+			log.die "rescue_dev must be distinct from root_dev and efi_dev."
+	fi
 }
 
 setup.show_help() {
@@ -568,11 +584,15 @@ setup.main() {
 	"$repository_root/btrfs-root/scripts/btrfs-root-setup"
 	setup.prepare_chroot
 	setup.run_inner_installation
-	setup.install_rescue_system
-	setup.unmount_everything
+	if [[ $install_rescue == yes ]]; then
+		setup.install_rescue_system
+	else
+		log.info "Persistent rescue-system creation was not requested"
+	fi
+	setup.restore_chroot_files
 	cleanup_required=false
 	trap - EXIT
-	log.info "Finished"
+	log.info "Finished; target filesystems and the root mapper remain mounted"
 }
 
 setup.main "$@"
