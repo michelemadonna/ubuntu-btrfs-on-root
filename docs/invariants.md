@@ -20,6 +20,9 @@ boot and maintenance commands.
   source mounted at `mp`.
 - Initial target preparation preserves `/target`, `/target/boot` and
   `/target/boot/efi`; their exact sources supply wizard defaults.
+- `/target/boot` may be absent. It is never created merely for discovery and
+  its absence means that no separate `boot_dev` is inferred.
+- `/target/cdrom` is unmounted only when mounted; its absence is non-fatal.
 - `boot_dev` is optional. Its content is copied from `$mp/boot` to
   `@$suite/@/boot`, validated, and its `/boot` fstab entry is removed without
   removing `/boot/efi`.

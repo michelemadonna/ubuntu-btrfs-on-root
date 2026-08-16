@@ -11,6 +11,8 @@ partitioning and install Ubuntu with this layout:
 
 An optional separate `/boot` remains mounted at `/target/boot`; its device is
 detected as `boot_dev` and later absorbed into the encrypted root.
+If `/target/boot` does not exist or is not mounted separately, this step is
+skipped and `boot_dev` remains empty.
 
 The initial rescue partition must be large enough for at least 7168 MiB of FAT
 rescue data plus a separate writable partition of at least 512 MiB. Complete the
@@ -18,7 +20,8 @@ Ubiquity installation but remain in the
 same live session. The scripts expect `/target`, `/target/boot/efi` and `/cdrom`
 to remain available. Their exact source devices become wizard defaults and a
 mounted `/target` becomes `mp`. Initial target preparation unmounts none of
-them.
+them. It only unmounts `/target/cdrom` when that path is actually mounted; an
+absent mount is not an error.
 
 Run `setup.sh` as root. When `setup.conf` is absent, the grouped wizard uses its
 built-in defaults, generates and validates the protected local

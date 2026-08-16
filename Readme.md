@@ -60,7 +60,8 @@ session. The scripts expect:
 
 - the installed system mounted at `/target`;
 - its ESP mounted at `/target/boot/efi`;
-- its optional separate boot partition mounted at `/target/boot`;
+- its optional separate boot partition mounted at `/target/boot`, when that
+  path exists; its absence is supported;
 - the live medium mounted at `/cdrom`;
 - x86-64 UEFI firmware and working network access.
 

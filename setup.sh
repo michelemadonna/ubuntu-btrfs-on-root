@@ -112,6 +112,7 @@ setup.generate_configuration() {
 		log.info "Detected separate boot partition $detected_boot_path mounted at /target/boot"
 	else
 		detected_boot_path=""
+		log.info "No separate /boot mount detected; boot_dev remains optional"
 	fi
 	while read -r name type size detail; do
 		[[ $type == disk ]] || continue
@@ -375,10 +376,17 @@ setup.parse_arguments() {
 
 setup.prepare_target() {
 	log.section "Installed target preflight"
-	common.require_commands mountpoint
+	common.require_commands mountpoint umount
 	[[ -d $mp ]] || log.die "Configured target mount point does not exist: $mp"
 	mountpoint -q "$mp" || log.die "Configured target is not mounted: $mp"
 	log.info "Preserve the existing target mount at $mp; storage scripts will consume it in place"
+	if mountpoint -q /target/cdrom; then
+		log.info "Unmount the live-medium bind mount from /target/cdrom"
+		umount /target/cdrom || log.die "Unable to unmount /target/cdrom."
+		log.success "Unmounted /target/cdrom"
+	else
+		log.info "/target/cdrom is not mounted; no unmount is required"
+	fi
 	log.success "Installed target is mounted and ready for validation"
 	log.section_end
 }

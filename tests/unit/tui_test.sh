@@ -51,6 +51,8 @@ tui-test.toggles() {
 }
 
 tui-test.generated_config_contract() {
+	local prepare_target_body
+
 	rg -q 'setup\.generate_configuration' "$repository_root/setup.sh"
 	if rg -q 'source .*setup\.conf\.example' "$repository_root/setup.sh"; then
 		printf 'setup.sh must not depend on setup.conf.example\n' >&2
@@ -65,8 +67,10 @@ tui-test.generated_config_contract() {
 	rg -q 'setup\.write_config_value "\$temporary_config" secure_boot_enrollment "\$secure_boot_enrollment"' "$repository_root/setup.sh"
 	rg -q 'Select the Secure Boot enrollment method' "$repository_root/setup.sh"
 	rg -q 'Reuse .* as the rescue partition after copying /boot into Btrfs' "$repository_root/setup.sh"
-	if awk '/^setup\.prepare_target\(\)/,/^}/' "$repository_root/setup.sh" | rg -q 'umount'; then
-		printf 'setup.prepare_target must not unmount the Ubiquity target\n' >&2
+	prepare_target_body="$(awk '/^setup\.prepare_target\(\)/,/^}/' "$repository_root/setup.sh")"
+	[[ $prepare_target_body == *'mountpoint -q /target/cdrom'* ]] || return 1
+	[[ $prepare_target_body == *'umount /target/cdrom'* ]] || return 1
+	if grep -Fq "umount \"\$mp\"" <<<"$prepare_target_body"; then
 		return 1
 	fi
 	rg -q 'setup\.write_config_value "\$temporary_config" mp "\$mp"' "$repository_root/setup.sh"

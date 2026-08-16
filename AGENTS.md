@@ -185,6 +185,8 @@ real devices.
 - Preserve Ubiquity's target mounts during initial preparation. When `boot_dev`
   is configured, copy and validate it in `@$suite/@/boot`, unmount it before
   conversion and remove only its `/boot` fstab entry.
+- `setup.prepare_target` may unmount `/target/cdrom` only after confirming it is
+  mounted; absence of that mount is not an error.
 - Preserve recovery access and existing non-TPM keyslots unless an explicit
   operation says otherwise.
 - Never pass secrets through command-line arguments when a safer input channel
@@ -327,6 +329,7 @@ grouped by theme and retain visible current defaults; password entry remains
 hidden. Root selection is disk-first and then limited to that disk's
 partitions. Exact mounts at `/target`, `/target/boot/efi` and `/target/boot`
 supply defaults for `root_dev`, `efi_dev`, optional `boot_dev` and `mp`.
+`/target/boot` may be absent and must not be created solely for discovery.
 Keep `mp`, `keyslot_size` and `btrfs_options` fixed and non-interactive unless a
 task explicitly changes this contract. Generated configuration remains
 shell-quoted, mode 0600 and atomically installed. Present `suite` as a closed

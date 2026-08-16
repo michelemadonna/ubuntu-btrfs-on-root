@@ -32,7 +32,12 @@ persistence partition of at least 512 MiB.
 The live environment is expected at `/cdrom`, Ubiquity's installed root at
 `/target`, its ESP at `/target/boot/efi`, and an optional separate boot at the
 exact mount `/target/boot`. The wizard derives defaults from those mount sources
-and uses `/target` as `mp`; initial target preparation preserves them.
+and uses `/target` as `mp`; initial target preparation preserves them. The
+incidental `/target/cdrom` bind mount is unmounted when present and ignored when
+absent.
+
+`/target/boot` is not required to exist. If it is absent or is not an exact
+mount point, no separate boot device is inferred and `boot_dev` remains empty.
 
 During the `btrfs-root` phase, setup verifies that `/dev/$efi_dev` is an
 unmounted FAT filesystem, assigns it the filesystem label `ESP` with `fatlabel`
