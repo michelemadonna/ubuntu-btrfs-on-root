@@ -129,6 +129,8 @@ Important current options are:
 | `mp` | `/mnt/root` | target mount point used during conversion |
 | `suite` | `resolute` | UKI token and Btrfs distribution container; produces `@resolute/@` |
 | `suite_type` | `ubuntu` | distribution icon name used by rEFInd, such as `os_ubuntu.png` |
+| `secure_boot_mode` | detected | temporary firmware-state snapshot: `setup`, `enabled`, `disabled` or `unknown` |
+| `secure_boot_enrollment` | `sbctl` | explicit trust-path choice: `sbctl` or `mok` |
 | `btrfs_options` | repository default | mount options embedded in fstab and the UKI command line |
 | `swap_size` | `4G` | Btrfs swap-file size |
 | `iter_time` | `3000` | Argon2id PBKDF calibration target in milliseconds |
@@ -138,7 +140,7 @@ Important current options are:
 | `snapshot_menu_pin` | `yes` | require its PIN for snapshot selection |
 | `enable_tpm` | `yes` | install TPM integration; it does not enroll a token |
 
-`PASSPHRASE`, `snapshot_menu_pin_value` and `mok_pin` must not be logged or
+`PASSPHRASE`, `snapshot_menu_pin_value` and a configured `mok_pin` must not be logged or
 committed with real values.
 
 `iter_time` is passed to `cryptsetup reencrypt --iter-time`. Despite its name,
@@ -249,7 +251,10 @@ discard. The root kernel command line identifies the same LUKS UUID and mounts
 
 ## Secure Boot modes
 
-Setup detects the current firmware state and selects one of two paths.
+The wizard detects the current firmware state and stores it temporarily as
+`secure_boot_mode`: `setup`, `enabled`, `disabled` or `unknown`. The user then
+explicitly selects `secure_boot_enrollment=sbctl` or `mok`; firmware state never
+silently changes that choice.
 
 ### Firmware in Setup Mode
 
@@ -258,7 +263,7 @@ and PK last while retaining supported Microsoft and firmware certificates.
 rEFInd and the participating EFI executables are signed and verified with the
 local db key.
 
-This path is used only when the firmware reports `SetupMode=1`, meaning no
+Direct enrollment can complete only when firmware reports `SetupMode=1`, meaning no
 active Platform Key is enforcing the current Secure Boot policy. Its advantage
 is a direct, locally controlled chain without an additional shim layer. It also
 allows sbctl to track and sign local EFI artifacts consistently. Its trade-offs
@@ -267,21 +272,32 @@ responsibility, and a firmware reset or lost private key requires deliberate
 recovery. Enrollment order is db, KEK and finally PK so enforcement is enabled
 only after the subordinate databases are ready.
 
+The user may still select `sbctl` while Secure Boot is enabled or disabled but
+not in Setup Mode. Setup emits a non-blocking warning, creates the keys, signs
+the EFI artifacts and continues, but does not enroll PK/KEK/db and does not
+switch to MOK automatically. With Secure Boot enabled, the resulting direct
+loader will not be trusted until the db identity is enrolled deliberately.
+
 ### Firmware already in User Mode
 
-Setup does not replace existing firmware platform keys. It installs a shim/MOK
+When the user selects MOK, setup does not replace firmware platform keys. It installs a shim/MOK
 path and imports the local db certificate with `mokutil`. On the next reboot,
 complete the MOK enrollment in MokManager using the configured `mok_pin`.
 
-This path is used when firmware reports `SetupMode=0`: an existing Platform Key
-already enforces User Mode, so setup leaves the firmware PK/KEK/db databases
-untouched. Its advantage is compatibility with an existing OEM or Microsoft
+The MOK path can be prepared whether Secure Boot is currently enabled or
+disabled. The wizard asks for `mok_pin` only after MOK is selected. Its
+advantage is compatibility with an existing OEM or Microsoft
 trust setup and no replacement of firmware ownership keys. Its disadvantages
 are the extra shim layer, a mandatory interactive MOK enrollment on reboot, and
 the need to keep shim/MokManager and the MOK-authorized signing certificate
 consistent. sbctl still creates the local signing keys and signs repository EFI
 artifacts, but those signatures reach firmware trust through shim and MOK rather
 than direct db enrollment.
+
+For both choices, setup copies only public certificates to
+`/boot/efi/EFI/keys`: `PK.pem`, `KEK.pem`, `db.pem` and, when generated for MOK,
+`db.cer`. It logs this operation and rejects private keys or unexpected content
+in that directory. Private signing keys remain under `/var/lib/sbctl/keys`.
 
 The repository includes `refind_themes.zip`, which the rEFInd setup expects at
 the repository root.

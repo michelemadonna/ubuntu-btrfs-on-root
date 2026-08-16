@@ -184,26 +184,35 @@ subvolume and swap mounts.
 
 ## Secure Boot subsystem
 
-Secure Boot setup runs inside the target chroot and requires UEFI on x86-64. It
-reads firmware `SetupMode` and `SecureBoot`, stores the initially detected setup
+Secure Boot setup runs inside the target chroot and requires UEFI on x86-64. The
+wizard reads firmware `SetupMode` and `SecureBoot`, records the temporary state
+as `secure_boot_mode`, and requires an explicit `secure_boot_enrollment` choice
+of `sbctl` or `mok`. Runtime setup stores the initially detected numeric setup
 mode in `/etc/securebootmode.conf`, and creates or reuses sbctl PK, KEK and db
 keys below `/var/lib/sbctl/keys`.
 
 There are two boot trust paths:
 
-- Firmware Setup Mode (`SetupMode=1`): keys are enrolled directly into firmware.
+- User-selected sbctl: keys are enrolled directly only in firmware Setup Mode.
   db is enrolled first, then KEK, and PK last. Supported Microsoft and firmware
   built-in certificates are retained.
-- Existing User Mode (`SetupMode=0`): firmware enrollment is skipped. The system
-  uses shim and imports the db certificate through MOK, requiring the user to
+- User-selected MOK: firmware PK/KEK/db enrollment is skipped. The system uses
+  shim and imports the db certificate through MOK, requiring the user to
   complete enrollment at the next reboot.
 
-Direct sbctl firmware enrollment is selected only in Setup Mode. It provides a
+Direct sbctl firmware enrollment succeeds only in Setup Mode. Selecting it in
+another state produces a non-blocking warning and continues with key creation
+and signing without enrollment or automatic MOK fallback. It provides a
 shorter locally controlled chain, but makes firmware-key backup and recovery the
 administrator's responsibility. User Mode preserves existing OEM/Microsoft
 firmware ownership through shim/MOK, but adds a shim layer and requires an
-interactive MOK enrollment. sbctl signs local artifacts in both modes; only the
-Setup Mode path enrolls its keys directly into firmware db.
+interactive MOK enrollment. MOK can be prepared with Secure Boot enabled or
+disabled, and its PIN is requested only for that choice. sbctl signs local
+artifacts in both modes.
+
+After key and optional DER generation, only `PK.pem`, `KEK.pem`, `db.pem` and
+the optional `db.cer` are copied to `/boot/efi/EFI/keys`. The copy is announced
+and validated; private keys remain outside the ESP.
 
 rEFInd becomes the primary loader. In the direct path, signed `refind_x64.efi`
 is also installed as the fallback `BOOTX64.EFI`. In the shim path, shim occupies

@@ -28,10 +28,10 @@ secure-boot-test.assert_equal() {
 }
 
 secure-boot-test.test_trust_path() {
-	secure-boot-test.assert_equal direct "$(secure-boot-setup.trust_path 1)"
-	secure-boot-test.assert_equal shim-mok "$(secure-boot-setup.trust_path 0)"
-	if secure-boot-setup.trust_path 2 >/dev/null; then
-		secure-boot-test.fail "invalid SetupMode selected a trust path"
+	secure-boot-test.assert_equal direct-sbctl "$(secure-boot-setup.trust_path sbctl)"
+	secure-boot-test.assert_equal shim-mok "$(secure-boot-setup.trust_path mok)"
+	if secure-boot-setup.trust_path invalid >/dev/null; then
+		secure-boot-test.fail "invalid enrollment method selected a trust path"
 	fi
 }
 
@@ -39,10 +39,10 @@ secure-boot-test.test_refind_loader_path() {
 	export REFIND_EFI=/boot/efi/EFI/refind
 	secure-boot-test.assert_equal \
 		/boot/efi/EFI/refind/refind_x64.efi \
-		"$(refind-setup.repository_signed_loader_path 1)"
+		"$(refind-setup.repository_signed_loader_path sbctl)"
 	secure-boot-test.assert_equal \
 		/boot/efi/EFI/refind/grubx64.efi \
-		"$(refind-setup.repository_signed_loader_path 0)"
+		"$(refind-setup.repository_signed_loader_path mok)"
 }
 
 secure-boot-test.test_remove_grubefi_directories() {
@@ -59,10 +59,10 @@ secure-boot-test.test_remove_grubefi_directories() {
 }
 
 secure-boot-test.test_fwupd_trust_mode() {
-	secure-boot-test.assert_equal true "$(fwupd-setup.disable_shim_for_mode 1)"
-	secure-boot-test.assert_equal false "$(fwupd-setup.disable_shim_for_mode 0)"
-	if fwupd-setup.disable_shim_for_mode 2 >/dev/null; then
-		secure-boot-test.fail "invalid SetupMode selected an fwupd trust mode"
+	secure-boot-test.assert_equal true "$(fwupd-setup.disable_shim_for_mode sbctl)"
+	secure-boot-test.assert_equal false "$(fwupd-setup.disable_shim_for_mode mok)"
+	if fwupd-setup.disable_shim_for_mode invalid >/dev/null; then
+		secure-boot-test.fail "invalid enrollment method selected an fwupd trust mode"
 	fi
 }
 
@@ -74,6 +74,8 @@ secure-boot-test.test_summary_has_no_secret() {
 	SETUP_MODE=0
 	# shellcheck disable=SC2034
 	SECURE_BOOT=1
+	secure_boot_mode=enabled
+	secure_boot_enrollment=mok
 	# shellcheck disable=SC2034
 	SBCTL_KEYROOT=/keys
 	# shellcheck disable=SC2034
@@ -87,9 +89,31 @@ secure-boot-test.test_summary_has_no_secret() {
 	[[ $output != *"$mok_pin"* ]] || secure-boot-test.fail "MOK PIN leaked into summary"
 }
 
+secure-boot-test.test_public_certificate_copy() {
+	local test_root
+
+	test_root="$(mktemp -d "${TMPDIR:-/tmp}/secure-boot-cert-test.XXXXXX")"
+	ESP="$test_root/esp"
+	SBCTL_KEYROOT="$test_root/private"
+	DB_CERT_DER="$SBCTL_KEYROOT/db/db.cer"
+	mkdir -p "$ESP/EFI" "$SBCTL_KEYROOT/PK" "$SBCTL_KEYROOT/KEK" "$SBCTL_KEYROOT/db"
+	printf 'public-pk\n' >"$SBCTL_KEYROOT/PK/PK.pem"
+	printf 'public-kek\n' >"$SBCTL_KEYROOT/KEK/KEK.pem"
+	printf 'public-db\n' >"$SBCTL_KEYROOT/db/db.pem"
+	printf 'public-der\n' >"$DB_CERT_DER"
+	printf 'private-db\n' >"$SBCTL_KEYROOT/db/db.key"
+	secure-boot-setup.copy_public_certificates >/dev/null
+	for certificate in PK.pem KEK.pem db.pem db.cer; do
+		[[ -f $ESP/EFI/keys/$certificate ]] || secure-boot-test.fail "public certificate was not copied: $certificate"
+	done
+	[[ ! -e $ESP/EFI/keys/db.key ]] || secure-boot-test.fail "private key was copied to the ESP"
+	rm -rf -- "$test_root"
+}
+
 secure-boot-test.test_trust_path
 secure-boot-test.test_refind_loader_path
 secure-boot-test.test_remove_grubefi_directories
 secure-boot-test.test_fwupd_trust_mode
 secure-boot-test.test_summary_has_no_secret
+secure-boot-test.test_public_certificate_copy
 printf 'Secure Boot helper tests passed.\n'

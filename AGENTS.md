@@ -219,6 +219,15 @@ real devices.
 - Do not replace existing signing keys automatically.
 - Preserve the distinction between firmware Setup Mode enrollment and the
   shim/MOK path.
+- Preserve the user's explicit `secure_boot_enrollment` choice (`sbctl` or
+  `mok`). Firmware state may warn or prevent direct enrollment but must never
+  cause an automatic fallback to MOK.
+- Treat `secure_boot_mode` as a temporary detected state (`setup`, `enabled`,
+  `disabled` or `unknown`), not as enrollment policy.
+- Ask for `mok_pin` only when MOK is selected. MOK preparation is allowed with
+  Secure Boot enabled or disabled.
+- Copy only public PK, KEK and db certificates and the optional DER certificate
+  to `$ESP/EFI/keys`; never copy private keys, auth payloads or ESL files.
 - When enrolling firmware variables, the Platform Key remains last.
 - rEFInd setup may remove an immediate child directory of `$ESP/EFI` only when
   that directory contains a regular file named exactly `grubefi_x64.efi`; keep
@@ -306,6 +315,11 @@ for example, `ubuntu` selects `os_ubuntu.png` when the theme provides it.
 `sb_key_dir` is not consumed by the scripts. `pre_download` and `enable_tpm`
 activate only when their value is exactly `yes`. Do not document unused
 variables as functional.
+
+`secure_boot_enrollment` is the user's closed selection (`sbctl`, `mok`).
+`secure_boot_mode` records the detected firmware state temporarily and must be
+refreshed from firmware during execution. `mok_pin` may be empty only for the
+sbctl path and must never appear in summaries or logs.
 
 If `setup.conf` is missing, `setup.sh` must use `lib/tui.sh` and built-in
 defaults to generate it without depending on `setup.conf.example`. Prompts are

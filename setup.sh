@@ -51,18 +51,43 @@ setup.device_size_mib() {
 	printf '%s\n' "$(($(blockdev --getsize64 "$device") / 1024 / 1024))"
 }
 
+setup.read_efi_uint8() {
+	local name=$1
+	local file
+
+	file="$(find /sys/firmware/efi/efivars -maxdepth 1 -name "${name}-*" -print -quit 2>/dev/null)"
+	[[ -n $file ]] || return 1
+	od -An -j4 -N1 -t u1 "$file" | tr -d '[:space:]'
+}
+
+setup.detect_secure_boot_mode() {
+	local setup_mode secure_boot
+
+	setup_mode="$(setup.read_efi_uint8 SetupMode 2>/dev/null || true)"
+	secure_boot="$(setup.read_efi_uint8 SecureBoot 2>/dev/null || true)"
+	if [[ $setup_mode == 1 ]]; then
+		printf 'setup\n'
+	elif [[ $secure_boot == 1 ]]; then
+		printf 'enabled\n'
+	elif [[ $secure_boot == 0 ]]; then
+		printf 'disabled\n'
+	else
+		printf 'unknown\n'
+	fi
+}
+
 setup.generate_configuration() {
 	local config_file=$1
 	local disk default_disk root_path efi_path boot_path rescue_path name type size detail confirmation config_mode config_name
 	local detected_root_path detected_efi_path detected_boot_path boot_default reuse_boot_as_rescue=no
 	local minimum_rescue_mib boot_size_mib
 	local root_dev=sda3 efi_dev=sda2 boot_dev='' rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu
-	local PASSPHRASE=password mok_pin=123456
+	local PASSPHRASE=password mok_pin='' secure_boot_enrollment=sbctl secure_boot_mode
 	local pre_download=yes enable_tpm=yes snapshot_menu=yes enlarge=no snapshot_menu_pin=yes snapshot_menu_pin_value=123456
 	local mp=/mnt/root keyslot_size=32m btrfs_options='defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1'
 	local -a disk_items=() partition_items=() efi_items=() boot_items=() rescue_items=()
 
-	common.require_commands bash blockdev du findmnt grep lsblk mktemp mv readlink stat
+	common.require_commands bash blockdev du find findmnt grep lsblk mktemp mv od readlink stat tr
 	[[ -r $TUI_INPUT_DEVICE ]] || log.die "Interactive terminal is unavailable: $TUI_INPUT_DEVICE"
 	log.section "Guided setup.conf creation"
 	log.warn "This procedure is intended only for a freshly installed Ubuntu system created from the live environment."
@@ -156,12 +181,25 @@ setup.generate_configuration() {
 	[[ $suite_type =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Distribution icon identifier is invalid."
 
 	log.section "Encryption and boot security"
+	secure_boot_mode="$(setup.detect_secure_boot_mode)"
+	log.info "Current Secure Boot firmware state: $secure_boot_mode"
+	if [[ $secure_boot_mode != setup ]]; then
+		log.warn "Firmware is not in Setup Mode; sbctl can create and use signing keys, but direct firmware enrollment cannot be completed now."
+	fi
+	secure_boot_enrollment="$(tui.select_one "Select the Secure Boot enrollment method" "$secure_boot_enrollment" \
+		'sbctl|Direct firmware enrollment with sbctl' \
+		'mok|Shim and Machine Owner Key enrollment')" || log.die "Invalid Secure Boot enrollment method."
+	if [[ $secure_boot_enrollment == sbctl && $secure_boot_mode != setup ]]; then
+		log.warn "sbctl was selected while firmware is not in Setup Mode; configuration will continue without automatic firmware enrollment."
+	fi
 	iter_time="$(tui.input "Argon2id time target in milliseconds" "$iter_time")"
 	PASSPHRASE="$(tui.password "Initial LUKS passphrase" "$PASSPHRASE")"
-	mok_pin="$(tui.password "MOK enrollment PIN" "$mok_pin")"
+	if [[ $secure_boot_enrollment == mok ]]; then
+		mok_pin="$(tui.password "MOK enrollment PIN" 123456)"
+		[[ -n $mok_pin ]] || log.die "MOK PIN cannot be empty."
+	fi
 	[[ $iter_time =~ ^[1-9][0-9]*$ ]] || log.die "Argon2id time target must be a positive integer."
 	[[ -n $PASSPHRASE ]] || log.die "LUKS passphrase cannot be empty."
-	[[ -n $mok_pin ]] || log.die "MOK PIN cannot be empty."
 
 	log.section "Optional features"
 	pre_download="$(tui.toggle "Pre-download target packages" "$pre_download")" || log.die "Invalid pre-download toggle."
@@ -192,6 +230,8 @@ setup.generate_configuration() {
 	setup.write_config_value "$temporary_config" btrfs_options "$btrfs_options"
 	setup.write_config_value "$temporary_config" suite "$suite"
 	setup.write_config_value "$temporary_config" suite_type "$suite_type"
+	setup.write_config_value "$temporary_config" secure_boot_mode "$secure_boot_mode"
+	setup.write_config_value "$temporary_config" secure_boot_enrollment "$secure_boot_enrollment"
 	setup.write_config_value "$temporary_config" PASSPHRASE "$PASSPHRASE"
 	setup.write_config_value "$temporary_config" pre_download "$pre_download"
 	setup.write_config_value "$temporary_config" root_sub_vol "@$suite"
@@ -216,6 +256,8 @@ setup.generate_configuration() {
 	log.summary_item "Btrfs options" "$btrfs_options"
 	log.summary_item "Suite" "$suite"
 	log.summary_item "Distribution icon" "$suite_type"
+	log.summary_item "Detected Secure Boot mode" "$secure_boot_mode"
+	log.summary_item "Secure Boot enrollment" "$secure_boot_enrollment"
 	log.summary_item "Argon2id target" "${iter_time} ms"
 	log.summary_item "Swap size" "$swap_size"
 	log.summary_item "Enlarge root" "$enlarge"
@@ -231,7 +273,7 @@ setup.generate_configuration() {
 	bash -n "$config_file" || log.die "Generated configuration contains invalid Bash syntax: $config_file"
 	config_mode=$(stat -c '%a' "$config_file")
 	[[ $config_mode == 600 ]] || log.die "Generated configuration permissions are $config_mode; expected 600."
-	for config_name in root_dev efi_dev boot_dev mp rescue_dev keyslot_size iter_time enlarge swap_size btrfs_options suite suite_type \
+	for config_name in root_dev efi_dev boot_dev mp rescue_dev keyslot_size iter_time enlarge swap_size btrfs_options suite suite_type secure_boot_mode secure_boot_enrollment \
 		PASSPHRASE pre_download root_sub_vol enable_tpm snapshot_menu snapshot_menu_pin snapshot_menu_pin_value mok_pin; do
 		grep -q "^export ${config_name}=" "$config_file" ||
 			log.die "Generated configuration is missing required value: $config_name"
@@ -264,6 +306,15 @@ setup.load_configuration() {
 	common.require_nonempty "root_sub_vol" "${root_sub_vol:-}"
 	common.require_nonempty "suite" "${suite:-}"
 	common.require_nonempty "pre_download" "${pre_download:-}"
+	common.require_nonempty "secure_boot_mode" "${secure_boot_mode:-}"
+	common.require_nonempty "secure_boot_enrollment" "${secure_boot_enrollment:-}"
+	[[ $secure_boot_mode == setup || $secure_boot_mode == enabled || $secure_boot_mode == disabled || $secure_boot_mode == unknown ]] ||
+		log.die "secure_boot_mode must be setup, enabled, disabled, or unknown."
+	[[ $secure_boot_enrollment == sbctl || $secure_boot_enrollment == mok ]] ||
+		log.die "secure_boot_enrollment must be sbctl or mok."
+	if [[ $secure_boot_enrollment == mok ]]; then
+		common.require_nonempty "mok_pin" "${mok_pin:-}"
+	fi
 	boot_dev=${boot_dev:-}
 	[[ -z $boot_dev || ($boot_dev != */* && $boot_dev != *..*) ]] ||
 		log.die "boot_dev must be empty or a device name relative to /dev."

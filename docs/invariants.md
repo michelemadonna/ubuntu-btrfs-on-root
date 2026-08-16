@@ -91,10 +91,15 @@ boot and maintenance commands.
 ## Secure Boot
 
 - Secure Boot is not disabled or bypassed by setup.
-- Firmware Setup Mode and User Mode follow different trust paths.
+- `secure_boot_enrollment` is an explicit `sbctl` or `mok` user choice; detected
+  firmware state must never silently change it.
+- `secure_boot_mode` is a temporary state snapshot (`setup`, `enabled`,
+  `disabled` or `unknown`), not the selected enrollment policy.
 - Existing firmware keys are not automatically replaced in User Mode.
-- Direct firmware enrollment occurs only in Setup Mode; User Mode uses shim/MOK
-  and retains the existing firmware ownership databases.
+- Direct firmware enrollment occurs only in Setup Mode. Outside it, an sbctl
+  selection warns and continues without enrollment or automatic MOK fallback.
+- A user-selected MOK path may be prepared while Secure Boot is enabled or
+  disabled and requests a PIN only for that selection.
 - Direct firmware enrollment orders db, KEK and PK, with PK last.
 - Supported Microsoft and firmware built-in trust is retained during direct
   enrollment.
@@ -104,6 +109,8 @@ boot and maintenance commands.
   the signatures required by their active trust path.
 - Signing keys below `/var/lib/sbctl/keys` and `/etc/uki/keys` are persistent
   private material and must not be copied into logs, tests or commits.
+- `/boot/efi/EFI/keys` contains only public `PK.pem`, `KEK.pem`, `db.pem` and an
+  optional `db.cer`; private keys and enrollment payloads are forbidden there.
 - Secure Boot setup is x86-64 UEFI-specific.
 
 ## UKIs
@@ -212,6 +219,9 @@ boot and maintenance commands.
 - Placeholder credentials are replaced before real execution and real
   credentials are never committed.
 - Feature flags `pre_download` and `enable_tpm` activate only for literal `yes`.
+- `secure_boot_enrollment` accepts only `sbctl` or `mok`; `mok_pin` is required
+  only for MOK. `secure_boot_mode` is refreshed from the observed firmware
+  state during Secure Boot setup.
 - `suite_type` selects `os_<suite_type>.png` for rEFInd, with a generic Linux
   fallback. `sb_key_dir` currently has no behavioral effect.
 - `refind_themes.zip` remains available at the repository root for Secure Boot

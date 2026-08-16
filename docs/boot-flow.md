@@ -81,23 +81,27 @@ confirmation because the operation is destructive.
 
 ## Installed Secure Boot chain
 
-The selected chain depends on the firmware state captured during setup.
+The selected chain depends on the user's `secure_boot_enrollment` choice. The
+detected state is recorded temporarily as `secure_boot_mode` and can warn about
+an impossible direct enrollment, but never selects a different chain.
 
 ### Direct firmware trust
 
-When the firmware is in Setup Mode, sbctl keys are enrolled into db, KEK and PK,
+When sbctl is selected and firmware is in Setup Mode, its keys are enrolled into db, KEK and PK,
 with PK enrolled last. The boot path is:
 
     UEFI firmware -> signed rEFInd -> signed UKI -> Linux kernel and embedded initrd
 
 The signed rEFInd loader is also placed at the architecture fallback path.
-This path is used only in Setup Mode. It avoids shim and gives direct control of
+Enrollment is possible only in Setup Mode. Outside it, setup warns without
+blocking, creates keys and signed artifacts, skips enrollment and does not fall
+back to MOK. The direct path avoids shim and gives direct control of
 PK/KEK/db, but makes local key backup and firmware recovery an administrator
 responsibility.
 
 ### Shim and MOK trust
 
-When the firmware is already in User Mode, setup does not replace its enrolled
+When MOK is selected, setup does not replace enrolled
 platform keys. It prepares a shim/MOK path and imports the local db certificate
 through `mokutil`. The user must confirm MOK enrollment at the next reboot.
 
@@ -106,13 +110,15 @@ The resulting path is:
     UEFI firmware -> shim -> MOK-authorized rEFInd payload -> signed UKI
 
 MokManager is installed beside shim to support the enrollment step.
-This path is used in User Mode. It preserves existing firmware ownership and
+This path can be prepared with Secure Boot enabled or disabled. The PIN is
+requested only for MOK. It preserves existing firmware ownership and
 OEM/Microsoft compatibility, but adds shim and requires interactive MOK
 enrollment. sbctl still signs local artifacts; MOK authorizes that identity
 through shim instead of direct firmware db enrollment.
 
-In both modes, rEFInd scans the generated configuration rather than booting a
-traditional GRUB kernel entry. fwupd is configured for the detected trust path,
+In both modes, setup copies only the public PK, KEK and db certificates, plus
+the MOK DER certificate when generated, to `/boot/efi/EFI/keys`. rEFInd scans the generated configuration rather than booting a
+traditional GRUB kernel entry. fwupd is configured for the selected trust path,
 and the selected EFI executables are signed and verified during setup.
 
 ## UKI selection

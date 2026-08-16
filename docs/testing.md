@@ -72,6 +72,9 @@ Prefer tests of deterministic transformations and decisions:
 - separate-boot copying, `/boot` fstab removal without removing `/boot/efi`,
   and rescue-reuse size and confirmation decisions;
 - Secure Boot mode detection and enrollment ordering;
+- explicit sbctl/MOK selection independent of detected firmware state,
+  non-blocking sbctl warnings outside Setup Mode and MOK-only PIN prompting;
+- public-certificate ESP copying with private-key and unexpected-file rejection;
 - rEFInd path and configuration selection for direct and shim modes;
 - version ordering and UKI path generation;
 - kernel postinst/postrm delegation to `kernel-install add`/`remove`;

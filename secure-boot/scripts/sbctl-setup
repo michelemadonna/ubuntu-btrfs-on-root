@@ -344,6 +344,10 @@ sbctl-setup.migrate_configuration() {
 }
 
 sbctl-setup.enroll_if_setup_mode() {
+	if [[ ${secure_boot_enrollment:-sbctl} != sbctl ]]; then
+		log.info "Skip direct firmware enrollment because the user selected MOK"
+		return
+	fi
 	if [[ -z "$SETUP_MODE" ]]; then
 		if [[ -f /etc/securebootmode.conf ]]; then
 			SETUP_MODE="$(</etc/securebootmode.conf)"
@@ -356,7 +360,7 @@ sbctl-setup.enroll_if_setup_mode() {
 
 	if [[ "$SETUP_MODE" != "1" ]]; then
 
-		log.info "SetupMode=0; skip firmware PK/KEK/db enrollment and preserve the existing hierarchy"
+		log.warn "Firmware is not in Setup Mode; sbctl cannot enroll PK, KEK and db now. Preserve the existing hierarchy and continue without enrollment"
 
 		return
 	fi

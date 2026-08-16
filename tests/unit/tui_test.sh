@@ -61,6 +61,9 @@ tui-test.generated_config_contract() {
 	rg -q 'setup\.mounted_device /target/boot/efi' "$repository_root/setup.sh"
 	rg -q 'setup\.mounted_device /target/boot' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" boot_dev "\$boot_dev"' "$repository_root/setup.sh"
+	rg -q 'setup\.write_config_value "\$temporary_config" secure_boot_mode "\$secure_boot_mode"' "$repository_root/setup.sh"
+	rg -q 'setup\.write_config_value "\$temporary_config" secure_boot_enrollment "\$secure_boot_enrollment"' "$repository_root/setup.sh"
+	rg -q 'Select the Secure Boot enrollment method' "$repository_root/setup.sh"
 	rg -q 'Reuse .* as the rescue partition after copying /boot into Btrfs' "$repository_root/setup.sh"
 	if awk '/^setup\.prepare_target\(\)/,/^}/' "$repository_root/setup.sh" | rg -q 'umount'; then
 		printf 'setup.prepare_target must not unmount the Ubiquity target\n' >&2
