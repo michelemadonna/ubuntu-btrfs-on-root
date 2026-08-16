@@ -25,9 +25,14 @@ tui-test.with_input() {
 }
 
 tui-test.input_and_password_defaults() {
-	local output
+	local output prompt
 	output="$(tui-test.with_input $'\n' tui.input "Value" "default" 2>/dev/null)"
 	tui-test.assert_equal default "$output"
+	prompt="$(tui-test.with_input $'secret\n' tui.password "Password" "fallback" 2>&1 >/dev/null)"
+	[[ $prompt == *'Password [default: ********]: ******'* ]] || {
+		printf 'Password prompt must mask the default and entered value.\n' >&2
+		return 1
+	}
 	output="$(tui-test.with_input $'secret\n' tui.password "Password" "fallback" 2>/dev/null)"
 	tui-test.assert_equal secret "$output"
 }
