@@ -14,6 +14,10 @@ The supported default disk layout is:
 | `/dev/sda2` | `/boot/efi` | FAT filesystem labelled `ESP`, containing rEFInd, shim when required, fwupd and UKIs |
 | `/dev/sda3` | `/` formatted as Btrfs | in-place LUKS2 container with the Btrfs subvolume layout |
 
+An optional separate `/boot` may also be created by Ubiquity. Its device is
+recorded as `boot_dev`, its files are migrated into `@$suite/@/boot`, and its
+fstab mount is removed. The old partition is otherwise preserved.
+
 All persistent data of the installed system—including root, home, logs,
 containers and swap—is inside LUKS2. The ESP is its only unencrypted partition
 in the normal boot chain. `/dev/sda1` is a separate unencrypted rescue system
@@ -26,8 +30,9 @@ large enough for a FAT rescue area of at least 7168 MiB and a separate ext4
 persistence partition of at least 512 MiB.
 
 The live environment is expected at `/cdrom`, Ubiquity's installed root at
-`/target`, and its ESP at `/target/boot/efi`. The defaults are defined in
-`setup.conf`.
+`/target`, its ESP at `/target/boot/efi`, and an optional separate boot at the
+exact mount `/target/boot`. The wizard derives defaults from those mount sources
+and uses `/target` as `mp`; initial target preparation preserves them.
 
 During the `btrfs-root` phase, setup verifies that `/dev/$efi_dev` is an
 unmounted FAT filesystem, assigns it the filesystem label `ESP` with `fatlabel`
@@ -118,7 +123,9 @@ conversion or entering the target chroot.
 
 ## Btrfs and LUKS subsystem
 
-`btrfs-root/scripts/btrfs-root-setup` transforms the Ubiquity filesystem. The
+`btrfs-root/scripts/btrfs-root-setup` first verifies that the exact configured
+root device contains Btrfs and is already mounted at `mp`. It then transforms
+the Ubiquity filesystem. The
 suite is the selected release, currently `resolute` or `noble`, so the container
 is `@$suite` and the active root is `@$suite/@`.
 
@@ -147,6 +154,13 @@ snapshots; home snapshots are not boot targets.
 
 After the subvolume copy has succeeded, the original top-level installation
 content is removed while `@`-prefixed subvolumes are retained.
+
+When `boot_dev` is configured, setup verifies its mount at `$mp/boot`, copies
+its content into the new root's `boot` directory, validates the destination and
+unmounts the old partition. Its `/boot` fstab line is removed while `/boot/efi`
+is retained. If its size is at least
+`max(7168 MiB, live-source size + 256 MiB) + 512 MiB`, the wizard may explicitly
+repurpose it as `rescue_dev`; only the later rescue phase reformats it.
 
 Encryption is performed in place. The Btrfs filesystem is shrunk by 32 MiB,
 unmounted and passed to `cryptsetup reencrypt` as LUKS2 with Argon2id, the

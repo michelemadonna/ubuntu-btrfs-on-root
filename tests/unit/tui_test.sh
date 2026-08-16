@@ -56,7 +56,16 @@ tui-test.generated_config_contract() {
 		printf 'setup.sh must not depend on setup.conf.example\n' >&2
 		return 1
 	fi
-	rg -q 'local root_dev=sda3 efi_dev=sda2 rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu' "$repository_root/setup.sh"
+	rg -q "local root_dev=sda3 efi_dev=sda2 boot_dev='' rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu" "$repository_root/setup.sh"
+	rg -q 'setup\.mounted_device /target' "$repository_root/setup.sh"
+	rg -q 'setup\.mounted_device /target/boot/efi' "$repository_root/setup.sh"
+	rg -q 'setup\.mounted_device /target/boot' "$repository_root/setup.sh"
+	rg -q 'setup\.write_config_value "\$temporary_config" boot_dev "\$boot_dev"' "$repository_root/setup.sh"
+	rg -q 'Reuse .* as the rescue partition after copying /boot into Btrfs' "$repository_root/setup.sh"
+	if awk '/^setup\.prepare_target\(\)/,/^}/' "$repository_root/setup.sh" | rg -q 'umount'; then
+		printf 'setup.prepare_target must not unmount the Ubiquity target\n' >&2
+		return 1
+	fi
 	rg -q 'setup\.write_config_value "\$temporary_config" mp "\$mp"' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" keyslot_size "\$keyslot_size"' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" btrfs_options "\$btrfs_options"' "$repository_root/setup.sh"

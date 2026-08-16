@@ -2,6 +2,7 @@
 
 export root_dev="sda3"
 export efi_dev="sda2"
+export boot_dev=""
 export mp="/mnt/root"
 export rescue_dev="sda1"
 export keyslot_size="32m"

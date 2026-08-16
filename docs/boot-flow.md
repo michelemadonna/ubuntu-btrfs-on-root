@@ -9,11 +9,16 @@ partitioning and install Ubuntu with this layout:
 2. `/dev/sda2` as the FAT32 EFI System Partition mounted at `/boot/efi`;
 3. `/dev/sda3` as the unencrypted Btrfs root mounted at `/`.
 
+An optional separate `/boot` remains mounted at `/target/boot`; its device is
+detected as `boot_dev` and later absorbed into the encrypted root.
+
 The initial rescue partition must be large enough for at least 7168 MiB of FAT
 rescue data plus a separate writable partition of at least 512 MiB. Complete the
 Ubiquity installation but remain in the
 same live session. The scripts expect `/target`, `/target/boot/efi` and `/cdrom`
-to remain available.
+to remain available. Their exact source devices become wizard defaults and a
+mounted `/target` becomes `mp`. Initial target preparation unmounts none of
+them.
 
 Run `setup.sh` as root. When `setup.conf` is absent, the grouped wizard uses its
 built-in defaults, generates and validates the protected local
@@ -24,14 +29,17 @@ should proceed. The defaults target `/dev/sda1`, `/dev/sda2` and `/dev/sda3`.
 
 The outer live-session phase performs these operations in order:
 
-1. Validate root execution and configuration.
+1. Validate root execution, configuration, exact mount sources and that the
+   configured root filesystem is Btrfs.
 2. Convert the Ubiquity Btrfs layout into the configured suite hierarchy and create
    the dedicated data subvolumes and swap file.
-3. Shrink Btrfs, encrypt `/dev/sda3` in place as LUKS2, open it as
+3. If `boot_dev` is set, copy it to `@$suite/@/boot`, validate it, unmount the
+   old partition and remove its `/boot` fstab entry.
+4. Shrink Btrfs, encrypt `/dev/sda3` in place as LUKS2, open it as
    `/dev/mapper/root`, remount the target and expand Btrfs.
-4. Rewrite the target's crypttab and fstab.
-5. Prepare target bind mounts and copy the repository into the installed system.
-6. Enter a mount-isolated chroot and run `setup.sh //inner`.
+5. Rewrite the target's crypttab and fstab.
+6. Prepare target bind mounts and copy the repository into the installed system.
+7. Enter a mount-isolated chroot and run `setup.sh //inner`.
 
 The inner phase then:
 

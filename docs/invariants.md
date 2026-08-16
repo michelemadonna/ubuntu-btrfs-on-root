@@ -16,6 +16,15 @@ boot and maintenance commands.
   label `ESP`; label application must not reformat it.
 - `/dev/sda3` initially contains the unencrypted Ubiquity Btrfs root mounted at
   `/target`; the repository encrypts it in place.
+- Before subvolume creation, the exact `root_dev` must be Btrfs and be the
+  source mounted at `mp`.
+- Initial target preparation preserves `/target`, `/target/boot` and
+  `/target/boot/efi`; their exact sources supply wizard defaults.
+- `boot_dev` is optional. Its content is copied from `$mp/boot` to
+  `@$suite/@/boot`, validated, and its `/boot` fstab entry is removed without
+  removing `/boot/efi`.
+- The boot partition is preserved unless the user explicitly accepts its reuse
+  as `rescue_dev` after the capacity check.
 - `/cdrom` is the source for the rescue live environment.
 - Installed-system persistent data and swap remain inside LUKS2. Its ESP is the
   only unencrypted partition in the normal boot chain; the rescue system is a
@@ -26,6 +35,8 @@ boot and maintenance commands.
 ## Rescue system
 
 - Rescue creation requires exact target-device confirmation before formatting.
+- When `rescue_dev=boot_dev`, formatting follows boot migration and an explicit
+  wizard confirmation.
 - The rescue target and source cannot be the same device.
 - The input rescue partition is on GPT and has room for a FAT rescue range of at
   least 7168 MiB, a 256 MiB source reserve when required, and at least 512 MiB
@@ -188,6 +199,8 @@ boot and maintenance commands.
 - When absent, it is generated only through the interactive TUI and installed
   atomically with mode 0600. `mp`, `keyslot_size` and `btrfs_options` retain
   their repository defaults and are not prompted.
+- Exact mounts at `/target`, `/target/boot/efi` and `/target/boot` provide
+  `root_dev`, `efi_dev`, optional `boot_dev` and `mp` defaults.
 - The guided flow restricts `suite` to `resolute` or `noble` and `suite_type`
   to the currently supported `ubuntu` value. All `yes`/`no` questions use
   toggles and persist only those literal values.

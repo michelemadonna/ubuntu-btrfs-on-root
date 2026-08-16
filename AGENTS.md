@@ -25,8 +25,13 @@ Ubiquity must use manual partitioning with this default layout:
 - `/dev/sda2`: FAT32 EFI System Partition mounted by Ubiquity at `/boot/efi`;
 - `/dev/sda3`: unencrypted Btrfs filesystem mounted by Ubiquity at `/`.
 
+An optional separate `/boot` must remain mounted at `/target/boot` and be
+configured as `boot_dev`. Setup migrates its content into `@$suite/@/boot`; the
+partition is preserved unless the user explicitly reuses it for rescue.
+
 The setup scripts assume the installed target is available at `/target`, its ESP
-at `/target/boot/efi`, and the live medium at `/cdrom`. Device names and other
+at `/target/boot/efi`, an optional separate boot at `/target/boot`, and the live
+medium at `/cdrom`. Device names and other
 installation values come from `setup.conf`; changing them requires checking all
 consumers before execution.
 
@@ -175,6 +180,11 @@ real devices.
 
 - Never format, shrink, encrypt, resize or mount a device inferred from
   ambiguous input.
+- Before subvolume creation, verify that the configured root is Btrfs and is the
+  exact source already mounted at `mp`.
+- Preserve Ubiquity's target mounts during initial preparation. When `boot_dev`
+  is configured, copy and validate it in `@$suite/@/boot`, unmount it before
+  conversion and remove only its `/boot` fstab entry.
 - Preserve recovery access and existing non-TPM keyslots unless an explicit
   operation says otherwise.
 - Never pass secrets through command-line arguments when a safer input channel
@@ -195,6 +205,8 @@ real devices.
   partition to at least 7168 MiB
   and creates a separate ext4 partition named and labelled `writable` in the
   released range; it must never recreate file-backed persistence.
+- A `boot_dev` may become `rescue_dev` only after the capacity check and an
+  explicit destructive-reuse confirmation.
 - `setup.sh --install-rescue-live` is the standalone post-boot rescue entry
   point. It must not enter Btrfs conversion or the target chroot and may take
   its live source from `RESCUE_SOURCE_DIR`, defaulting to `/cdrom`.
@@ -298,8 +310,9 @@ variables as functional.
 If `setup.conf` is missing, `setup.sh` must use `lib/tui.sh` and built-in
 defaults to generate it without depending on `setup.conf.example`. Prompts are
 grouped by theme and retain visible current defaults; password entry remains
-hidden. Root selection is
-disk-first and then limited to that disk's partitions.
+hidden. Root selection is disk-first and then limited to that disk's
+partitions. Exact mounts at `/target`, `/target/boot/efi` and `/target/boot`
+supply defaults for `root_dev`, `efi_dev`, optional `boot_dev` and `mp`.
 Keep `mp`, `keyslot_size` and `btrfs_options` fixed and non-interactive unless a
 task explicitly changes this contract. Generated configuration remains
 shell-quoted, mode 0600 and atomically installed. Present `suite` as a closed

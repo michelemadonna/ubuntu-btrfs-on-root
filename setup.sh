@@ -22,16 +22,47 @@ setup.write_config_value() {
 	printf 'export %s=%q\n' "$name" "$value" >>"$file"
 }
 
+setup.mounted_device() {
+	local mountpoint_path=$1
+	local source
+
+	source="$(findmnt -rn -M "$mountpoint_path" -o SOURCE 2>/dev/null || true)"
+	source=${source%%\[*}
+	[[ $source == /dev/* ]] || return 1
+	readlink -f -- "$source"
+}
+
+setup.minimum_rescue_size_mib() {
+	local source_directory=${1:-/cdrom}
+	local source_size_mib=0
+
+	if [[ -d $source_directory ]]; then
+		read -r source_size_mib _ < <(du -sm -- "$source_directory")
+	fi
+	if ((source_size_mib + 256 > 7168)); then
+		printf '%s\n' "$((source_size_mib + 256 + 512))"
+	else
+		printf '7680\n'
+	fi
+}
+
+setup.device_size_mib() {
+	local device=$1
+	printf '%s\n' "$(($(blockdev --getsize64 "$device") / 1024 / 1024))"
+}
+
 setup.generate_configuration() {
 	local config_file=$1
-	local disk default_disk root_path efi_path rescue_path name type size detail confirmation config_mode config_name
-	local root_dev=sda3 efi_dev=sda2 rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu
+	local disk default_disk root_path efi_path boot_path rescue_path name type size detail confirmation config_mode config_name
+	local detected_root_path detected_efi_path detected_boot_path boot_default reuse_boot_as_rescue=no
+	local minimum_rescue_mib boot_size_mib
+	local root_dev=sda3 efi_dev=sda2 boot_dev='' rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu
 	local PASSPHRASE=password mok_pin=123456
 	local pre_download=yes enable_tpm=yes snapshot_menu=yes enlarge=no snapshot_menu_pin=yes snapshot_menu_pin_value=123456
 	local mp=/mnt/root keyslot_size=32m btrfs_options='defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1'
-	local -a disk_items=() partition_items=() efi_items=() rescue_items=()
+	local -a disk_items=() partition_items=() efi_items=() boot_items=() rescue_items=()
 
-	common.require_commands bash grep lsblk mktemp mv stat
+	common.require_commands bash blockdev du findmnt grep lsblk mktemp mv readlink stat
 	[[ -r $TUI_INPUT_DEVICE ]] || log.die "Interactive terminal is unavailable: $TUI_INPUT_DEVICE"
 	log.section "Guided setup.conf creation"
 	log.warn "This procedure is intended only for a freshly installed Ubuntu system created from the live environment."
@@ -39,6 +70,24 @@ setup.generate_configuration() {
 	log.info "The wizard is using the built-in supported defaults."
 
 	log.section "Storage configuration"
+	detected_root_path="$(setup.mounted_device /target || true)"
+	detected_efi_path="$(setup.mounted_device /target/boot/efi || true)"
+	detected_boot_path="$(setup.mounted_device /target/boot || true)"
+	if [[ -n $detected_root_path ]]; then
+		root_dev=${detected_root_path#/dev/}
+		mp=/target
+		log.info "Detected installed root $detected_root_path mounted at /target"
+	fi
+	if [[ -n $detected_efi_path ]]; then
+		efi_dev=${detected_efi_path#/dev/}
+		log.info "Detected EFI System Partition $detected_efi_path mounted at /target/boot/efi"
+	fi
+	if [[ -n $detected_boot_path && $detected_boot_path != "$detected_root_path" ]]; then
+		boot_dev=${detected_boot_path#/dev/}
+		log.info "Detected separate boot partition $detected_boot_path mounted at /target/boot"
+	else
+		detected_boot_path=""
+	fi
 	while read -r name type size detail; do
 		[[ $type == disk ]] || continue
 		disk_items+=("$name|$name $size ${detail:-unknown model}")
@@ -61,16 +110,41 @@ setup.generate_configuration() {
 	done
 	efi_path="$(tui.select_one "Select the EFI System Partition" "/dev/$efi_dev" "${efi_items[@]}")" ||
 		log.die "Invalid EFI partition selection."
+	boot_items+=("none|No separate /boot partition")
 	for detail in "${partition_items[@]}"; do
-		[[ ${detail%%|*} == "$root_path" || ${detail%%|*} == "$efi_path" ]] || rescue_items+=("$detail")
+		[[ ${detail%%|*} == "$root_path" || ${detail%%|*} == "$efi_path" ]] || boot_items+=("$detail")
 	done
-	rescue_path="$(tui.select_one "Select the oversized partition reserved for rescue" "/dev/$rescue_dev" "${rescue_items[@]}")" ||
-		log.die "Invalid rescue partition selection."
+	boot_default=${detected_boot_path:-none}
+	boot_path="$(tui.select_one "Select the optional separate /boot partition" "$boot_default" "${boot_items[@]}")" ||
+		log.die "Invalid boot partition selection."
+	[[ $boot_path != none ]] || boot_path=""
+
+	if [[ -n $boot_path ]]; then
+		minimum_rescue_mib="$(setup.minimum_rescue_size_mib /cdrom)"
+		boot_size_mib="$(setup.device_size_mib "$boot_path")"
+		if ((boot_size_mib >= minimum_rescue_mib)); then
+			reuse_boot_as_rescue="$(tui.toggle "Reuse $boot_path as the rescue partition after copying /boot into Btrfs" no)" ||
+				log.die "Invalid boot-partition reuse toggle."
+		else
+			log.info "$boot_path is ${boot_size_mib} MiB; rescue reuse requires at least ${minimum_rescue_mib} MiB"
+		fi
+	fi
+
+	if [[ $reuse_boot_as_rescue == yes ]]; then
+		rescue_path=$boot_path
+	else
+		for detail in "${partition_items[@]}"; do
+			[[ ${detail%%|*} == "$root_path" || ${detail%%|*} == "$efi_path" || ${detail%%|*} == "$boot_path" ]] || rescue_items+=("$detail")
+		done
+		rescue_path="$(tui.select_one "Select the oversized partition reserved for rescue" "/dev/$rescue_dev" "${rescue_items[@]}")" ||
+			log.die "Invalid rescue partition selection."
+	fi
 	swap_size="$(tui.input "Btrfs swapfile size" "$swap_size")"
 	[[ $swap_size =~ ^[1-9][0-9]*[KMGTP]$ ]] || log.die "Swap size must use a value such as 4G."
 
 	root_dev=${root_path#/dev/}
 	efi_dev=${efi_path#/dev/}
+	boot_dev=${boot_path#/dev/}
 	rescue_dev=${rescue_path#/dev/}
 
 	log.section "Distribution configuration"
@@ -108,6 +182,7 @@ setup.generate_configuration() {
 	chmod 0600 "$temporary_config"
 	setup.write_config_value "$temporary_config" root_dev "$root_dev"
 	setup.write_config_value "$temporary_config" efi_dev "$efi_dev"
+	setup.write_config_value "$temporary_config" boot_dev "$boot_dev"
 	setup.write_config_value "$temporary_config" mp "$mp"
 	setup.write_config_value "$temporary_config" rescue_dev "$rescue_dev"
 	setup.write_config_value "$temporary_config" keyslot_size "$keyslot_size"
@@ -133,7 +208,9 @@ setup.generate_configuration() {
 	log.summary_item "Disk" "$disk"
 	log.summary_item "Root" "$root_path"
 	log.summary_item "ESP" "$efi_path"
+	log.summary_item "Separate boot" "${boot_path:-none}"
 	log.summary_item "Rescue" "$rescue_path"
+	log.summary_item "Boot reused for rescue" "$reuse_boot_as_rescue"
 	log.summary_item "Mount point" "$mp"
 	log.summary_item "LUKS header space" "$keyslot_size"
 	log.summary_item "Btrfs options" "$btrfs_options"
@@ -154,7 +231,7 @@ setup.generate_configuration() {
 	bash -n "$config_file" || log.die "Generated configuration contains invalid Bash syntax: $config_file"
 	config_mode=$(stat -c '%a' "$config_file")
 	[[ $config_mode == 600 ]] || log.die "Generated configuration permissions are $config_mode; expected 600."
-	for config_name in root_dev efi_dev mp rescue_dev keyslot_size iter_time enlarge swap_size btrfs_options suite suite_type \
+	for config_name in root_dev efi_dev boot_dev mp rescue_dev keyslot_size iter_time enlarge swap_size btrfs_options suite suite_type \
 		PASSPHRASE pre_download root_sub_vol enable_tpm snapshot_menu snapshot_menu_pin snapshot_menu_pin_value mok_pin; do
 		grep -q "^export ${config_name}=" "$config_file" ||
 			log.die "Generated configuration is missing required value: $config_name"
@@ -187,6 +264,11 @@ setup.load_configuration() {
 	common.require_nonempty "root_sub_vol" "${root_sub_vol:-}"
 	common.require_nonempty "suite" "${suite:-}"
 	common.require_nonempty "pre_download" "${pre_download:-}"
+	boot_dev=${boot_dev:-}
+	[[ -z $boot_dev || ($boot_dev != */* && $boot_dev != *..*) ]] ||
+		log.die "boot_dev must be empty or a device name relative to /dev."
+	[[ -z $boot_dev || ($boot_dev != "$root_dev" && $boot_dev != "$efi_dev") ]] ||
+		log.die "boot_dev must be distinct from root_dev and efi_dev."
 	[[ $rescue_dev != */* && $rescue_dev != *..* ]] ||
 		log.die "rescue_dev must be a device name relative to /dev."
 	[[ $rescue_dev != "$root_dev" && $rescue_dev != "$efi_dev" ]] ||
@@ -241,11 +323,13 @@ setup.parse_arguments() {
 }
 
 setup.prepare_target() {
-	log.info "Prepare installation target"
-	umount /target/boot/efi
-	umount /target/cdrom
-	umount /target
-	mkdir "$mp"
+	log.section "Installed target preflight"
+	common.require_commands mountpoint
+	[[ -d $mp ]] || log.die "Configured target mount point does not exist: $mp"
+	mountpoint -q "$mp" || log.die "Configured target is not mounted: $mp"
+	log.info "Preserve the existing target mount at $mp; storage scripts will consume it in place"
+	log.success "Installed target is mounted and ready for validation"
+	log.section_end
 }
 
 setup.install_rescue_system() {

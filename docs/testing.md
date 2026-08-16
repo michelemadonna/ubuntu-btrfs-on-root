@@ -62,12 +62,15 @@ are inherited from that caller.
 Prefer tests of deterministic transformations and decisions:
 
 - setup configuration validation and device-name construction;
+- mounted-target discovery and preservation for root, ESP and optional boot;
 - TUI default handling, hidden input, single/multiple selection, normalized
   `yes`/`no` toggles and generated configuration contract;
 - `log.*` output channels, formatting and fatal-exit behavior;
 - rescue source/destination sizing and FAT32/persistence limits;
 - rescue GPT split calculations and the partition-backed `writable` contract;
-- Btrfs subvolume and fstab/crypttab model generation;
+- Btrfs source-type preflight, subvolume and fstab/crypttab model generation;
+- separate-boot copying, `/boot` fstab removal without removing `/boot/efi`,
+  and rescue-reuse size and confirmation decisions;
 - Secure Boot mode detection and enrollment ordering;
 - rEFInd path and configuration selection for direct and shim modes;
 - version ordering and UKI path generation;
@@ -130,6 +133,8 @@ workflow:
 2. use Ubiquity manual partitioning;
 3. create `/dev/sda1` for rescue, `/dev/sda2` as the FAT32 ESP and `/dev/sda3`
    as the unencrypted Btrfs root;
+   optionally add a separate `/boot` to test migration and, only on a disposable
+   target, its explicitly confirmed rescue reuse;
 4. finish installation and remain in the live session;
 5. supply non-production setup credentials and the required
    `refind_themes.zip` artifact included at the repository root;
@@ -151,6 +156,8 @@ dedicated physical target.
 Integration testing should also exercise controlled failures:
 
 - incorrect setup device mapping must fail before destructive execution;
+- a non-Btrfs root, mismatched mount source or configured-but-unmounted boot
+  partition must fail before subvolume creation;
 - insufficient rescue capacity and oversized FAT32 source files must fail;
 - an unavailable signing key or invalid EFI signature must prevent artifact
   acceptance;

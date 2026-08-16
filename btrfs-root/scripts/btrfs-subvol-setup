@@ -28,6 +28,39 @@ btrfs-subvol-setup.validate_configuration() {
 		log.die "root_sub_vol must be a safe relative Btrfs path."
 }
 
+btrfs-subvol-setup.validate_source_filesystem() {
+	local source_device="/dev/$root_dev"
+	local filesystem_type
+	local mounted_source
+
+	[[ -b $source_device ]] || log.die "Configured root device is not a block device: $source_device"
+	filesystem_type="$(blkid -c /dev/null -s TYPE -o value "$source_device")"
+	[[ $filesystem_type == btrfs ]] ||
+		log.die "Root partition must contain Btrfs before subvolume creation; detected '${filesystem_type:-unknown}' on $source_device."
+	mounted_source="$(findmnt -rn -M "$mp" -o SOURCE 2>/dev/null || true)"
+	mounted_source=${mounted_source%%\[*}
+	[[ -n $mounted_source && $(readlink -f -- "$mounted_source") == "$(readlink -f -- "$source_device")" ]] ||
+		log.die "Configured root device $source_device is not mounted at $mp."
+	log.success "Validated Btrfs root source $source_device mounted at $mp"
+}
+
+btrfs-subvol-setup.copy_separate_boot() {
+	local copied_root=$1
+	local source_boot="$mp/boot"
+	local destination_boot="$copied_root/boot"
+
+	[[ -n ${boot_dev:-} ]] || return 0
+	log.info "Copy separate /boot content from /dev/$boot_dev into $destination_boot"
+	mkdir -p "$destination_boot"
+	cp -a -- "$source_boot/." "$destination_boot/"
+	[[ -n $(find "$destination_boot" -mindepth 1 -print -quit) ]] ||
+		log.die "Separate boot partition /dev/$boot_dev contained no files to migrate."
+	sync
+	log.success "Copied separate /boot content into the encrypted Btrfs root"
+	log.info "Unmount migrated separate boot partition from $source_boot"
+	umount "$source_boot"
+}
+
 btrfs-subvol-setup.move_directory_contents() (
 	local source_directory=$1
 	local destination_directory=$2
@@ -58,8 +91,8 @@ btrfs-subvol-setup.run() {
 	local copied_root="$root_sub_vol/@"
 
 	log.section "Btrfs subvolume layout"
-	log.info "Mount source Btrfs filesystem $source_device at $mp"
-	mount "$source_device" "$mp"
+	btrfs-subvol-setup.validate_source_filesystem
+	log.info "Use existing source Btrfs mount $source_device at $mp"
 	cd "$mp"
 
 	log.info "Create distribution container subvolume $root_sub_vol"
@@ -69,6 +102,7 @@ btrfs-subvol-setup.run() {
 
 	log.info "Remove nested installer subvolume copy $copied_root/$root_sub_vol"
 	rm -Rf -- "${copied_root:?}/${root_sub_vol:?}"
+	btrfs-subvol-setup.copy_separate_boot "$copied_root"
 
 	btrfs-subvol-setup.create_data_subvolume "@home"
 	btrfs-subvol-setup.move_directory_contents "$copied_root/home" "$root_sub_vol/@home"

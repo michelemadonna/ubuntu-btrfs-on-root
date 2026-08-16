@@ -33,6 +33,12 @@ partitioning. Create this default layout:
 | `/dev/sda2` | FAT32 EFI System Partition mounted at `/boot/efi` | label `ESP`; rEFInd, shim when needed, fwupd and signed UKIs |
 | `/dev/sda3` | unencrypted Btrfs mounted at `/` | LUKS2-encrypted Ubuntu Btrfs root |
 
+An installation may also have a separate `/boot` partition. Ubiquity must leave
+it mounted at `/target/boot`; the wizard detects it as `boot_dev`. Setup copies
+its contents into the encrypted `@$suite/@/boot`, removes the obsolete `/boot`
+entry from fstab and preserves the old partition unless it is explicitly
+selected for reuse as the rescue target.
+
 The partition initially assigned to `/dev/sda1` must be large enough for a rescue
 FAT filesystem of at least 7168 MiB plus at least 512 MiB of persistence. Setup
 shrinks `/dev/sda1` to the larger of 7168 MiB or the live-medium size plus a
@@ -54,6 +60,7 @@ session. The scripts expect:
 
 - the installed system mounted at `/target`;
 - its ESP mounted at `/target/boot/efi`;
+- its optional separate boot partition mounted at `/target/boot`;
 - the live medium mounted at `/cdrom`;
 - x86-64 UEFI firmware and working network access.
 
@@ -82,8 +89,14 @@ into `setup.sh`; the wizard does not depend on `setup.conf.example` being
 present. Inputs are grouped into storage, distribution, encryption
 and boot security, and optional-feature sections. The wizard first lists block
 devices, then lists only the partitions belonging to the selected device for
-root selection. ESP and oversized rescue partitions are
-selected from the remaining partitions. `suite` is a single selection limited
+root selection. When `/target`, `/target/boot/efi` and an exact separate
+`/target/boot` mount exist, their source devices are offered as defaults for
+`root_dev`, `efi_dev` and `boot_dev`, and `mp` becomes `/target`. Initial target
+preparation preserves those mounts. ESP, optional boot and oversized rescue
+partitions are selected from the remaining partitions. If the boot partition
+is large enough, the wizard offers to reuse it for rescue after copying its
+files; accepting sets `rescue_dev=boot_dev` and authorizes its later destructive
+rescue formatting. `suite` is a single selection limited
 to `resolute` or `noble`; `suite_type` is a single selection currently limited
 to `ubuntu`. Every `yes`/`no` setting is presented as a toggle and normalized to
 one of those two literal values. Secrets use hidden input. The generated file is
@@ -100,7 +113,7 @@ The wizard deliberately does not ask for `mp`, `keyslot_size` or
 `btrfs_options`; it writes their current supported values directly:
 
 ```text
-mp=/mnt/root
+mp=/mnt/root # automatically /target when Ubiquity's target is mounted
 keyslot_size=32m
 btrfs_options=defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1
 ```
@@ -111,6 +124,7 @@ Important current options are:
 | --- | --- | --- |
 | `root_dev` | `sda3` | physical Btrfs root that will be encrypted |
 | `efi_dev` | `sda2` | EFI System Partition |
+| `boot_dev` | empty | optional separate boot partition migrated into encrypted root |
 | `rescue_dev` | `sda1` | partition that setup will reformat for rescue |
 | `mp` | `/mnt/root` | target mount point used during conversion |
 | `suite` | `resolute` | UKI token and Btrfs distribution container; produces `@resolute/@` |
@@ -157,19 +171,22 @@ last reported state. These checks do not replace a real reboot test.
 
 The main flow performs these operations:
 
-1. creates `@$suite/@` and the dedicated Btrfs data subvolumes;
-2. creates a Btrfs swap file;
-3. encrypts `/dev/sda3` in place as LUKS2 and mounts it as
+1. verifies that the configured root device is Btrfs and mounted at `mp`;
+2. creates `@$suite/@` and the dedicated Btrfs data subvolumes;
+3. when `boot_dev` is set, copies it into `@$suite/@/boot`, unmounts it and
+   removes its obsolete `/boot` fstab entry;
+4. creates a Btrfs swap file;
+5. encrypts `/dev/sda3` in place as LUKS2 and mounts it as
    `/dev/mapper/root`;
-4. generates the target fstab and crypttab configuration;
-5. enters the installed system in a mount-isolated chroot;
-6. configures Secure Boot, rEFInd and fwupd;
-7. installs Snapper and the optional early-boot snapshot selector;
-8. configures kernel-install, dracut and ukify, then generates and verifies UKIs;
-9. installs TPM support when enabled, without enrolling LUKS automatically;
-10. splits the reserved rescue range, creates the ext4 `writable` partition and
+6. generates the target fstab and crypttab configuration;
+7. enters the installed system in a mount-isolated chroot;
+8. configures Secure Boot, rEFInd and fwupd;
+9. installs Snapper and the optional early-boot snapshot selector;
+10. configures kernel-install, dracut and ukify, then generates and verifies UKIs;
+11. installs TPM support when enabled, without enrolling LUKS automatically;
+12. splits the reserved rescue range, creates the ext4 `writable` partition and
     copies the live system to the resized FAT rescue partition;
-11. unmounts the target and closes the temporary LUKS mapping.
+13. unmounts the target and closes the temporary LUKS mapping.
 
 Detailed installation and runtime flows are documented in
 [docs/architecture.md](docs/architecture.md) and

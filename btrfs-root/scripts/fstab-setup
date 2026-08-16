@@ -52,12 +52,29 @@ fstab-setup.build_root_entry() {
 		"$options" "$subvolume_root"
 }
 
+fstab-setup.remove_separate_boot_entry() {
+	local fstab_file=$1
+	local temporary_file
+
+	[[ -n ${boot_dev:-} ]] || return 0
+	temporary_file="$(mktemp "${fstab_file}.XXXXXX")"
+	awk '$2 != "/boot"' "$fstab_file" >"$temporary_file"
+	if cmp -s "$fstab_file" "$temporary_file"; then
+		rm -f -- "$temporary_file"
+		log.die "Separate boot partition is configured but no /boot entry was found in $fstab_file."
+	fi
+	install -m 0644 "$temporary_file" "$fstab_file"
+	rm -f -- "$temporary_file"
+	log.info "Removed the obsolete separate /boot mount from $fstab_file after migrating its content"
+}
+
 fstab-setup.run() {
 	local fstab_file="$mp/etc/fstab"
 	local root_entry
 
 	log.section "Persistent Btrfs mounts"
 	common.require_readable_file "$fstab_file" "Target fstab"
+	fstab-setup.remove_separate_boot_entry "$fstab_file"
 	root_entry="$(fstab-setup.build_root_entry "$btrfs_options" "$root_sub_vol")"
 
 	log.info "Replace the installer root entry in $fstab_file with the encrypted mapper and normal root subvolume"
