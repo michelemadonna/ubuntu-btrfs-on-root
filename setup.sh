@@ -408,7 +408,11 @@ setup.parse_arguments() {
 
 setup.prepare_target() {
 	log.section "Installed target preflight"
-	common.require_commands mkdir mount mountpoint umount
+	common.require_commands apt-get mkdir mount mountpoint umount
+	if ! command -v btrfs >/dev/null 2>&1 || ! command -v rsync >/dev/null 2>&1; then
+		log.info "Install live-session storage tools required for Btrfs conversion"
+		apt-get install -y btrfs-progs rsync
+	fi
 	mkdir -p -- "$mp"
 	if [[ $suite_type == kali ]]; then
 		log.info "Kali mode: mount the configured filesystems for conversion"
