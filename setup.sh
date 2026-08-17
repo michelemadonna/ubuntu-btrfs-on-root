@@ -529,7 +529,7 @@ setup.inner_installation() {
 	fi
 
 	log.info "Install target initramfs integration for the configured LUKS root"
-	apt-get install -y cryptsetup-initramfs
+	apt-get install -y btrfs-progs cryptsetup-initramfs
 
 	# The Btrfs/LUKS storage phase has already completed outside the chroot.
 	# Security-sensitive phase coordinators execute as isolated entry points.

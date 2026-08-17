@@ -119,8 +119,14 @@ btrfs-subvol-setup.copy_kali_tree() {
 btrfs-subvol-setup.remove_kali_sources() {
 	local source_root=$1
 	local name
+	local -a top_level_subvolumes=()
 
-	for name in @ @home @root @usr@local @var@log @.snapshots; do
+	mapfile -t top_level_subvolumes < <(
+		btrfs subvolume list "$source_root" |
+			awk '$3 == "top" && $4 == "level" && $5 == "5" { print $6 }'
+	)
+	for name in "${top_level_subvolumes[@]}"; do
+		[[ $name == "$root_sub_vol" ]] && continue
 		log.info "Remove migrated Kali source subvolume $name"
 		btrfs subvolume delete "$source_root/$name"
 	done
@@ -143,6 +149,8 @@ btrfs-subvol-setup.run_kali() {
 		btrfs-subvol-setup.create_data_subvolume "$name"
 	done
 	btrfs-subvol-setup.copy_kali_tree "$source_root" "$destination_root"
+	log.info "Remove pre-existing Kali snapshot directories before configuring Snapper"
+	rm -Rf -- "$destination_root/@/.snapshots" "$destination_root/@home/.snapshots"
 	if [[ -n $boot_backup ]]; then
 		log.info "Copy backed-up separate /boot into $destination_root/@/boot"
 		mkdir -p "$destination_root/@/boot"
