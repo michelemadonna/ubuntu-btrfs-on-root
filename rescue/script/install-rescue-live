@@ -153,10 +153,8 @@ install-rescue-live.run() {
 
 	log.section "Rescue partition split"
 	log.info "Shrink partition $partition_number on $disk to $rescue_size_mib MiB"
-	log.warn "Confirm the partition shrink to parted after the exact-device safety confirmation succeeded"
-	LC_ALL=C parted --pretend-input-tty "$disk" unit s resizepart "$partition_number" "${new_end_sector}s" <<-'EOF'
-		Yes
-	EOF
+	log.info "Apply the confirmed partition shrink with parted"
+	LC_ALL=C parted --script "$disk" unit s resizepart "$partition_number" "${new_end_sector}s"
 	log.info "Create GPT partition 'writable' from sector $writable_start_sector through $original_end_sector"
 	parted --script "$disk" unit s mkpart writable ext4 "${writable_start_sector}s" "${original_end_sector}s"
 	partprobe "$disk"
