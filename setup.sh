@@ -408,7 +408,9 @@ setup.parse_arguments() {
 
 setup.prepare_target() {
 	log.section "Installed target preflight"
-	common.require_commands apt-get mkdir mount mountpoint umount
+	common.require_commands apt-get chmod install mkdir mount mountpoint umount
+	install -d -m 1777 /tmp
+	chmod 1777 /tmp
 	if ! command -v btrfs >/dev/null 2>&1 || ! command -v rsync >/dev/null 2>&1; then
 		log.info "Install live-session storage tools required for Btrfs conversion"
 		apt-get install -y btrfs-progs rsync
@@ -500,14 +502,14 @@ setup.pre_download_all() {
 		asciidoc-base binutils build-essential ca-certificates coreutils cryptsetup-bin
 		cryptsetup-initramfs curl dialog dosfstools dracut e2fsprogs efibootmgr findutils fwupd
 		fwupd-unsigned git golang-go jq libpcsclite-dev libpcsclite1
-		libtss2-tcti-tabrmd0 openssl pcscd pkgconf pkgconf-bin refind rsync
+		libtss2-tcti-tabrmd0 openssl pcscd pkgconf pkgconf-bin rsync
 		sbsigntool snapper systemd-cryptsetup systemd-ukify tpm2-tools tpm2-tss
 		util-linux
 	)
 	if [[ $suite_type == kali ]]; then
 		packages+=(libtss2-esys-3.0.2-0 libtss2-mu-4.0.1-0 libtss2-rc0)
 	else
-		packages+=(libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64)
+		packages+=(libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64 refind)
 	fi
 
 	apt install --no-install-recommends -y --download-only \

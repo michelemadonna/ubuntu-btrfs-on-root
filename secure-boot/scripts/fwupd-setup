@@ -123,7 +123,11 @@ fwupd-setup.install_dependencies() {
 	# Distribution-specific EFI companion packages.
 	#
 	apt-get install -y fwupd-efi || true
-	apt-get install -y fwupd-signed || true
+	if [[ ${suite_type:-ubuntu} != kali ]]; then
+		apt-get install -y fwupd-signed || true
+	else
+		log.info "Skip Kali fwupd-signed package; fwupd EFI will be signed locally"
+	fi
 	apt-get install -y fwupd-unsigned || true
 }
 
