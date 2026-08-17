@@ -134,6 +134,7 @@ btrfs-subvol-setup.run_kali() {
 	local name
 
 	log.section "Kali Btrfs layout migration"
+	cd "$source_root"
 	btrfs-subvol-setup.validate_kali_sources "$source_root"
 	log.info "Create distribution container subvolume $destination_root"
 	btrfs subvolume create "$destination_root"
