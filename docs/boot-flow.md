@@ -26,10 +26,12 @@ unmounted only when it is a mount point; its absence is non-fatal.
 2. Unmount the ESP for FAT label `ESP` validation/application.
 3. Snapshot the installed root into `@$suite/@` and create data subvolumes.
 4. If `boot_dev` exists, copy it into the new encrypted-root `/boot`, validate
-   the copy, unmount the old boot and remove only its fstab entry.
+   the copy and unmount the old boot.
 5. Shrink Btrfs, unmount it, perform in-place LUKS2 reencryption, open mapper
    `root`, mount the new root and grow Btrfs.
-6. Write crypttab, root/data/swap fstab entries and prepare chroot bind mounts.
+6. Write crypttab and regenerate `fstab` from the Btrfs root and ESP UUIDs,
+   including the root, EFI, data and swap entries; then prepare chroot bind
+   mounts.
 7. Copy the repository into the target and invoke `setup.sh //inner` in an
    isolated mount namespace.
 

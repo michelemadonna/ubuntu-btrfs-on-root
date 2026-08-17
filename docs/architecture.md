@@ -65,7 +65,7 @@ Root snapshots are under `@$suite/@/.snapshots`; home snapshots are under
 `@$suite/@home/.snapshots`.
 
 If `boot_dev` is configured, its content is copied to `@$suite/@/boot`, checked
-and its `/boot` fstab entry removed. The partition is preserved unless selected
+and the old `/boot` mount is omitted from the regenerated fstab. The partition is preserved unless selected
 for rescue. LUKS conversion reserves 32 MiB, uses Argon2id with configurable
 `iter_time` (milliseconds), opens mapper `root` and then grows Btrfs to the
 available mapped size.

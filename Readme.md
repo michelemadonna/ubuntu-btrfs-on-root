@@ -180,7 +180,8 @@ The main flow performs these operations:
 1. verifies that the configured root device is Btrfs and mounted at `mp`;
 2. creates `@$suite/@` and the dedicated Btrfs data subvolumes;
 3. when `boot_dev` is set, copies it into `@$suite/@/boot`, unmounts it and
-   removes its obsolete `/boot` fstab entry;
+   regenerates `fstab` from the encrypted root and ESP UUIDs, without relying
+   on the installer-generated file;
 4. creates a Btrfs swap file;
 5. encrypts `/dev/sda3` in place as LUKS2 and mounts it as
    `/dev/mapper/root`;

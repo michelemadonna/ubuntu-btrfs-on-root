@@ -29,7 +29,10 @@ producer and consumer before altering one.
 - Do not delete original top-level data until root snapshot and relocations
   succeed.
 - A configured separate boot is copied and validated in `@$suite/@/boot` before
-  unmount; remove `/boot` from fstab but retain `/boot/efi`.
+  unmount; regenerated fstab contains `/boot/efi` but no separate `/boot`.
+- `fstab` is regenerated from scratch using the UUIDs of the encrypted Btrfs
+  filesystem and ESP, then includes the configured root, data and swap
+  subvolume entries.
 - In-place encryption uses LUKS2 mapper `root`, reserves 32 MiB and identifies
   the volume by LUKS UUID in crypttab.
 - `iter_time` is a positive Argon2id calibration target in milliseconds, not a

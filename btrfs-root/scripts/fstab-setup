@@ -16,6 +16,7 @@ source "${SETUP_CONFIG_FILE:-$repository_root/setup.conf}"
 
 fstab-setup.validate_configuration() {
 	common.require_nonempty "root_dev" "${root_dev:-}"
+	common.require_nonempty "efi_dev" "${efi_dev:-}"
 	common.require_nonempty "mp" "${mp:-}"
 	common.require_nonempty "root_sub_vol" "${root_sub_vol:-}"
 	common.require_nonempty "btrfs_options" "${btrfs_options:-}"
@@ -26,6 +27,16 @@ fstab-setup.validate_configuration() {
 		log.die "mp must be an absolute path other than /."
 	[[ $root_sub_vol != /* && $root_sub_vol != *..* ]] ||
 		log.die "root_sub_vol must be a safe relative Btrfs path."
+}
+
+fstab-setup.device_uuid() {
+	local device=$1
+	local description=$2
+	local uuid
+
+	uuid="$(blkid -c /dev/null -s UUID -o value "$device")"
+	common.require_nonempty "$description UUID" "$uuid"
+	printf '%s\n' "$uuid"
 }
 
 fstab-setup.build_entries() {
@@ -52,42 +63,32 @@ fstab-setup.build_root_entry() {
 		"$options" "$subvolume_root"
 }
 
-fstab-setup.remove_separate_boot_entry() {
-	local fstab_file=$1
-	local temporary_file
+fstab-setup.build_fstab() {
+	local root_uuid=$1
+	local efi_uuid=$2
+	local options=$3
+	local subvolume_root=$4
 
-	[[ -n ${boot_dev:-} ]] || return 0
-	temporary_file="$(mktemp "${fstab_file}.XXXXXX")"
-	awk '$2 != "/boot"' "$fstab_file" >"$temporary_file"
-	if cmp -s "$fstab_file" "$temporary_file"; then
-		rm -f -- "$temporary_file"
-		log.die "Separate boot partition is configured but no /boot entry was found in $fstab_file."
-	fi
-	install -m 0644 "$temporary_file" "$fstab_file"
-	rm -f -- "$temporary_file"
-	log.info "Removed the obsolete separate /boot mount from $fstab_file after migrating its content"
+	printf 'UUID=%s / btrfs %s,subvol=%s/@ 0 1\n' \
+		"$root_uuid" "$options" "$subvolume_root"
+	printf 'UUID=%s /boot/efi vfat umask=0077 0 1\n' "$efi_uuid"
+	fstab-setup.build_entries "$options" "$subvolume_root"
 }
 
 fstab-setup.run() {
 	local fstab_file="$mp/etc/fstab"
-	local root_entry
+	local temporary_file
+	local root_uuid
+	local efi_uuid
 
 	log.section "Persistent Btrfs mounts"
-	common.require_readable_file "$fstab_file" "Target fstab"
-	fstab-setup.remove_separate_boot_entry "$fstab_file"
-	root_entry="$(fstab-setup.build_root_entry "$btrfs_options" "$root_sub_vol")"
-
-	log.info "Replace the installer root entry in $fstab_file with the encrypted mapper and normal root subvolume"
-	if ! grep -Eq '^.* / btrfs defaults 0 1$' "$fstab_file"; then
-		log.die "Expected installer Btrfs root entry not found in $fstab_file; refusing to create an ambiguous root mount."
-	fi
-	sed -i \
-		"s|^.* / btrfs defaults 0 1\$|$root_entry|" \
-		"$fstab_file"
-
-	log.info "Append mounts for home, log, cache, temporary data, virtualization, containers, and swap"
-	fstab-setup.build_entries "$btrfs_options" "$root_sub_vol" >>"$fstab_file"
-	log.info "Configured root entry: $root_entry"
+	root_uuid="$(fstab-setup.device_uuid /dev/mapper/root "Root filesystem")"
+	efi_uuid="$(fstab-setup.device_uuid "/dev/$efi_dev" "EFI filesystem")"
+	temporary_file="$(mktemp "${fstab_file}.XXXXXX")"
+	fstab-setup.build_fstab "$root_uuid" "$efi_uuid" "$btrfs_options" "$root_sub_vol" >"$temporary_file"
+	install -m 0644 "$temporary_file" "$fstab_file"
+	rm -f -- "$temporary_file"
+	log.info "Regenerated $fstab_file from the root and EFI filesystem UUIDs"
 	log.success "Persistent Btrfs and swap mounts written to $fstab_file"
 }
 
