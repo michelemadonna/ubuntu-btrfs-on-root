@@ -409,7 +409,7 @@ setup.parse_arguments() {
 setup.prepare_target() {
 	log.section "Installed target preflight"
 	common.require_commands mkdir mount mountpoint umount
-	[[ -d $mp ]] || log.die "Configured target mount point does not exist: $mp"
+	mkdir -p -- "$mp"
 	if [[ $suite_type == kali ]]; then
 		log.info "Kali mode: mount the configured filesystems for conversion"
 		mountpoint -q "$mp" || mount "/dev/$root_dev" "$mp"
