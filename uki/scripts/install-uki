@@ -82,11 +82,17 @@ install-uki.write_dracut_config() {
 }
 
 install-uki.create_splash() {
+	local source_image=/usr/share/plymouth/themes/spinner/bgrt-fallback.png
+	if [[ ${suite_type:-ubuntu} == kali ]]; then
+		source_image=/usr/share/plymouth/themes/kali/kali-logo.png
+	fi
+	common.require_readable_file "$source_image" "Plymouth splash image"
 	log.info "Convert the Plymouth fallback image into the UKI BMP splash"
-	python3 - <<-'PY'
+	python3 - "$source_image" <<-'PY'
+		import sys
 		from PIL import Image
 
-		source = "/usr/share/plymouth/themes/spinner/bgrt-fallback.png"
+		source = sys.argv[1]
 		destination = "/etc/kernel/uki-splash.bmp"
 		Image.open(source).convert("RGB").save(destination, format="BMP")
 	PY
