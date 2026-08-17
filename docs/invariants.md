@@ -11,6 +11,8 @@ producer and consumer before altering one.
   devices and validated for expected type/source before mutation.
 - Root starts as unencrypted Btrfs mounted at `mp`; the ESP is FAT and receives
   label `ESP` without reformatting.
+- Kali mode may start with no filesystems mounted; setup mounts the configured
+  root, ESP and optional separate `/boot` before conversion.
 - An exact separate mount at `/target/boot` is optional and never created for
   discovery; the ESP path still remains `/target/boot/efi`.
 - `setup.prepare_target` preserves target mounts except conditional
@@ -33,6 +35,9 @@ producer and consumer before altering one.
 - `fstab` is regenerated from scratch using the UUIDs of the encrypted Btrfs
   filesystem and ESP, then includes the configured root, data and swap
   subvolume entries.
+- Kali conversion copies `@`, `@root`, `@usr@local`, `@home`, `/var/cache` and
+  `@var@log` into the repository layout, then deletes the original Kali
+  subvolumes, including `@.snapshots`, only after copy validation.
 - In-place encryption uses LUKS2 mapper `root`, reserves 32 MiB and identifies
   the volume by LUKS UUID in crypttab.
 - `iter_time` is a positive Argon2id calibration target in milliseconds, not a

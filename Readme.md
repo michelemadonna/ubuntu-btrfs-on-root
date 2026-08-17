@@ -1,6 +1,6 @@
 # Ubuntu Btrfs on Root
 
-This repository converts an Ubuntu system installed by Ubiquity into a
+This repository converts an Ubuntu or Kali Linux system installed by Ubiquity into a
 full-disk-encryption solution with:
 
 - a LUKS2-encrypted Btrfs root;
@@ -98,9 +98,8 @@ enabled, an adequately sized `boot_dev` is suggested as the default rescue
 target after its files are migrated. If no boot partition exists or the user
 declines its reuse, the wizard asks for another partition. When rescue is
 disabled, no rescue partition is requested and `rescue_dev` remains empty.
-`suite` is a single selection limited
-to `resolute` or `noble`; `suite_type` is a single selection currently limited
-to `ubuntu`. Every `yes`/`no` setting is presented as a toggle and normalized to
+`suite` supports `resolute`, `noble` and `kali`; `suite_type` supports `ubuntu`
+and `kali`. Kali installations do not create a rescue system. Every `yes`/`no` setting is presented as a toggle and normalized to
 one of those two literal values. Secrets use hidden input. The generated file is
 written atomically with mode `0600`, then checked for Bash syntax, required
 values and permissions. After showing the complete non-secret configuration

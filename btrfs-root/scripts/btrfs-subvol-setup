@@ -86,13 +86,105 @@ btrfs-subvol-setup.create_data_subvolume() {
 	btrfs subvolume create "$path"
 }
 
+btrfs-subvol-setup.validate_kali_sources() {
+	local source_root=$1
+	local name
+
+	for name in @ @home @root @usr@local @var@log @.snapshots; do
+		[[ -d $source_root/$name ]] ||
+			log.die "Kali source subvolume is missing: $name"
+	done
+}
+
+btrfs-subvol-setup.copy_kali_tree() {
+	local source_root=$1
+	local destination_root=$2
+
+	log.info "Copy Kali root subvolume into $destination_root/@"
+	rsync -aHAXx --numeric-ids "$source_root/@/." "$destination_root/@/"
+	log.info "Copy Kali @root into $destination_root/@/root"
+	mkdir -p "$destination_root/@/root"
+	rsync -aHAXx --numeric-ids "$source_root/@root/." "$destination_root/@/root/"
+	log.info "Copy Kali @usr@local into $destination_root/@/usr/local"
+	mkdir -p "$destination_root/@/usr/local"
+	rsync -aHAXx --numeric-ids "$source_root/@usr@local/." "$destination_root/@/usr/local/"
+	log.info "Copy Kali home into $destination_root/@home"
+	rsync -aHAXx --numeric-ids "$source_root/@home/." "$destination_root/@home/"
+	log.info "Copy Kali cache into $destination_root/@cache"
+	rsync -aHAXx --numeric-ids "$source_root/@/var/cache/." "$destination_root/@cache/"
+	log.info "Copy Kali log into $destination_root/@log"
+	rsync -aHAXx --numeric-ids "$source_root/@var@log/." "$destination_root/@log/"
+}
+
+btrfs-subvol-setup.remove_kali_sources() {
+	local source_root=$1
+	local name
+
+	for name in @ @home @root @usr@local @var@log @.snapshots; do
+		log.info "Remove migrated Kali source subvolume $name"
+		btrfs subvolume delete "$source_root/$name"
+	done
+}
+
+btrfs-subvol-setup.run_kali() {
+	local source_device="/dev/$root_dev"
+	local boot_backup=${1:-}
+	local source_root="$mp"
+	local destination_root="$root_sub_vol"
+	local name
+
+	log.section "Kali Btrfs layout migration"
+	btrfs-subvol-setup.validate_kali_sources "$source_root"
+	log.info "Create distribution container subvolume $destination_root"
+	btrfs subvolume create "$destination_root"
+	btrfs subvolume create "$destination_root/@"
+	for name in @home @cache @log @tmp @libvirt @docker @swap; do
+		btrfs-subvol-setup.create_data_subvolume "$name"
+	done
+	btrfs-subvol-setup.copy_kali_tree "$source_root" "$destination_root"
+	if [[ -n $boot_backup ]]; then
+		log.info "Copy backed-up separate /boot into $destination_root/@/boot"
+		mkdir -p "$destination_root/@/boot"
+		rsync -aHAXx --numeric-ids "$boot_backup/." "$destination_root/@/boot/"
+	fi
+	btrfs filesystem mkswapfile --size "$swap_size" "$destination_root/@swap/swapfile"
+	[[ -n $(find "$destination_root/@" -mindepth 1 -print -quit) ]] ||
+		log.die "Kali root copy is empty."
+	btrfs-subvol-setup.remove_kali_sources "$source_root"
+
+	cd /
+	log.info "Unmount Kali top-level filesystem from $mp"
+	umount "$mp"
+	log.info "Mount normal root subvolume $destination_root/@ from $source_device"
+	mount "$source_device" -o "subvol=$destination_root/@" "$mp"
+	log.success "Kali Btrfs layout migration completed"
+	log.section_end
+}
+
 btrfs-subvol-setup.run() {
 	local source_device="/dev/$root_dev"
 	local copied_root="$root_sub_vol/@"
+	local boot_backup=''
 
 	log.section "Btrfs subvolume layout"
 	btrfs-subvol-setup.validate_source_filesystem
 	log.info "Use existing source Btrfs mount $source_device at $mp"
+	if [[ $suite_type == kali && -n ${boot_dev:-} ]]; then
+		boot_backup="$(mktemp -d /tmp/kali-boot.XXXXXX)"
+		log.info "Back up separate /boot before switching to the Kali top-level mount"
+		rsync -aHAXx --numeric-ids "$mp/boot/." "$boot_backup/"
+		[[ -n $(find "$boot_backup" -mindepth 1 -print -quit) ]] ||
+			log.die "Separate boot partition /dev/$boot_dev contained no files to migrate."
+		umount "$mp/boot"
+	fi
+	if [[ $suite_type == kali ]]; then
+		cd /
+		umount "$mp"
+		mount "$source_device" -o subvolid=5 "$mp"
+		btrfs-subvol-setup.run_kali "$boot_backup"
+		[[ -z $boot_backup ]] || rm -Rf -- "$boot_backup"
+		return
+	fi
 	cd "$mp"
 
 	log.info "Create distribution container subvolume $root_sub_vol"

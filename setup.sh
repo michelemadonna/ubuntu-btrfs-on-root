@@ -145,8 +145,24 @@ setup.generate_configuration() {
 		log.die "Invalid boot partition selection."
 	[[ $boot_path != none ]] || boot_path=""
 
-	install_rescue="$(tui.toggle "Create the persistent rescue system" "$install_rescue")" ||
-		log.die "Invalid rescue-system toggle."
+	log.section "Distribution configuration"
+	suite="$(tui.select_one "Select the distribution suite/release" "$suite" 'resolute|Ubuntu Resolute' 'noble|Ubuntu Noble' 'kali|Kali Linux')" ||
+		log.die "Invalid suite selection."
+	suite_type="$(tui.select_one "Select the distribution type used for the rEFInd icon" "$suite_type" 'ubuntu|Ubuntu' 'kali|Kali Linux')" ||
+		log.die "Invalid distribution type selection."
+	if [[ $suite == kali ]]; then
+		suite_type=kali
+	fi
+	[[ $suite =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Suite must be a safe lowercase identifier."
+	[[ $suite_type =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Distribution icon identifier is invalid."
+
+	if [[ $suite_type == kali ]]; then
+		install_rescue=no
+		log.info "Kali Linux does not support rescue-system creation during installation"
+	else
+		install_rescue="$(tui.toggle "Create the persistent rescue system" "$install_rescue")" ||
+			log.die "Invalid rescue-system toggle."
+	fi
 	if [[ $install_rescue == yes && -n $boot_path ]]; then
 		minimum_rescue_mib="$(setup.minimum_rescue_size_mib /cdrom)"
 		boot_size_mib="$(setup.device_size_mib "$boot_path")"
@@ -177,14 +193,6 @@ setup.generate_configuration() {
 	efi_dev=${efi_path#/dev/}
 	boot_dev=${boot_path#/dev/}
 	rescue_dev=${rescue_path#/dev/}
-
-	log.section "Distribution configuration"
-	suite="$(tui.select_one "Select the Ubuntu suite/release" "$suite" 'resolute|Ubuntu Resolute' 'noble|Ubuntu Noble')" ||
-		log.die "Invalid suite selection."
-	suite_type="$(tui.select_one "Select the distribution type used for the rEFInd icon" "$suite_type" 'ubuntu|Ubuntu')" ||
-		log.die "Invalid distribution type selection."
-	[[ $suite =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Suite must be a safe lowercase identifier."
-	[[ $suite_type =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Distribution icon identifier is invalid."
 
 	log.section "Encryption and boot security"
 	secure_boot_mode="$(setup.detect_secure_boot_mode)"
@@ -313,6 +321,11 @@ setup.load_configuration() {
 	common.require_nonempty "mp" "${mp:-}"
 	common.require_nonempty "root_sub_vol" "${root_sub_vol:-}"
 	common.require_nonempty "suite" "${suite:-}"
+	common.require_nonempty "suite_type" "${suite_type:-}"
+	[[ $suite_type == ubuntu || $suite_type == kali ]] || log.die "suite_type must be ubuntu or kali."
+	if [[ $suite == kali && $suite_type != kali ]]; then
+		log.die "suite=kali requires suite_type=kali."
+	fi
 	common.require_nonempty "pre_download" "${pre_download:-}"
 	common.require_nonempty "secure_boot_mode" "${secure_boot_mode:-}"
 	common.require_nonempty "secure_boot_enrollment" "${secure_boot_enrollment:-}"
@@ -322,6 +335,9 @@ setup.load_configuration() {
 		log.die "secure_boot_enrollment must be sbctl or mok."
 	install_rescue=${install_rescue:-yes}
 	[[ $install_rescue == yes || $install_rescue == no ]] || log.die "install_rescue must be yes or no."
+	if [[ $suite_type == kali ]]; then
+		install_rescue=no
+	fi
 	EXPERIMENTAL_SBCTL_APPEND=${EXPERIMENTAL_SBCTL_APPEND:-false}
 	[[ $EXPERIMENTAL_SBCTL_APPEND == true || $EXPERIMENTAL_SBCTL_APPEND == false ]] ||
 		log.die "EXPERIMENTAL_SBCTL_APPEND must be true or false."
@@ -334,7 +350,7 @@ setup.load_configuration() {
 	[[ -z $boot_dev || ($boot_dev != "$root_dev" && $boot_dev != "$efi_dev") ]] ||
 		log.die "boot_dev must be distinct from root_dev and efi_dev."
 	rescue_dev=${rescue_dev:-}
-	if [[ $install_rescue == yes || $setup_action == install-rescue-live ]]; then
+	if [[ ($install_rescue == yes && $suite_type != kali) || $setup_action == install-rescue-live ]]; then
 		common.require_nonempty "rescue_dev" "$rescue_dev"
 		[[ $rescue_dev != */* && $rescue_dev != *..* ]] ||
 			log.die "rescue_dev must be a device name relative to /dev."
@@ -392,8 +408,20 @@ setup.parse_arguments() {
 
 setup.prepare_target() {
 	log.section "Installed target preflight"
-	common.require_commands mountpoint umount
+	common.require_commands mkdir mount mountpoint umount
 	[[ -d $mp ]] || log.die "Configured target mount point does not exist: $mp"
+	if [[ $suite_type == kali ]]; then
+		log.info "Kali mode: mount the configured filesystems for conversion"
+		mountpoint -q "$mp" || mount "/dev/$root_dev" "$mp"
+		mkdir -p "$mp/boot/efi"
+		mountpoint -q "$mp/boot/efi" || mount "/dev/$efi_dev" "$mp/boot/efi"
+		if [[ -n $boot_dev ]]; then
+			mkdir -p "$mp/boot"
+			mountpoint -q "$mp/boot" || mount "/dev/$boot_dev" "$mp/boot"
+		fi
+		log.success "Kali filesystems mounted and ready for validation"
+		return
+	fi
 	mountpoint -q "$mp" || log.die "Configured target is not mounted: $mp"
 	log.info "Preserve the existing target mount at $mp; storage scripts will consume it in place"
 	if mountpoint -q /target/cdrom; then
@@ -468,11 +496,15 @@ setup.pre_download_all() {
 		asciidoc-base binutils build-essential ca-certificates coreutils cryptsetup-bin
 		cryptsetup-initramfs curl dialog dosfstools dracut e2fsprogs efibootmgr findutils fwupd
 		fwupd-unsigned git golang-go jq libpcsclite-dev libpcsclite1
-		libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64
 		libtss2-tcti-tabrmd0 openssl pcscd pkgconf pkgconf-bin refind rsync
 		sbsigntool snapper systemd-cryptsetup systemd-ukify tpm2-tools tpm2-tss
 		util-linux
 	)
+	if [[ $suite_type == kali ]]; then
+		packages+=(libtss2-esys-3.0.2-0 libtss2-mu-4.0.1-0 libtss2-rc0)
+	else
+		packages+=(libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64)
+	fi
 
 	apt install --no-install-recommends -y --download-only \
 		btrfs-assistant btrfsmaintenance
@@ -584,7 +616,7 @@ setup.main() {
 	"$repository_root/btrfs-root/scripts/btrfs-root-setup"
 	setup.prepare_chroot
 	setup.run_inner_installation
-	if [[ $install_rescue == yes ]]; then
+	if [[ $install_rescue == yes && $suite_type != kali ]]; then
 		setup.install_rescue_system
 	else
 		log.info "Persistent rescue-system creation was not requested"

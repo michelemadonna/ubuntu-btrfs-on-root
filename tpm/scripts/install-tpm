@@ -98,8 +98,13 @@ install-tpm.run() {
 
 	log.section "TPM2 LUKS integration"
 	log.info "Install systemd cryptenroll and TPM2 runtime dependencies"
-	apt-get install -y systemd-cryptsetup cryptsetup-bin tpm2-tools tpm2-tss \
-		libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64 libtss2-tcti-tabrmd0
+	local -a tpm_packages=(systemd-cryptsetup cryptsetup-bin tpm2-tools tpm2-tss libtss2-tcti-tabrmd0)
+	if [[ ${suite_type:-ubuntu} == kali ]]; then
+		tpm_packages+=(libtss2-esys-3.0.2-0 libtss2-mu-4.0.1-0 libtss2-rc0)
+	else
+		tpm_packages+=(libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64)
+	fi
+	apt-get install -y "${tpm_packages[@]}"
 
 	luks_device="/dev/$root_dev"
 	[[ -b $luks_device ]] || log.die "Invalid block device: $luks_device"

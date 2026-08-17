@@ -6,7 +6,8 @@ safety requirements are in `invariants.md`.
 ## Configuration discovery
 
 Run `setup.sh` as root after Ubiquity completes, without leaving the live
-session. If `setup.conf` is absent, the wizard:
+session. For Kali, the wizard mounts the configured root, ESP and optional
+separate `/boot` itself. If `setup.conf` is absent, the wizard:
 
 1. detects exact sources mounted at `/target`, `/target/boot/efi` and optional
    `/target/boot`;
@@ -32,6 +33,11 @@ unmounted only when it is a mount point; its absence is non-fatal.
 6. Write crypttab and regenerate `fstab` from the Btrfs root and ESP UUIDs,
    including the root, EFI, data and swap entries; then prepare chroot bind
    mounts.
+
+For Kali, the storage phase first mounts the Btrfs top-level (`subvolid=5`),
+copies the original Kali subvolumes into `@$suite/@`, migrates a configured
+separate `/boot`, removes the old Kali subvolumes after validation, and mounts
+the new root subvolume.
 7. Copy the repository into the target and invoke `setup.sh //inner` in an
    isolated mount namespace.
 
