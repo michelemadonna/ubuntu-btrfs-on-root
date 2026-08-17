@@ -154,7 +154,10 @@ install-rescue-live.run() {
 	log.section "Rescue partition split"
 	log.info "Shrink partition $partition_number on $disk to $rescue_size_mib MiB"
 	log.info "Apply the confirmed partition shrink with parted"
-	LC_ALL=C parted --script "$disk" unit s resizepart "$partition_number" "${new_end_sector}s"
+	# parted --script still refuses a resize that may discard data.  The exact
+	# device confirmation above is the installer-level authorization; answer
+	# parted's second, unavoidable confirmation explicitly.
+	printf 'Yes\n' | LC_ALL=C parted ---pretend-input-tty "$disk" unit s resizepart "$partition_number" "${new_end_sector}s"
 	log.info "Create GPT partition 'writable' from sector $writable_start_sector through $original_end_sector"
 	parted --script "$disk" unit s mkpart writable ext4 "${writable_start_sector}s" "${original_end_sector}s"
 	partprobe "$disk"
