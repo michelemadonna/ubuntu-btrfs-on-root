@@ -78,22 +78,9 @@ sbctl-setup.install_dependencies() {
 		findutils \
 		coreutils
 
-	#
-	# Prefer distro package.
-	#
 	if ! command -v sbctl >/dev/null 2>&1; then
-
-		log.info "Try to install sbctl from the distribution repository"
-		if apt-cache show sbctl >/dev/null 2>&1; then
-			log.info "sbctl package available in distribution repository"
-			apt-get install -y sbctl || true
-		fi
-		if ! command -v sbctl >/dev/null 2>&1; then
-			log.info "sbctl package unavailable in distribution repository"
-			log.info "Build sbctl version $SBCTL_VERSION from upstream source"
-			sbctl-setup.install_upstream
-		fi
-
+		log.info "Build sbctl version $SBCTL_VERSION from upstream source"
+		sbctl-setup.install_upstream
 	fi
 }
 

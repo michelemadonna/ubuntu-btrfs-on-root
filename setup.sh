@@ -509,7 +509,8 @@ setup.pre_download_all() {
 	if [[ $suite_type == kali ]]; then
 		packages+=(libtss2-esys-3.0.2-0 libtss2-mu-4.0.1-0 libtss2-rc0)
 	else
-		packages+=(libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64 refind sbctl)
+		packages+=(libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64)
+		apt-cache show refind >/dev/null 2>&1 && packages+=(refind)
 	fi
 
 	apt install --no-install-recommends -y --download-only \
