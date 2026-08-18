@@ -66,6 +66,10 @@ if [ -z "$root_dev" ] && [ -n "${root:-}" ]; then
 	/dev/*)
 		root_dev="$root"
 		;;
+
+	UUID=*)
+		root_dev="/dev/disk/by-uuid/${root#UUID=}"
+		;;
 	esac
 fi
 
