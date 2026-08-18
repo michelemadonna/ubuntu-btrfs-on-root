@@ -51,6 +51,7 @@ snapshot-management-test.kernel_guard() {
 	rg -Fq 'UUID=*)' "$hook"
 	rg -Fq "snapshot-menu: pre-mount:" "$hook"
 	rg -Fq "request marker is absent" "$hook"
+	dash -n "$hook"
 }
 
 snapshot-management-test.initramfs_logging() {
@@ -61,6 +62,7 @@ snapshot-management-test.initramfs_logging() {
 	rg -Fq "snapshot menu requested" "$listener_stop"
 	rg -Fq "plymouth watch-keystroke" "$listener_stop"
 	rg -Fq "Plymouth splash restored after trigger" "$listener_stop"
+	rg -Fq "plymouth toggle-details" "$listener_stop"
 }
 
 snapshot-management-test.run() {

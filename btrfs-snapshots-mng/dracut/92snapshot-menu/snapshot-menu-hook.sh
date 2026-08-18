@@ -9,7 +9,7 @@ SNAPSHOT_MENU_DONE="/run/snapshot-menu-done"
 SNAPSHOT_MENU_REQUESTED="/run/snapshot-menu-requested"
 SNAPSHOT_SELECTION="/run/snapshot-menu-selected"
 
-snapshot-menu-hook.log() {
+snapshot_menu_hook_log() {
 	printf '<6>snapshot-menu: pre-mount: %s\n' "$1" \
 		2>/dev/null >/dev/kmsg || :
 }
@@ -23,7 +23,7 @@ snapshot-menu-hook.log() {
 # Menu already handled.
 #
 if [ -e "$SNAPSHOT_MENU_DONE" ]; then
-	snapshot-menu-hook.log "skipped because completion marker exists"
+	snapshot_menu_hook_log "skipped because completion marker exists"
 	return 0
 fi
 
@@ -31,11 +31,11 @@ fi
 # The early keyboard listener did not request the menu.
 #
 if [ ! -e "$SNAPSHOT_MENU_REQUESTED" ]; then
-	snapshot-menu-hook.log "skipped because request marker is absent"
+	snapshot_menu_hook_log "skipped because request marker is absent"
 	return 0
 fi
 
-snapshot-menu-hook.log \
+snapshot_menu_hook_log \
 	"entered with request marker present root=${root:-<unset>} dev_root=$([ -e /dev/root ] && readlink -f /dev/root 2>/dev/null || printf absent)"
 
 #
@@ -45,7 +45,7 @@ snapshot-menu-hook.log \
 #
 
 if [ ! -r "$SNAPSHOT_MENU_CONF" ]; then
-	snapshot-menu-hook.log "configuration is missing"
+	snapshot_menu_hook_log "configuration is missing"
 	warn "snapshot-menu: configuration missing"
 
 	rm -f "$SNAPSHOT_MENU_REQUESTED"
@@ -95,13 +95,13 @@ fi
 # completed: Dracut must be allowed to invoke the hook again.
 #
 if [ -z "$root_dev" ] || [ ! -b "$root_dev" ]; then
-	snapshot-menu-hook.log \
+	snapshot_menu_hook_log \
 		"root device is not ready resolved=${root_dev:-<empty>}"
 	unset root_dev
 	return 0
 fi
 
-snapshot-menu-hook.log "root device resolved to ${root_dev}"
+snapshot_menu_hook_log "root device resolved to ${root_dev}"
 
 #
 # From this point onward execute only once.
@@ -131,7 +131,7 @@ if command -v plymouth >/dev/null 2>&1 &&
 		>/dev/null 2>&1 || :
 fi
 
-snapshot-menu-hook.log "plymouth_active=${plymouth_active}"
+snapshot_menu_hook_log "plymouth_active=${plymouth_active}"
 
 #
 # ------------------------------------------------------------
@@ -167,13 +167,13 @@ fi
 menu_rc=1
 
 if [ -x "$SNAPSHOT_MENU" ]; then
-	snapshot-menu-hook.log "starting snapshot menu"
+	snapshot_menu_hook_log "starting snapshot menu"
 	"$SNAPSHOT_MENU" "$root_dev"
 	menu_rc=$?
-	snapshot-menu-hook.log \
+	snapshot_menu_hook_log \
 		"snapshot menu finished status=${menu_rc} selection_present=$([ -s "$SNAPSHOT_SELECTION" ] && printf yes || printf no)"
 else
-	snapshot-menu-hook.log "snapshot menu executable is missing"
+	snapshot_menu_hook_log "snapshot menu executable is missing"
 	warn "snapshot-menu: $SNAPSHOT_MENU is missing"
 fi
 
@@ -287,7 +287,7 @@ if [ "$plymouth_active" -eq 1 ]; then
 		>/dev/null 2>&1 || :
 fi
 
-snapshot-menu-hook.log \
+snapshot_menu_hook_log \
 	"completed status=${menu_rc} plymouth_restored=${plymouth_active}"
 
 #

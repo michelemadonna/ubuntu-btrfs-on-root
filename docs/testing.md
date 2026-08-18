@@ -14,6 +14,10 @@ shellcheck -x <file>
 shfmt -d <file>
 ```
 
+Dracut sources hook files through `/bin/sh` regardless of their shebang. Run
+`dash -n` on sourced hooks as well; function names and syntax must therefore be
+accepted by Dash even when the hook file declares Bash.
+
 Run relevant tests directly from the repository root:
 
 ```bash

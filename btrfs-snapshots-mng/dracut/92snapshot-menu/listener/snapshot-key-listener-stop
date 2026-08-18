@@ -404,6 +404,11 @@ fi
 if [ -e "$MARKER" ]; then
 	snapshot-key-listener-stop.log "snapshot menu requested"
 	if [ "$plymouth_active" -eq 1 ]; then
+		if [ "$plymouth_key_fallback" = yes ]; then
+			plymouth toggle-details >/dev/null 2>&1 || :
+			snapshot-key-listener-stop.log \
+				"Plymouth details toggled after fallback trigger"
+		fi
 		plymouth show-splash >/dev/null 2>&1 || :
 		snapshot-key-listener-stop.log \
 			"Plymouth splash restored after trigger"
