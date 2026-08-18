@@ -42,7 +42,7 @@ does not execute the unit tests.
 | `btrfs_root_test.sh` | subvolume paths, Kali cleanup, fstab and storage summaries |
 | `rescue_test.sh` | sizing, persistence and optional orchestration |
 | `secure_boot_test.sh` | trust-path selection, certificate export and sbctl contract |
-| `snapshot_management_test.sh` | distro menu configuration, F12 and installed artifacts |
+| `snapshot_management_test.sh` | distro menu configuration, B/b trigger and installed artifacts |
 | `uki_test.sh` | command line, UKI and kernel-hook behavior |
 | `tpm_test.sh` | TPM configuration and enrollment argv |
 

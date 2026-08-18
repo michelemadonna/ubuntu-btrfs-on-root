@@ -473,7 +473,7 @@ static bool parse_trigger(const char *trigger_argument)
     if (trigger_argument == NULL ||
         trigger_argument[0] == '\0') {
 
-        trigger_argument = "F12";
+        trigger_argument = "B";
     }
 
     /*
@@ -845,7 +845,7 @@ int main(int argc, char *argv[])
     int exit_status = EXIT_SUCCESS;
     bool no_compatible_device_logged = false;
 
-    trigger_argument = argc >= 2 ? argv[1] : "F12";
+    trigger_argument = argc >= 2 ? argv[1] : "B";
 
     if (!parse_trigger(trigger_argument)) {
         fprintf(

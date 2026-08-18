@@ -50,7 +50,7 @@ btrfs-snapshots-mng-setup.render_base_config() {
 		SNAPSHOT_CMDLINE="/etc/cmdline.d/99-snapshot.conf"
 		PAGE_SIZE=20
 		DESCRIPTION_MAX_LENGTH=24
-		SNAPSHOT_TRIGGER="F12"
+		SNAPSHOT_TRIGGER="B"
 		SNAPSHOT_TRIGGER_WINDOW_TICKS=50
 		SNAPSHOT_TRIGGER_RESULT_TICKS=0
 	EOF
@@ -58,7 +58,7 @@ btrfs-snapshots-mng-setup.render_base_config() {
 	if [[ $distribution_type == kali ]]; then
 		cat <<-'EOF'
 			# Kali: Alt-based triggers are unsupported because Alt makes Plymouth
-			# switch away from the graphical splash during early boot. Use F12.
+			# switch away from the graphical splash during early boot. Use B.
 		EOF
 	fi
 }
@@ -148,7 +148,7 @@ btrfs-snapshots-mng-setup.print_summary() {
 		log.summary_item "Normal root" "$root_sub_vol/@"
 		log.summary_item "Module" "$module_target"
 		log.summary_item "Configuration" "$menu_config"
-		log.summary_item "Trigger" "F12 (5.0 seconds)"
+		log.summary_item "Trigger" "B/b (5.0 seconds)"
 		log.summary_item "Snapshot root" "read-only lower layer + tmpfs overlay"
 	fi
 	log.success "Btrfs snapshot management setup completed"

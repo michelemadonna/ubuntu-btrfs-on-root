@@ -23,14 +23,14 @@ snapshot-management-test.base_config() {
 	output="$(btrfs-snapshots-mng-setup.render_base_config '@noble/@' ubuntu noble)"
 	snapshot-management-test.assert_contains "$output" 'ROOT_SUBVOL="@noble/@"'
 	snapshot-management-test.assert_contains "$output" 'SUITE="noble"'
-	snapshot-management-test.assert_contains "$output" 'SNAPSHOT_TRIGGER="F12"'
+	snapshot-management-test.assert_contains "$output" 'SNAPSHOT_TRIGGER="B"'
 	snapshot-management-test.assert_contains "$output" 'PAGE_SIZE=20'
 	[[ $output != *'Alt-based triggers are unsupported'* ]]
 	[[ $output != *'SNAPSHOT_PLYMOUTH_KEY_FALLBACK'* ]]
 
 	kali_output="$(btrfs-snapshots-mng-setup.render_base_config '@kali/@' kali kali)"
 	snapshot-management-test.assert_contains "$kali_output" 'SUITE="kali"'
-	snapshot-management-test.assert_contains "$kali_output" 'SNAPSHOT_TRIGGER="F12"'
+	snapshot-management-test.assert_contains "$kali_output" 'SNAPSHOT_TRIGGER="B"'
 	snapshot-management-test.assert_contains \
 		"$kali_output" \
 		'Alt-based triggers are unsupported'
@@ -90,11 +90,11 @@ snapshot-management-test.function_key_mapping() {
 	local module_setup="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/module-setup.sh"
 
 	rg -Fq 'case 12: return KEY_F12;' "$listener"
-	rg -Fq 'trigger_argument = "F12";' "$listener"
+	rg -Fq 'trigger_argument = "B";' "$listener"
 	if rg -Fq 'return KEY_F1 + (int)number - 1;' "$listener"; then
 		return 1
 	fi
-	rg -Fq 'DEFAULT_TRIGGER="F12"' "$listener_stop"
+	rg -Fq 'DEFAULT_TRIGGER="B"' "$listener_stop"
 	rg -q '^[[:space:]]*instmods evdev$' "$module_setup"
 	rg -Fq 'accepted input device path=' "$listener"
 	rg -Fq 'trigger event device=event%u code=%u value=%d' "$listener"

@@ -96,7 +96,7 @@ pressing `Tab` on it exposes all older installed versions.
 1. Firmware validates direct rEFInd or shim.
 2. rEFInd launches the selected signed UKI.
 3. The UKI starts its kernel and dracut initramfs.
-4. When installed, the listener watches for F12, then exits and closes its
+4. When installed, the listener watches for B/b, then exits and closes its
    input descriptors before cryptsetup can request credentials.
 5. LUKS unlock uses a valid TPM token when enrolled, otherwise retained
    password/recovery access.
@@ -108,7 +108,7 @@ PINless enrollment.
 
 ## Snapshot branch
 
-When F12 is detected during the pre-cryptsetup window, a request marker is
+When B/b is detected during the pre-cryptsetup window, a request marker is
 retained until LUKS is available. Plymouth keeps the `Snapshot menu ENABLED`
 message visible during the LUKS prompt; the pre-mount hook removes it before
 opening the selector. Before the real-root mount, the hook then:

@@ -456,7 +456,7 @@ The early-boot Snapper selector is a distinctive feature of this project. It can
 boot a historical root snapshot before the real root is mounted, including when
 that root is inside LUKS, without modifying the selected snapshot.
 
-When `snapshot_menu=yes`, a small listener watches TTY1 for F12 during the
+When `snapshot_menu=yes`, a small evdev listener watches for B/b during the
 five-second early-boot window. It releases the input devices before cryptsetup
 may need the keyboard. If triggered, the dracut pre-mount hook waits for the
 unlocked root device, mounts the Btrfs top level read-only and reads Snapper
@@ -492,7 +492,7 @@ The menu can be customized through `/etc/snapshot-menu.conf`:
 ```bash
 PAGE_SIZE=20
 DESCRIPTION_MAX_LENGTH=24
-SNAPSHOT_TRIGGER="F12"
+SNAPSHOT_TRIGGER="B"
 SNAPSHOT_TRIGGER_WINDOW_TICKS=50
 SNAPSHOT_TRIGGER_RESULT_TICKS=0
 ```
@@ -507,7 +507,7 @@ non-negative.
 
 On Kali, triggers that use the `Alt` modifier are not supported: pressing
 `Alt` during early boot makes Plymouth leave the graphical splash and moves the
-LUKS prompt to the text console. Keep the default `F12` trigger on Kali.
+LUKS prompt to the text console. Keep the default `B` trigger on Kali.
 
 The file is embedded into the initramfs. After editing it, regenerate all UKIs:
 

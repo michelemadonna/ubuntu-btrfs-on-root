@@ -112,7 +112,7 @@ containing a regular `grubx64.efi`.
 ## Snapshot subsystem
 
 `btrfs-snapshots-mng/` installs Snapper root/home profiles and optional dracut
-module `92snapshot-menu`. A compiled evdev listener detects F12 before
+module `92snapshot-menu`. A compiled evdev listener detects B/b before
 cryptsetup, then exits and closes its input descriptors. The hook runs after
 LUKS availability but before the real-root mount, offers compatible root
 snapshots, mounts the selection read-only and uses an ephemeral overlay.

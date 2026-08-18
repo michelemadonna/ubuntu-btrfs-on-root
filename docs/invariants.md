@@ -113,11 +113,11 @@ producer and consumer before altering one.
 - Mount top level and selected snapshot read-only; runtime writes are ephemeral.
 - Never delete or mutate a snapshot during validation.
 - `/etc/snapshot-menu.conf` defaults remain `PAGE_SIZE=20`,
-  `DESCRIPTION_MAX_LENGTH=24`, `SNAPSHOT_TRIGGER="F12"`,
+  `DESCRIPTION_MAX_LENGTH=24`, `SNAPSHOT_TRIGGER="B"`,
   `SNAPSHOT_TRIGGER_WINDOW_TICKS=50`, `SNAPSHOT_TRIGGER_RESULT_TICKS=0`.
 - The generated configuration records `SUITE`; every current-system label and
   snapshot-menu title is derived from it rather than a distribution literal.
-- Ubuntu and Kali use the same evdev F12 trigger path; generated configurations
+- Ubuntu and Kali use the same evdev B/b trigger path; generated configurations
   do not enable the Plymouth character fallback.
 - Kali must not use a trigger containing `Alt`, because it makes Plymouth leave
   the graphical splash and moves LUKS prompting to the text console.

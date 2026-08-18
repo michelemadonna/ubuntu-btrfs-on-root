@@ -6,7 +6,7 @@ LISTENER="/usr/libexec/snapshot-key-listener"
 PIDFILE="/run/snapshot-key-listener.pid"
 MARKER="/run/snapshot-menu-requested"
 
-DEFAULT_TRIGGER="F12"
+DEFAULT_TRIGGER="B"
 DEFAULT_WINDOW_TICKS=20
 DEFAULT_RESULT_TICKS=10
 DEFAULT_PROBE_TICKS=5
