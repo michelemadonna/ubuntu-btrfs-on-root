@@ -12,6 +12,11 @@ DEFAULT_RESULT_TICKS=10
 DEFAULT_PROBE_TICKS=5
 DEFAULT_TTY="/dev/tty1"
 
+snapshot-key-listener-stop.log() {
+	printf '<6>snapshot-menu: listener-stop: %s\n' "$1" \
+		2>/dev/null >/dev/kmsg || :
+}
+
 #
 # ------------------------------------------------------------
 # Configuration
@@ -110,6 +115,9 @@ if [ "$silent_mode" -eq 0 ] &&
 	plymouth_active=1
 fi
 
+snapshot-key-listener-stop.log \
+	"started trigger=${trigger} window_ticks=${window_ticks} result_ticks=${result_ticks} plymouth_active=${plymouth_active} marker_present=$([ -e "$MARKER" ] && printf yes || printf no)"
+
 #
 # ------------------------------------------------------------
 # Display helpers
@@ -170,9 +178,13 @@ snapshot-key-listener-stop.show_message() {
 listener_pid=""
 
 snapshot-key-listener-stop.stop_listener() {
+	listener_status="not-started"
+
 	if [ -n "$listener_pid" ] &&
 		kill -0 "$listener_pid" 2>/dev/null; then
 
+		snapshot-key-listener-stop.log \
+			"stopping listener pid=${listener_pid}"
 		kill -TERM "$listener_pid" 2>/dev/null || :
 
 		count=0
@@ -186,8 +198,15 @@ snapshot-key-listener-stop.stop_listener() {
 	fi
 
 	if [ -n "$listener_pid" ]; then
-		wait "$listener_pid" 2>/dev/null || :
+		if wait "$listener_pid" 2>/dev/null; then
+			listener_status=0
+		else
+			listener_status=$?
+		fi
 	fi
+
+	snapshot-key-listener-stop.log \
+		"listener finished status=${listener_status} marker_present=$([ -e "$MARKER" ] && printf yes || printf no)"
 
 	listener_pid=""
 	rm -f "$PIDFILE"
@@ -229,6 +248,14 @@ if [ ! -e "$MARKER" ] &&
 		2>&1 &
 
 	listener_pid=$!
+	snapshot-key-listener-stop.log \
+		"listener started pid=${listener_pid}"
+elif [ -e "$MARKER" ]; then
+	snapshot-key-listener-stop.log \
+		"listener not started because request marker already exists"
+else
+	snapshot-key-listener-stop.log \
+		"listener not started because executable is missing"
 fi
 
 #
@@ -332,8 +359,10 @@ fi
 #
 
 if [ -e "$MARKER" ]; then
+	snapshot-key-listener-stop.log "snapshot menu requested"
 	snapshot-key-listener-stop.show_message "Snapshot menu ENABLED"
 else
+	snapshot-key-listener-stop.log "snapshot menu not requested"
 	if [ "$result_ticks" -gt 0 ]; then
 		snapshot-key-listener-stop.show_message "Snapshot menu not requested"
 	fi

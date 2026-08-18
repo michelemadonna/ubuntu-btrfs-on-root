@@ -60,6 +60,14 @@ Safe checks may inspect temporary or prebuilt artifacts:
 Post-summary validation may inspect current artifacts, but must not enroll keys,
 alter tokens, delete snapshots or modify firmware.
 
+Snapshot-menu initramfs diagnostics are written to the kernel journal with the
+`snapshot-menu:` prefix. After a boot, inspect the listener, request marker,
+root-device resolution, menu result and Plymouth restoration with:
+
+```bash
+journalctl -b -k --no-pager | grep 'snapshot-menu:'
+```
+
 ## External tools used by production scripts
 
 This inventory is derived from current `require_commands` checks and direct

@@ -43,12 +43,23 @@ snapshot-management-test.kernel_guard() {
 	rg -q 'KERNEL_STATUS\[(\$)?selected\].*Present' "$menu"
 	rg -q 'Cannot boot snapshot.*kernel modules' "$menu"
 	rg -Fq 'UUID=*)' "$hook"
+	rg -Fq "snapshot-menu: pre-mount:" "$hook"
+	rg -Fq "request marker is absent" "$hook"
+}
+
+snapshot-management-test.initramfs_logging() {
+	local listener_stop="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/listener/snapshot-key-listener-stop"
+
+	rg -Fq "snapshot-menu: listener-stop:" "$listener_stop"
+	rg -Fq "listener finished status=" "$listener_stop"
+	rg -Fq "snapshot menu requested" "$listener_stop"
 }
 
 snapshot-management-test.run() {
 	snapshot-management-test.base_config
 	snapshot-management-test.pin_config
 	snapshot-management-test.kernel_guard
+	snapshot-management-test.initramfs_logging
 	printf 'snapshot_management_test: PASS\n'
 }
 
