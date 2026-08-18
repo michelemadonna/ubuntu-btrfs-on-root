@@ -18,12 +18,18 @@ snapshot-management-test.assert_contains() {
 }
 
 snapshot-management-test.base_config() {
-	local output
+	local kali_output output
 
 	output="$(btrfs-snapshots-mng-setup.render_base_config '@ubuntu/@')"
 	snapshot-management-test.assert_contains "$output" 'ROOT_SUBVOL="@ubuntu/@"'
 	snapshot-management-test.assert_contains "$output" 'SNAPSHOT_TRIGGER="ALT+B"'
 	snapshot-management-test.assert_contains "$output" 'PAGE_SIZE=20'
+	[[ $output != *'SNAPSHOT_PLYMOUTH_KEY_FALLBACK'* ]]
+
+	kali_output="$(btrfs-snapshots-mng-setup.render_base_config '@kali/@' kali)"
+	snapshot-management-test.assert_contains \
+		"$kali_output" \
+		'SNAPSHOT_PLYMOUTH_KEY_FALLBACK=yes'
 }
 
 snapshot-management-test.pin_config() {
@@ -53,6 +59,8 @@ snapshot-management-test.initramfs_logging() {
 	rg -Fq "snapshot-menu: listener-stop:" "$listener_stop"
 	rg -Fq "listener finished status=" "$listener_stop"
 	rg -Fq "snapshot menu requested" "$listener_stop"
+	rg -Fq "plymouth watch-keystroke" "$listener_stop"
+	rg -Fq "Plymouth splash restored after trigger" "$listener_stop"
 }
 
 snapshot-management-test.run() {

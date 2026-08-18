@@ -111,6 +111,9 @@ producer and consumer before altering one.
 - `/etc/snapshot-menu.conf` defaults remain `PAGE_SIZE=20`,
   `DESCRIPTION_MAX_LENGTH=24`, `SNAPSHOT_TRIGGER="ALT+B"`,
   `SNAPSHOT_TRIGGER_WINDOW_TICKS=50`, `SNAPSHOT_TRIGGER_RESULT_TICKS=0`.
+- Kali enables `SNAPSHOT_PLYMOUTH_KEY_FALLBACK=yes` so `plymouthd`, when it
+  owns early-boot input, can forward the `B` portion of Alt+B to the selector;
+  Ubuntu keeps the evdev-only listener path.
   Ticks are 100 ms, description width is capped at 40, and changes require UKI
   regeneration.
 
