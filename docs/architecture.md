@@ -118,6 +118,9 @@ LUKS availability but before the real-root mount, offers compatible root
 snapshots, mounts the selection read-only and uses an ephemeral overlay.
 Failure or cancellation returns to normal boot.
 
+The dracut module explicitly includes the kernel `evdev` handler so modular
+Kali kernels expose `/dev/input/event*` during the early trigger window.
+
 Menu settings come from `/etc/snapshot-menu.conf` and are embedded in the
 initramfs, so changes require `generate-uki --all`.
 

@@ -83,6 +83,7 @@ snapshot-management-test.suite_labels() {
 snapshot-management-test.function_key_mapping() {
 	local listener="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/listener/snapshot-key-listener.c"
 	local listener_stop="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/listener/snapshot-key-listener-stop"
+	local module_setup="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/module-setup.sh"
 
 	rg -Fq 'case 12: return KEY_F12;' "$listener"
 	rg -Fq 'trigger_argument = "F12";' "$listener"
@@ -90,6 +91,7 @@ snapshot-management-test.function_key_mapping() {
 		return 1
 	fi
 	rg -Fq 'DEFAULT_TRIGGER="F12"' "$listener_stop"
+	rg -q '^[[:space:]]*instmods evdev$' "$module_setup"
 	rg -Fq 'accepted input device path=' "$listener"
 	rg -Fq 'trigger event device=event%u code=%u value=%d' "$listener"
 	rg -Fq 'request marker created' "$listener"
