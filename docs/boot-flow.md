@@ -109,7 +109,9 @@ PINless enrollment.
 ## Snapshot branch
 
 When F12 is detected during the pre-cryptsetup window, a request marker is
-retained until LUKS is available. Before the real-root mount, the hook then:
+retained until LUKS is available. Plymouth keeps the `Snapshot menu ENABLED`
+message visible during the LUKS prompt; the pre-mount hook removes it before
+opening the selector. Before the real-root mount, the hook then:
 
 1. mount the Btrfs top level read-only;
 2. list current root and compatible `@$suite/@/.snapshots/*/snapshot` entries;

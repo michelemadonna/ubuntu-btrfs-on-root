@@ -426,7 +426,12 @@ if [ "$result_ticks" -gt 0 ]; then
 	done
 fi
 
-snapshot-key-listener-stop.hide_message
+if [ -e "$MARKER" ]; then
+	snapshot-key-listener-stop.log \
+		"enabled message retained until pre-mount"
+else
+	snapshot-key-listener-stop.hide_message
+fi
 
 if [ "$plymouth_active" -eq 0 ] &&
 	[ -c "$menu_tty" ]; then

@@ -60,6 +60,7 @@ snapshot-management-test.kernel_guard() {
 }
 
 snapshot-management-test.initramfs_logging() {
+	local hook="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/snapshot-menu-hook.sh"
 	local listener_stop="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/listener/snapshot-key-listener-stop"
 
 	rg -Fq "snapshot-menu: listener-stop:" "$listener_stop"
@@ -67,6 +68,9 @@ snapshot-management-test.initramfs_logging() {
 	rg -Fq "snapshot menu requested" "$listener_stop"
 	rg -Fq "plymouth watch-keystroke" "$listener_stop"
 	rg -Fq "Plymouth splash restored after trigger" "$listener_stop"
+	rg -Fq "enabled message retained until pre-mount" "$listener_stop"
+	rg -Fq 'plymouth hide-message' "$hook"
+	rg -Fq -- '--text="Snapshot menu ENABLED"' "$hook"
 	rg -Fq 'keys=bB' "$listener_stop"
 }
 
