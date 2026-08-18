@@ -146,12 +146,13 @@ setup.generate_configuration() {
 	[[ $boot_path != none ]] || boot_path=""
 
 	log.section "Distribution configuration"
-	suite="$(tui.select_one "Select the distribution suite/release" "$suite" 'resolute|Ubuntu Resolute' 'noble|Ubuntu Noble' 'kali|Kali Linux')" ||
-		log.die "Invalid suite selection."
 	suite_type="$(tui.select_one "Select the distribution type used for the rEFInd icon" "$suite_type" 'ubuntu|Ubuntu' 'kali|Kali Linux')" ||
 		log.die "Invalid distribution type selection."
-	if [[ $suite == kali ]]; then
-		suite_type=kali
+	if [[ $suite_type == kali ]]; then
+		suite=kali
+	else
+		suite="$(tui.select_one "Select the Ubuntu suite/release" "$suite" 'resolute|Ubuntu Resolute' 'noble|Ubuntu Noble')" ||
+			log.die "Invalid Ubuntu suite selection."
 	fi
 	[[ $suite =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Suite must be a safe lowercase identifier."
 	[[ $suite_type =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Distribution icon identifier is invalid."
