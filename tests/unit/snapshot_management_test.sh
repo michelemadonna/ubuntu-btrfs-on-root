@@ -80,12 +80,25 @@ snapshot-management-test.suite_labels() {
 	fi
 }
 
+snapshot-management-test.function_key_mapping() {
+	local listener="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/listener/snapshot-key-listener.c"
+	local listener_stop="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/listener/snapshot-key-listener-stop"
+
+	rg -Fq 'case 12: return KEY_F12;' "$listener"
+	rg -Fq 'trigger_argument = "F12";' "$listener"
+	if rg -Fq 'return KEY_F1 + (int)number - 1;' "$listener"; then
+		return 1
+	fi
+	rg -Fq 'DEFAULT_TRIGGER="F12"' "$listener_stop"
+}
+
 snapshot-management-test.run() {
 	snapshot-management-test.base_config
 	snapshot-management-test.pin_config
 	snapshot-management-test.kernel_guard
 	snapshot-management-test.initramfs_logging
 	snapshot-management-test.suite_labels
+	snapshot-management-test.function_key_mapping
 	printf 'snapshot_management_test: PASS\n'
 }
 

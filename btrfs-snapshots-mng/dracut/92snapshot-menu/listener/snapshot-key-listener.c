@@ -227,7 +227,37 @@ static int function_key_code(const char *token)
         return -1;
     }
 
-    return KEY_F1 + (int)number - 1;
+    /*
+     * Linux input-event codes are not contiguous across F10/F11 or
+     * F12/F13. Do not derive them arithmetically from KEY_F1.
+     */
+    switch (number) {
+        case 1:  return KEY_F1;
+        case 2:  return KEY_F2;
+        case 3:  return KEY_F3;
+        case 4:  return KEY_F4;
+        case 5:  return KEY_F5;
+        case 6:  return KEY_F6;
+        case 7:  return KEY_F7;
+        case 8:  return KEY_F8;
+        case 9:  return KEY_F9;
+        case 10: return KEY_F10;
+        case 11: return KEY_F11;
+        case 12: return KEY_F12;
+        case 13: return KEY_F13;
+        case 14: return KEY_F14;
+        case 15: return KEY_F15;
+        case 16: return KEY_F16;
+        case 17: return KEY_F17;
+        case 18: return KEY_F18;
+        case 19: return KEY_F19;
+        case 20: return KEY_F20;
+        case 21: return KEY_F21;
+        case 22: return KEY_F22;
+        case 23: return KEY_F23;
+        case 24: return KEY_F24;
+        default: return -1;
+    }
 }
 
 static bool parse_trigger_token(const char *token)
@@ -392,7 +422,7 @@ static bool parse_trigger(const char *trigger_argument)
     if (trigger_argument == NULL ||
         trigger_argument[0] == '\0') {
 
-        trigger_argument = "ALT";
+        trigger_argument = "F12";
     }
 
     /*
@@ -732,7 +762,7 @@ int main(int argc, char *argv[])
     int poll_result;
     int exit_status = EXIT_SUCCESS;
 
-    trigger_argument = argc >= 2 ? argv[1] : "ALT";
+    trigger_argument = argc >= 2 ? argv[1] : "F12";
 
     if (!parse_trigger(trigger_argument)) {
         fprintf(
