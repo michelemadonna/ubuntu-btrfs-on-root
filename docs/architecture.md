@@ -6,9 +6,8 @@ for verification.
 
 ## System boundary
 
-The project converts a fresh Ubuntu Ubiquity installation from its live session
-or a fresh Kali installation selected by the wizard. The default device layout
-is:
+The project converts a fresh Ubuntu/Kali installation or creates one from a
+live session with `debootstrap`. The migration default device layout is:
 
 | Device | Initial role | Result |
 | --- | --- | --- |
@@ -19,8 +18,8 @@ is:
 Device names are configurable. Ubuntu discovery expects the installed root at
 `/target`, the ESP at `/target/boot/efi` and an optional separate boot at
 `/target/boot`. Kali setup can mount those configured filesystems itself.
-`/cdrom` supplies the Ubuntu live rescue source; rescue creation is disabled by
-the Kali installation flow.
+`/cdrom` supplies the Ubuntu live rescue source. Kali migration disables rescue;
+new installation requires a source containing `casper/` when rescue is selected.
 
 Installed persistent data and swap live inside LUKS2. The ESP and optional
 rescue environment are outside that encryption boundary. A migrated old boot
@@ -29,8 +28,9 @@ partition is unused afterward unless explicitly reformatted for rescue.
 ## Orchestrator and framework
 
 `setup.sh` owns the configuration wizard and the outer live/inner chroot split.
-The outer phase performs storage conversion and optional rescue creation; the
-inner phase installs Secure Boot, snapshots, UKIs and optional TPM support.
+The outer phase dispatches storage conversion or fresh provisioning and
+optional rescue creation; the inner phase installs Secure Boot, snapshots,
+UKIs and optional TPM support.
 Successful completion restores temporary resolver/service-policy files but
 leaves target mounts and `/dev/mapper/root` open.
 
@@ -48,6 +48,16 @@ target is installation input, not a runtime dependency.
 `btrfs-root/scripts/btrfs-root-setup` coordinates exact-device/mount checks,
 ESP labelling, subvolume conversion, in-place LUKS2 encryption and fstab/
 crypttab generation.
+
+`new-install/scripts/new-install-setup` owns whole-disk validation, GPT geometry,
+`sgdisk`, fresh LUKS2/Btrfs creation and `debootstrap`. It discovers partitions
+by unique GPT labels and returns resolved device paths to the orchestrator.
+Both storage paths converge before chroot preparation.
+
+New GPT order is ESP, optional rescue reserve, encrypted Linux root, and—only
+for percentage root sizing—optional MSR, Windows and Windows RE. Rescue starts
+as one 10 GiB range so its owning subsystem can split FAT and persistence inside
+that range.
 
 Each suite is a top-level sibling container:
 

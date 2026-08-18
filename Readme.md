@@ -1,6 +1,6 @@
 # Ubuntu Btrfs on Root
 
-This repository converts a fresh Ubuntu or Kali Linux installation into a
+This repository installs or converts Ubuntu and Kali Linux into a
 full-disk-encryption solution with:
 
 - a LUKS2-encrypted Btrfs root;
@@ -12,10 +12,10 @@ full-disk-encryption solution with:
 - a persistent Ubuntu live rescue system on a separate partition;
 - rEFInd as the installed boot manager.
 
-This is not an operating-system installer and it is not intended to convert an
-existing production installation. Ubuntu setup starts in the same live session
-immediately after Ubiquity finishes. Kali setup must start from a Kali Live
-session after the fresh Kali installation has been created.
+The wizard offers `In-place migration` for a fresh system created by the
+distribution installer and `New installation` for bootstrapping directly from
+a live environment with `debootstrap`. Migration is not intended for an
+existing production installation.
 
 > [!WARNING]
 > Setup reformats the rescue partition, restructures the Btrfs filesystem,
@@ -23,7 +23,24 @@ session after the fresh Kali installation has been created.
 > device configuration can destroy data or leave the machine unable to boot.
 > Back up important data and verify every value in `setup.conf` before running.
 
-## Required disk layout
+New installation erases the selected whole disk. The wizard validates and
+summarizes the complete layout first; provisioning then requires the exact
+`/dev/...` disk path before the first `sgdisk` operation.
+
+## New installation layout
+
+New installation creates a GPT with `sgdisk`, a FAT32 ESP labelled `ESP`, an
+optional 10 GiB rescue reserve, and a LUKS2 root containing Btrfs. Root may use
+all remaining space or a percentage. Windows is offered only for percentage
+sizing; when enabled, setup adds a 16 MiB MSR, the requested NTFS partition and
+a 1 GiB NTFS Windows RE partition. Insufficient space returns to sizing without
+changing the disk. Windows itself is not installed.
+
+The wizard records hostname, root login password, locale, timezone and keyboard
+configuration. Ubuntu uses the selected suite. Kali bootstraps `kali-rolling`
+while retaining `suite=kali` for boot and snapshot configuration.
+
+## Migration required disk layout
 
 Boot the Ubuntu live medium in UEFI mode, launch Ubiquity and choose manual
 partitioning. Create this default layout:
@@ -112,7 +129,8 @@ target after its files are migrated. If no boot partition exists or the user
 declines its reuse, the wizard asks for another partition. When rescue is
 disabled, no rescue partition is requested and `rescue_dev` remains empty.
 `suite` supports `resolute`, `noble` and `kali`; `suite_type` supports `ubuntu`
-and `kali`. Kali installations do not create a rescue system. Every `yes`/`no`
+and `kali`. Kali migration does not create rescue; new installation can do so
+when the live source provides Ubuntu `casper/` content. Every `yes`/`no`
 setting is presented as a toggle and normalized to one of those two literal
 values. Secrets use hidden input. The generated file is
 written atomically with mode `0600`, then checked for Bash syntax, required
@@ -120,7 +138,7 @@ values and permissions. After showing the complete non-secret configuration
 summary, setup asks whether installation should proceed. Answering `no` leaves
 the generated configuration in place but performs no installation operation.
 
-At startup the wizard warns that this conversion is intended only for an Ubuntu
+In migration mode the wizard warns that conversion is intended only for an Ubuntu
 system just installed from the live environment. It is not a migration tool for
 an existing production installation.
 
@@ -177,6 +195,10 @@ From the repository root in the live session:
 ```bash
 sudo ./setup.sh
 ```
+
+Select the installation mode first. New installation requires network access
+and a live environment able to install the target distribution's archive
+keyring and the `debootstrap`, `gdisk`, filesystem and encryption tools.
 
 The installation is intentionally interactive where a destructive target or
 security action needs confirmation. Keep the terminal open and read every
@@ -572,6 +594,7 @@ limitations. Security and boot assumptions are listed in
 ├── lib/                     shared framework and dedicated log.* module
 ├── rescue/                  persistent Ubuntu live rescue creation
 ├── btrfs-root/              Btrfs conversion and LUKS2 encryption
+├── new-install/             GPT, fresh LUKS2/Btrfs and debootstrap provisioning
 ├── secure-boot/             sbctl, shim/MOK, rEFInd and fwupd
 ├── btrfs-snapshots-mng/     Snapper and early-boot snapshot selection
 ├── uki/                     kernel-install, dracut and ukify integration

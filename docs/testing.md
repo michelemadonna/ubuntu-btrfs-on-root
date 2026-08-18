@@ -40,6 +40,7 @@ does not execute the unit tests.
 | `common_test.sh` | framework and logging |
 | `tui_test.sh` | prompts, defaults and generated configuration contract |
 | `btrfs_root_test.sh` | subvolume paths, Kali cleanup, fstab and storage summaries |
+| `new_install_test.sh` | GPT sizing, Windows gating, retry status, archive trust and mocked `sgdisk` argv |
 | `rescue_test.sh` | sizing, persistence and optional orchestration |
 | `secure_boot_test.sh` | trust-path selection, certificate export and sbctl contract |
 | `snapshot_management_test.sh` | distro menu configuration, B/b trigger and installed artifacts |
@@ -82,7 +83,7 @@ commands are grouped.
 | Area | Tools |
 | --- | --- |
 | Base/orchestration | Bash, `apt`, `apt-get`, `awk`, `coreutils`, `find`, `grep`, `sed`, `util-linux`, `unshare` |
-| Storage | `btrfs`, `cryptsetup`, `blkid`, `blockdev`, `findmnt`, `lsblk`, `mount`, `umount`, `fatlabel`, `parted` |
+| Storage | `btrfs`, `cryptsetup`, `blkid`, `blockdev`, `debootstrap`, `findmnt`, `lsblk`, `mount`, `umount`, `fatlabel`, `mkfs.ntfs`, `parted`, `partprobe`, `sgdisk`, `udevadm` |
 | Rescue | `du`, `mkfs.ext4`, `mkfs.vfat`, `partprobe`, `rsync`, `udevadm`, `xargs` |
 | Secure Boot | `sbctl`, `sbverify`, `sbsign`, `mokutil`, `openssl`, `chattr`, `lsattr`, `dpkg-query`, `debconf-set-selections`, `efibootmgr`, `refind-install`, `unzip` |
 | Firmware updates | `fwupdmgr`, `systemctl` when available |
@@ -108,9 +109,9 @@ fallback paths.
 
 ## Destructive integration test
 
-Use only a disposable UEFI VM or explicitly allocated hardware. Reproduce the
-post-Ubiquity Ubuntu state or a fresh Kali target, use non-production
-credentials and exercise:
+Use only a disposable UEFI VM or explicitly allocated hardware. Exercise both
+new installation and the post-Ubiquity/fresh-Kali migration states with
+non-production credentials:
 
 1. Ubuntu snapshot conversion, Kali top-level migration, separate-boot
    migration and LUKS password recovery;
@@ -121,9 +122,17 @@ credentials and exercise:
 6. normal boot, selector cancellation and compatible read-only snapshot boot;
 7. rescue boot and persistence when installed;
 8. successful setup leaving target mounts and mapper open.
+9. new GPT installation with root-all, root-percentage, Windows-space retry,
+   Ubuntu/Kali bootstrap and SATA/NVMe device discovery.
 
 The environment must tolerate partition formatting, in-place encryption and
 firmware/MOK changes. Static and mocked tests cannot establish bootability.
+
+New-install unit tests mock partitioning and cover calculations only. They are
+not evidence that a target was bootstrapped, encrypted, booted, or installed
+alongside Windows. Destructive integration must additionally cover SATA, NVMe
+and virtual-disk names, archive keyrings, rescue splitting, and each supported
+suite on disposable media.
 
 ## Reporting evidence
 

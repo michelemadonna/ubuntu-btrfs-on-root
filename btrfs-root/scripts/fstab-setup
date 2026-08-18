@@ -11,8 +11,10 @@ repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
 # Runtime-derived paths allow direct execution and sourcing from setup.sh.
 # shellcheck disable=SC1090,SC1091
 source "$repository_root/lib/common.sh"
-# shellcheck disable=SC1090,SC1091
-source "${SETUP_CONFIG_FILE:-$repository_root/setup.conf}"
+if [[ ${FSTAB_SETUP_SKIP_CONFIG:-no} != yes ]]; then
+	# shellcheck disable=SC1090,SC1091
+	source "${SETUP_CONFIG_FILE:-$repository_root/setup.conf}"
+fi
 
 fstab-setup.validate_configuration() {
 	common.require_nonempty "root_dev" "${root_dev:-}"

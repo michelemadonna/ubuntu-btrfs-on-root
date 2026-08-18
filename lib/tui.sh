@@ -18,12 +18,12 @@ tui.input() {
 tui.password() {
 	local prompt=$1
 	local default=${2:-}
-	local value='' character masked_default input_fd
+	local value='' character masked_default
 
 	masked_default=$default #"$(printf '%*s' "${#default}" '' | tr ' ' '*')"
 	printf '%s [default: %s]: ' "$prompt" "${masked_default:-none}" >&2
-	exec {input_fd}<"$TUI_INPUT_DEVICE"
-	while IFS= read -r -s -n 1 -u "$input_fd" character; do
+	exec 9<"$TUI_INPUT_DEVICE"
+	while IFS= read -r -s -n 1 -u 9 character; do
 		case $character in
 		'')
 			break
@@ -40,10 +40,24 @@ tui.password() {
 			;;
 		esac
 	done
-	exec {input_fd}<&-
+	exec 9<&-
 
 	printf '\n' >&2
 	printf '%s\n' "${value:-$default}"
+}
+
+tui.password_confirm() {
+	local prompt=$1
+	local default=${2:-}
+	local first second
+
+	first="$(tui.password "$prompt" "$default")"
+	second="$(tui.password "Confirm $prompt" "$default")"
+	[[ $first == "$second" ]] || {
+		printf '%s do not match.\n' "$prompt" >&2
+		return 1
+	}
+	printf '%s\n' "$first"
 }
 
 tui.toggle() {

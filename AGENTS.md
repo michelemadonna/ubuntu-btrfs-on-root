@@ -123,14 +123,17 @@ experimental sbctl append behavior.
 
 Only these closed selections are supported currently:
 
+- `install_mode`: `migration`, `new`;
+- `root_size_strategy`: `all`, `percent`;
 - `suite`: `resolute`, `noble`, `kali`;
 - `suite_type`: `ubuntu`, `kali`; selecting suite `kali` forces type `kali`;
 - `secure_boot_enrollment`: `sbctl`, `mok`;
 - `secure_boot_mode`: detected `setup`, `enabled`, `disabled`, `unknown`;
 - `EXPERIMENTAL_SBCTL_APPEND`: `true`, `false`.
 
-`mok_pin` is required only for MOK. Kali forces `install_rescue=no` during the
-main installation. Otherwise, `install_rescue=no` permits an empty
+`mok_pin` is required only for MOK. Kali migration forces
+`install_rescue=no`; new installation may create rescue only when its live
+source exposes `casper/`. Otherwise, `install_rescue=no` permits an empty
 `rescue_dev`; the standalone rescue action still requires one. `sb_key_dir` is
 currently unused. Preserve the repository-root `refind_themes.zip` dependency.
 

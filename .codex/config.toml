@@ -4,6 +4,5 @@ plan_mode_reasoning_effort = "medium"
 
 [agents]
 enabled = true
-default_subagent_model = "gpt-5.6"
+default_subagent_model = "gpt-5.6-sol"
 default_subagent_reasoning_effort = "medium"
-

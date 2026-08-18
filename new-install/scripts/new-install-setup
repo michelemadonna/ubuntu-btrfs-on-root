@@ -1,0 +1,383 @@
+#!/usr/bin/env bash
+# Configuration variables are loaded by setup.sh or from setup.conf when run directly.
+# shellcheck disable=SC2034,SC2154
+
+set -Eeuo pipefail
+umask 077
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
+
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
+
+readonly NEW_INSTALL_RESCUE_MIB=10240
+readonly NEW_INSTALL_MSR_MIB=16
+readonly NEW_INSTALL_WINRE_MIB=1024
+readonly NEW_INSTALL_GPT_RESERVE_MIB=4
+readonly NEW_INSTALL_MIN_ESP_MIB=512
+readonly NEW_INSTALL_MIN_ROOT_MIB=16384
+readonly NEW_INSTALL_MIN_WINDOWS_MIB=32768
+readonly NEW_INSTALL_KALI_KEY_FINGERPRINT=827C8569F2518CC677FECA1AED65462EC8D5E4C5
+
+new-install.validate_positive_integer() {
+	local name=$1 value=$2
+	[[ $value =~ ^[1-9][0-9]*$ ]] || log.die "$name must be a positive integer."
+}
+
+new-install.calculate_layout() {
+	local disk_mib=$1 esp_mib=$2 rescue_enabled=$3 root_strategy=$4 root_percent=$5 windows_enabled=$6 windows_mib=$7
+	local rescue_mib=0 allocatable_mib root_mib remaining_mib windows_required_mib=0
+
+	new-install.validate_positive_integer "Disk size" "$disk_mib"
+	new-install.validate_positive_integer "ESP size" "$esp_mib"
+	((esp_mib >= NEW_INSTALL_MIN_ESP_MIB)) || log.die "ESP must be at least $NEW_INSTALL_MIN_ESP_MIB MiB."
+	[[ $rescue_enabled == yes || $rescue_enabled == no ]] || log.die "install_rescue must be yes or no."
+	[[ $windows_enabled == yes || $windows_enabled == no ]] || log.die "install_windows must be yes or no."
+	[[ $root_strategy == all || $root_strategy == percent ]] || log.die "root_size_strategy must be all or percent."
+	[[ $root_strategy != all || $windows_enabled == no ]] || log.die "Windows cannot be requested when root uses all remaining space."
+
+	[[ $rescue_enabled == no ]] || rescue_mib=$NEW_INSTALL_RESCUE_MIB
+	allocatable_mib=$((disk_mib - NEW_INSTALL_GPT_RESERVE_MIB - esp_mib - rescue_mib))
+	((allocatable_mib >= NEW_INSTALL_MIN_ROOT_MIB)) || log.die "Disk is too small for the requested ESP, rescue reserve, and minimum root filesystem."
+
+	if [[ $root_strategy == all ]]; then
+		root_mib=$allocatable_mib
+	else
+		new-install.validate_positive_integer "Root percentage" "$root_percent"
+		((root_percent < 100)) || log.die "Root percentage must be between 1 and 99; select all remaining space for 100%."
+		root_mib=$((allocatable_mib * root_percent / 100))
+		((root_mib >= NEW_INSTALL_MIN_ROOT_MIB)) || log.die "Calculated root size is below $NEW_INSTALL_MIN_ROOT_MIB MiB."
+	fi
+
+	remaining_mib=$((allocatable_mib - root_mib))
+	if [[ $windows_enabled == yes ]]; then
+		new-install.validate_positive_integer "Windows size" "$windows_mib"
+		((windows_mib >= NEW_INSTALL_MIN_WINDOWS_MIB)) || log.die "Windows must be at least $NEW_INSTALL_MIN_WINDOWS_MIB MiB."
+		windows_required_mib=$((NEW_INSTALL_MSR_MIB + windows_mib + NEW_INSTALL_WINRE_MIB))
+		((remaining_mib >= windows_required_mib)) || return 2
+	fi
+
+	printf 'esp_mib=%s\n' "$esp_mib"
+	printf 'rescue_mib=%s\n' "$rescue_mib"
+	printf 'root_mib=%s\n' "$root_mib"
+	printf 'remaining_mib=%s\n' "$remaining_mib"
+	printf 'windows_required_mib=%s\n' "$windows_required_mib"
+}
+
+new-install.partition_path_by_label() {
+	local disk=$1 label=$2 listing path count
+
+	listing="$(lsblk -nrpo PATH,PARTLABEL "$disk")"
+	path="$(awk -v label="$label" '$2 == label { print $1 }' <<<"$listing")"
+	count="$(awk 'NF { count++ } END { print count + 0 }' <<<"$path")"
+	((count == 1)) || log.die "Expected one partition named $label on $disk; found $count."
+	printf '%s\n' "$path"
+}
+
+new-install.keyring_has_fingerprint() {
+	local keyring=$1 fingerprint=$2
+
+	gpg --batch --no-default-keyring --keyring "$keyring" --with-colons --fingerprint 2>/dev/null |
+		awk -F: -v fingerprint="$fingerprint" '$1 == "fpr" && $10 == fingerprint { found=1 } END { exit !found }'
+}
+
+new-install.prepare_kali_bootstrap() {
+	local keyring=/usr/share/keyrings/kali-archive-keyring.gpg
+	local key_url=https://archive.kali.org/archive-keyring.gpg
+	local temporary_keyring temporary_script
+
+	common.require_commands curl gpg install ln mktemp rm sed
+	if [[ ! -r $keyring ]] || ! new-install.keyring_has_fingerprint "$keyring" "$NEW_INSTALL_KALI_KEY_FINGERPRINT"; then
+		temporary_keyring="$(mktemp /tmp/kali-archive-keyring.XXXXXX.gpg)"
+		log.info "Download the official Kali archive keyring over HTTPS"
+		curl --fail --silent --show-error --location "$key_url" --output "$temporary_keyring"
+		new-install.keyring_has_fingerprint "$temporary_keyring" "$NEW_INSTALL_KALI_KEY_FINGERPRINT" ||
+			log.die "Downloaded Kali keyring does not contain the pinned archive fingerprint."
+		install -m 0644 "$temporary_keyring" "$keyring"
+		rm -f -- "$temporary_keyring"
+	fi
+	if [[ ! -e /usr/share/debootstrap/scripts/kali-rolling ]]; then
+		[[ -r /usr/share/debootstrap/scripts/sid ]] || log.die "debootstrap sid script is unavailable for Kali bootstrap preparation."
+		temporary_script="$(mktemp /tmp/debootstrap-kali.XXXXXX)"
+		{
+			printf 'default_mirror http://http.kali.org/kali\n'
+			sed 's/debian-archive-keyring.gpg/kali-archive-keyring.gpg/g' /usr/share/debootstrap/scripts/sid
+		} >"$temporary_script"
+		install -m 0755 "$temporary_script" /usr/share/debootstrap/scripts/kali
+		rm -f -- "$temporary_script"
+		ln -s kali /usr/share/debootstrap/scripts/kali-rolling
+	fi
+	log.success "Kali archive key and debootstrap suite script are verified"
+}
+
+new-install.validate_target_disk() {
+	local disk=$1 canonical_disk source parent child_name
+	local -a protected_sources=()
+
+	[[ -b $disk ]] || log.die "Installation target is not a block device: $disk"
+	[[ $(lsblk -dnro TYPE "$disk") == disk ]] || log.die "New installation target must be a whole disk: $disk"
+	canonical_disk="$(readlink -f -- "$disk")"
+	while IFS= read -r source; do
+		[[ $source == /dev/* ]] || continue
+		source=${source%%\[*}
+		protected_sources+=("$(readlink -f -- "$source")")
+	done < <(
+		findmnt -rn -M / -o SOURCE 2>/dev/null || true
+		findmnt -rn -M /cdrom -o SOURCE 2>/dev/null || true
+	)
+	for source in "${protected_sources[@]}"; do
+		parent="$(lsblk -ndo PKNAME "$source" 2>/dev/null | tr -d '[:space:]')"
+		[[ -z $parent || $(readlink -f -- "/dev/$parent") != "$canonical_disk" ]] ||
+			log.die "Refusing to erase $disk because it contains the running system or live medium source $source."
+	done
+	if lsblk -nrpo MOUNTPOINTS "$disk" | grep -q '[^[:space:]]'; then
+		log.die "Refusing to erase $disk because it or one of its partitions is mounted."
+	fi
+	while IFS= read -r source; do
+		[[ -n $source ]] || continue
+		parent="$(lsblk -ndo PKNAME "$source" 2>/dev/null | tr -d '[:space:]')"
+		[[ -z $parent || $(readlink -f -- "/dev/$parent") != "$canonical_disk" ]] ||
+			log.die "Refusing to erase $disk because $source is active swap."
+	done < <(swapon --noheadings --show=NAME 2>/dev/null || true)
+	while IFS= read -r child_name; do
+		[[ -n $child_name ]] || continue
+		[[ ! -d /sys/class/block/$child_name/holders || -z $(find "/sys/class/block/$child_name/holders" -mindepth 1 -maxdepth 1 -print -quit) ]] ||
+			log.die "Refusing to erase $disk because $child_name has active device-mapper or storage holders."
+	done < <(lsblk -nrpo KNAME "$canonical_disk" | sed 's|.*/||')
+	log.success "Validated unused whole-disk target $canonical_disk"
+}
+
+new-install.confirm_destruction() {
+	local disk=$1 confirmation
+
+	log.warn "ALL DATA ON $disk WILL BE PERMANENTLY DESTROYED."
+	printf 'Type the exact disk path (%s) to continue: ' "$disk" >&2
+	IFS= read -r confirmation <"${TUI_INPUT_DEVICE:-/dev/tty}"
+	[[ $confirmation == "$disk" ]] || log.die "Disk confirmation failed; nothing was changed."
+}
+
+new-install.print_planned_layout() {
+	log.section "Confirmed new-installation layout"
+	log.summary_item "Disk" "$install_disk ($disk_size_mib MiB)"
+	log.summary_item "ESP" "$esp_size_mib MiB"
+	log.summary_item "Rescue reserve" "$([[ $install_rescue == yes ]] && printf '%s MiB' "$NEW_INSTALL_RESCUE_MIB" || printf disabled)"
+	log.summary_item "Encrypted root" "$root_size_mib MiB"
+	if [[ $install_windows == yes ]]; then
+		log.summary_item "Microsoft reserved" "$NEW_INSTALL_MSR_MIB MiB"
+		log.summary_item "Windows" "$windows_size_mib MiB"
+		log.summary_item "Windows RE" "$NEW_INSTALL_WINRE_MIB MiB"
+	fi
+	log.warn "The next confirmation authorizes permanent destruction of every existing partition on $install_disk."
+	log.section_end
+}
+
+new-install.create_partition_table() {
+	local disk=$1 number=1
+	local -a commands=(-Z -o)
+
+	commands+=(-n "$number:0:+${esp_size_mib}MiB" -t "$number:ef00" -c "$number:ESP")
+	((number += 1))
+	if [[ $install_rescue == yes ]]; then
+		commands+=(-n "$number:0:+${NEW_INSTALL_RESCUE_MIB}MiB" -t "$number:0700" -c "$number:rescue-reserve")
+		((number += 1))
+	fi
+	commands+=(-n "$number:0:+${root_size_mib}MiB" -t "$number:8309" -c "$number:linux-root")
+	((number += 1))
+	if [[ $install_windows == yes ]]; then
+		commands+=(-n "$number:0:+${NEW_INSTALL_MSR_MIB}MiB" -t "$number:0c01" -c "$number:Microsoft-reserved")
+		((number += 1))
+		commands+=(-n "$number:0:+${windows_size_mib}MiB" -t "$number:0700" -c "$number:Windows")
+		((number += 1))
+		commands+=(-n "$number:0:+${NEW_INSTALL_WINRE_MIB}MiB" -t "$number:2700" -c "$number:Windows-RE")
+	fi
+
+	log.info "Create the confirmed GPT layout on $disk with sgdisk"
+	sgdisk "${commands[@]}" "$disk"
+	partprobe "$disk"
+	udevadm settle
+}
+
+new-install.discover_partitions() {
+	local disk=$1
+
+	efi_path="$(new-install.partition_path_by_label "$disk" ESP)"
+	root_path="$(new-install.partition_path_by_label "$disk" linux-root)"
+	rescue_path=''
+	windows_path=''
+	winre_path=''
+	[[ $install_rescue == no ]] || rescue_path="$(new-install.partition_path_by_label "$disk" rescue-reserve)"
+	if [[ $install_windows == yes ]]; then
+		windows_path="$(new-install.partition_path_by_label "$disk" Windows)"
+		winre_path="$(new-install.partition_path_by_label "$disk" Windows-RE)"
+	fi
+	root_dev=${root_path#/dev/}
+	efi_dev=${efi_path#/dev/}
+	rescue_dev=${rescue_path#/dev/}
+}
+
+new-install.create_subvolumes() {
+	local name
+
+	mount /dev/mapper/root "$mp"
+	cd "$mp"
+	btrfs subvolume create "$root_sub_vol"
+	for name in @ @home @cache @log @tmp @libvirt @docker @swap; do
+		btrfs subvolume create "$root_sub_vol/$name"
+	done
+	cd /
+	umount "$mp"
+	mount /dev/mapper/root -o "subvol=$root_sub_vol/@" "$mp"
+	mkdir -p "$mp/home" "$mp/var/cache" "$mp/var/log" "$mp/tmp" "$mp/var/lib/libvirt" "$mp/var/lib/docker" "$mp/swap" "$mp/boot/efi"
+	for name in \
+		"$mp/home:$root_sub_vol/@home" \
+		"$mp/var/cache:$root_sub_vol/@cache" \
+		"$mp/var/log:$root_sub_vol/@log" \
+		"$mp/tmp:$root_sub_vol/@tmp" \
+		"$mp/var/lib/libvirt:$root_sub_vol/@libvirt" \
+		"$mp/var/lib/docker:$root_sub_vol/@docker" \
+		"$mp/swap:$root_sub_vol/@swap"; do
+		mount /dev/mapper/root -o "subvol=${name#*:}" "${name%%:*}"
+	done
+	btrfs filesystem mkswapfile --size "$swap_size" "$mp/swap/swapfile"
+	mount "$efi_path" "$mp/boot/efi"
+}
+
+new-install.bootstrap_target() {
+	local bootstrap_suite mirror include_packages keyring
+
+	if [[ $suite_type == kali ]]; then
+		bootstrap_suite=kali-rolling
+		mirror=https://http.kali.org/kali
+		keyring=/usr/share/keyrings/kali-archive-keyring.gpg
+		include_packages=linux-image-amd64,kali-archive-keyring,kali-linux-core,btrfs-progs,cryptsetup-initramfs,locales,console-setup,keyboard-configuration
+	else
+		bootstrap_suite=$suite
+		mirror=http://archive.ubuntu.com/ubuntu
+		keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg
+		include_packages=linux-image-generic,ubuntu-minimal,btrfs-progs,cryptsetup-initramfs,locales,console-setup,keyboard-configuration
+	fi
+	[[ -r $keyring ]] || log.die "Archive keyring is unavailable for $suite_type: $keyring"
+	log.info "Bootstrap $suite_type suite $bootstrap_suite into $mp"
+	debootstrap --arch=amd64 --keyring="$keyring" --include="$include_packages" "$bootstrap_suite" "$mp" "$mirror"
+	if [[ $suite_type == kali ]]; then
+		cat >"$mp/etc/apt/sources.list" <<-'EOF'
+			deb http://http.kali.org/kali kali-rolling main contrib non-free non-free-firmware
+		EOF
+	else
+		cat >"$mp/etc/apt/sources.list" <<-EOF
+			deb http://archive.ubuntu.com/ubuntu $suite main restricted universe multiverse
+			deb http://archive.ubuntu.com/ubuntu $suite-updates main restricted universe multiverse
+			deb http://security.ubuntu.com/ubuntu $suite-security main restricted universe multiverse
+		EOF
+	fi
+}
+
+new-install.configure_target() {
+	local luks_uuid
+
+	printf '%s\n' "$target_hostname" >"$mp/etc/hostname"
+	cat >"$mp/etc/hosts" <<-EOF
+		127.0.0.1 localhost
+		127.0.1.1 $target_hostname
+		::1 localhost ip6-localhost ip6-loopback
+	EOF
+	printf '%s UTF-8\n' "$target_locale" >"$mp/etc/locale.gen"
+	printf 'LANG=%s\n' "$target_locale" >"$mp/etc/default/locale"
+	ln -sfn "/usr/share/zoneinfo/$target_timezone" "$mp/etc/localtime"
+	printf '%s\n' "$target_timezone" >"$mp/etc/timezone"
+	cat >"$mp/etc/default/keyboard" <<-EOF
+		XKBMODEL="pc105"
+		XKBLAYOUT="$keyboard_layout"
+		XKBVARIANT="$keyboard_variant"
+		XKBOPTIONS=""
+		BACKSPACE="guess"
+	EOF
+	luks_uuid="$(blkid -c /dev/null -s UUID -o value "$root_path")"
+	printf 'root UUID=%s none luks,discard\n' "$luks_uuid" >"$mp/etc/crypttab"
+	# shellcheck disable=SC1090,SC1091
+	FSTAB_SETUP_SKIP_CONFIG=yes source "$repository_root/btrfs-root/scripts/fstab-setup"
+	fstab-setup.run
+	chroot "$mp" locale-gen
+	chroot "$mp" dpkg-reconfigure -f noninteractive tzdata
+	printf 'root:%s\n' "$TARGET_PASSWORD" | chroot "$mp" chpasswd
+	chmod 1777 "$mp/tmp"
+}
+
+new-install.print_summary() {
+	log.section "New installation storage summary"
+	log.summary_item "Disk" "$install_disk"
+	log.summary_item "ESP" "$efi_path ($esp_size_mib MiB, FAT32, label ESP)"
+	log.summary_item "Rescue reserve" "${rescue_path:-disabled}"
+	log.summary_item "Encrypted root" "$root_path ($root_size_mib MiB, LUKS2/Btrfs)"
+	[[ $install_windows == no ]] || log.summary_item "Windows" "$windows_path ($windows_size_mib MiB)"
+	[[ $install_windows == no ]] || log.summary_item "Windows RE" "$winre_path ($NEW_INSTALL_WINRE_MIB MiB)"
+	log.summary_item "Distribution" "$suite_type/$suite"
+	log.summary_item "Locale" "$target_locale; $target_timezone; $keyboard_layout${keyboard_variant:+/$keyboard_variant}"
+	log.success "New base system installed and ready for common post-installation phases"
+	log.section_end
+}
+
+new-install.validate_result() {
+	local name listing
+
+	log.section "Post-summary validation"
+	cryptsetup isLuks "$root_path" || log.die "Root partition is not LUKS2."
+	[[ $(blkid -c /dev/null -s TYPE -o value "$efi_path") == vfat ]] || log.die "ESP is not FAT."
+	[[ $(blkid -c /dev/null -s LABEL -o value "$efi_path") == ESP ]] || log.die "ESP label is not ESP."
+	[[ -b /dev/mapper/root ]] || log.die "Root mapper is unavailable."
+	listing="$(btrfs subvolume list "$mp")"
+	for name in @ @home @cache @log @tmp @libvirt @docker @swap; do
+		grep -Fq "path $root_sub_vol/$name" <<<"$listing" || log.die "Missing Btrfs subvolume: $root_sub_vol/$name"
+	done
+	[[ -s $mp/etc/fstab && -s $mp/etc/crypttab && -s $mp/etc/hostname ]] || log.die "Base target configuration is incomplete."
+	log.success "Validated partition filesystems, LUKS mapper, subvolumes and base target configuration"
+	log.section_end
+}
+
+new-install.run() {
+	local current_disk_mib current_identity
+
+	common.require_root
+	common.require_commands awk blkid blockdev btrfs cat chmod chroot cryptsetup debootstrap dpkg find findmnt grep lsblk mkfs.btrfs mkfs.ntfs mkfs.vfat mount partprobe readlink sed sgdisk swapon tr udevadm umount
+	[[ $(dpkg --print-architecture) == amd64 ]] || log.die "New installation currently supports amd64 only."
+	[[ -d /sys/firmware/efi ]] || log.die "New installation requires a live session booted in UEFI mode."
+	if [[ $install_rescue == yes ]]; then
+		[[ -d ${RESCUE_SOURCE_DIR:-/cdrom}/casper ]] || log.die "Rescue was requested but the live source does not provide casper/."
+	fi
+	new-install.validate_target_disk "$install_disk"
+	current_disk_mib="$(($(blockdev --getsize64 "$install_disk") / 1024 / 1024))"
+	current_identity="$(lsblk -dnro SIZE,MODEL,SERIAL,WWN "$install_disk" | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//')"
+	[[ $current_disk_mib == "$disk_size_mib" ]] || log.die "Target disk size changed after configuration; refusing to continue."
+	[[ $current_identity == "$install_disk_identity" ]] || log.die "Target disk identity changed after configuration; refusing to continue."
+	new-install.calculate_layout "$disk_size_mib" "$esp_size_mib" "$install_rescue" "$root_size_strategy" "$root_size_percent" "$install_windows" "$windows_size_mib" >/dev/null
+	new-install.print_planned_layout
+	new-install.confirm_destruction "$install_disk"
+	new-install.create_partition_table "$install_disk"
+	new-install.discover_partitions "$install_disk"
+	if declare -F setup.persist_runtime_devices >/dev/null; then
+		setup.persist_runtime_devices "$repository_root/setup.conf"
+	fi
+	log.info "Format ESP $efi_path as FAT32 with label ESP"
+	mkfs.vfat -F 32 -n ESP "$efi_path"
+	if [[ $install_windows == yes ]]; then
+		mkfs.ntfs -F -L Windows "$windows_path"
+		mkfs.ntfs -F -L WindowsRE "$winre_path"
+	fi
+	log.info "Format $root_path as LUKS2 using Argon2id; the passphrase is never logged"
+	printf '%s\n' "$PASSPHRASE" | cryptsetup luksFormat --batch-mode --type luks2 --pbkdf argon2id --iter-time "$iter_time" "$root_path"
+	printf '%s\n' "$PASSPHRASE" | cryptsetup open "$root_path" root
+	mkfs.btrfs -f -L ROOT /dev/mapper/root
+	mkdir -p "$mp"
+	new-install.create_subvolumes
+	new-install.bootstrap_target
+	new-install.configure_target
+	new-install.print_summary
+	new-install.validate_result
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	# shellcheck disable=SC1090,SC1091
+	source "${SETUP_CONFIG_FILE:-$repository_root/setup.conf}"
+	new-install.run
+fi

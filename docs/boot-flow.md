@@ -5,9 +5,8 @@ safety requirements are in `invariants.md`.
 
 ## Configuration discovery
 
-Run `setup.sh` as root after the fresh installation. For Ubuntu, remain in the
-Ubiquity live session; for Kali, the wizard mounts the configured root, ESP and
-optional separate `/boot`. If `setup.conf` is absent, the wizard:
+Run `setup.sh` as root from a UEFI x86-64 live session. If `setup.conf` is
+absent, the wizard first selects migration or new installation. Migration then:
 
 1. detects exact sources mounted at `/target`, `/target/boot/efi` and optional
    `/target/boot`;
@@ -21,7 +20,24 @@ optional separate `/boot`. If `setup.conf` is absent, the wizard:
 An exact separate `/target/boot` mount may be absent. `/target/cdrom` is
 unmounted only when it is a mount point; its absence is non-fatal.
 
+New installation selects an unused whole disk, calculates ESP, optional 10 GiB
+rescue, root and optional Windows ranges, then gathers suite, LUKS, hostname and
+localization values. Windows is skipped when root uses all remaining space. An
+insufficient Windows layout returns to sizing.
+
 ## Live-session outer phase
+
+### New installation
+
+1. Install required live tools and target archive keyring.
+2. Revalidate the whole disk and calculated layout, then require its exact path.
+3. Create GPT partitions with `sgdisk`, settle udev and resolve GPT labels.
+4. Format ESP and optional Windows ranges; create and open fresh LUKS2 root.
+5. Create Btrfs suite/data subvolumes, mount them and run `debootstrap`.
+6. Configure identity, localization, crypttab and atomic UUID-based fstab.
+7. Persist resolved devices and join the common chroot phase.
+
+### In-place migration
 
 1. Validate configuration, exact devices, mounts and Btrfs root type.
 2. Unmount the ESP for FAT label `ESP` validation/application.

@@ -29,8 +29,8 @@ tui-test.input_and_password_defaults() {
 	output="$(tui-test.with_input $'\n' tui.input "Value" "default" 2>/dev/null)"
 	tui-test.assert_equal default "$output"
 	prompt="$(tui-test.with_input $'secret\n' tui.password "Password" "fallback" 2>&1 >/dev/null)"
-	[[ $prompt == *'Password [default: ********]: ******'* ]] || {
-		printf 'Password prompt must mask the default and entered value.\n' >&2
+	[[ $prompt == *'Password [default: fallback]: ******'* ]] || {
+		printf 'Password prompt must show the default and mask the entered value.\n' >&2
 		return 1
 	}
 	output="$(tui-test.with_input $'secret\n' tui.password "Password" "fallback" 2>/dev/null)"
@@ -64,6 +64,10 @@ tui-test.generated_config_contract() {
 		return 1
 	fi
 	rg -q "local root_dev=sda3 efi_dev=sda2 boot_dev='' rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu" "$repository_root/setup.sh"
+	rg -q 'Select installation mode' "$repository_root/setup.sh"
+	rg -q 'root_size_strategy == percent' "$repository_root/setup.sh"
+	rg -q 'Reserve partitions for Windows and Windows RE' "$repository_root/setup.sh"
+	rg -q 'tui\.password_confirm "Initial LUKS passphrase"' "$repository_root/setup.sh"
 	rg -q 'setup\.mounted_device /target' "$repository_root/setup.sh"
 	rg -q 'setup\.mounted_device /target/boot/efi' "$repository_root/setup.sh"
 	rg -q 'setup\.mounted_device /target/boot' "$repository_root/setup.sh"

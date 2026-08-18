@@ -5,9 +5,9 @@ producer and consumer before altering one.
 
 ## Execution and devices
 
-- Primary setup runs as root before first boot: from the post-Ubiquity live
-  session for Ubuntu or against the selected fresh Kali installation. Both
-  paths require manual partitioning and UEFI x86-64.
+- Primary setup runs as root before first boot from a UEFI x86-64 live session.
+  Migration consumes a fresh distribution installation; new installation owns
+  whole-disk partitioning and bootstraps the target.
 - Destructive targets must be explicit, distinct where required, real block
   devices and validated for expected type/source before mutation.
 - Root starts as unencrypted Btrfs mounted at `mp`; the ESP is FAT and receives
@@ -20,6 +20,12 @@ producer and consumer before altering one.
   `/target/cdrom`; successful completion leaves target mounts and mapper `root`
   open.
 - Secrets and private keys never enter logs, summaries, tests or commits.
+- New installation accepts only an unused whole disk that is not the live/root
+  source and has no mounts, swap or holders. Its exact path must be typed after
+  layout validation and before `sgdisk`.
+- `install_mode` is exactly `migration` or `new`. Windows is allowed only with
+  percentage root sizing; insufficient space returns to sizing without disk
+  mutation.
 
 ## Btrfs, boot and LUKS
 
@@ -42,6 +48,13 @@ producer and consumer before altering one.
   subvolumes while preserving `@kali`.
 - In-place encryption uses LUKS2 mapper `root`, reserves 32 MiB and identifies
   the volume by LUKS UUID in crypttab.
+- New installation creates LUKS2 directly with mapper `root` and creates the
+  same suite/data subvolumes without reencryption.
+- Kali bootstrap verifies the downloaded archive keyring against the pinned
+  official archive fingerprint; signature verification may not be disabled.
+- Ubuntu uses its archive/security mirrors and `main restricted universe
+  multiverse`; Kali uses only `kali-rolling` with `main contrib non-free
+  non-free-firmware`. Their mirrors and archive keyrings must never be mixed.
 - `iter_time` is a positive Argon2id calibration target in milliseconds, not a
   literal iteration count.
 - Preserve password/recovery access and non-TPM keyslots.
@@ -59,6 +72,8 @@ producer and consumer before altering one.
 - Persistence is a separate trailing ext4 partition labelled `writable`; no
   file-backed persistence may be introduced.
 - Rescue and persistence remain outside root encryption.
+- New installation reserves exactly 10240 MiB before the rescue installer
+  splits that range into FAT live and trailing ext4 persistence.
 
 ## Secure Boot
 
@@ -134,3 +149,5 @@ producer and consumer before altering one.
   `yes`. `sb_key_dir` remains unused.
 - Declining final wizard confirmation retains configuration and starts no
   installation work.
+- Resolved new-install device paths replace placeholders atomically after GPT
+  creation and before the repository is copied into the target.
