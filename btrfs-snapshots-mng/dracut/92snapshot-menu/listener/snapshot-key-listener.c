@@ -45,18 +45,45 @@ static volatile sig_atomic_t running = 1;
 
 static void log_kernel(const char *format, ...)
 {
+    char message[512];
     va_list arguments;
+    int formatted_length;
+    int length;
     int fd;
+
+    length = snprintf(
+        message,
+        sizeof(message),
+        "<6>snapshot-menu: listener: "
+    );
+
+    if (length < 0 || (size_t)length >= sizeof(message))
+        return;
+
+    va_start(arguments, format);
+    formatted_length = vsnprintf(
+        message + length,
+        sizeof(message) - (size_t)length,
+        format,
+        arguments
+    );
+    va_end(arguments);
+
+    if (formatted_length < 0)
+        return;
+
+    length += formatted_length;
+
+    if ((size_t)length >= sizeof(message) - 1U)
+        length = (int)sizeof(message) - 2;
+
+    message[length++] = '\n';
 
     fd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
     if (fd < 0)
         return;
 
-    dprintf(fd, "<6>snapshot-menu: listener: ");
-    va_start(arguments, format);
-    vdprintf(fd, format, arguments);
-    va_end(arguments);
-    dprintf(fd, "\n");
+    (void)write(fd, message, (size_t)length);
     close(fd);
 }
 
