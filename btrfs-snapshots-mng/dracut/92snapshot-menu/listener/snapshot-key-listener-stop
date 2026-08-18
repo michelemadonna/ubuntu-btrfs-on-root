@@ -34,8 +34,6 @@ result_ticks="${SNAPSHOT_TRIGGER_RESULT_TICKS:-$DEFAULT_RESULT_TICKS}"
 probe_ticks="${SNAPSHOT_TRIGGER_PROBE_TICKS:-$DEFAULT_PROBE_TICKS}"
 menu_tty="${TTY:-$DEFAULT_TTY}"
 plymouth_key_fallback="${SNAPSHOT_PLYMOUTH_KEY_FALLBACK:-no}"
-input_grab="${SNAPSHOT_INPUT_GRAB:-no}"
-keep_enabled_message="${SNAPSHOT_KEEP_ENABLED_MESSAGE:-no}"
 
 #
 # ------------------------------------------------------------
@@ -75,24 +73,6 @@ yes | true | 1)
 	;;
 *)
 	plymouth_key_fallback=no
-	;;
-esac
-
-case "$input_grab" in
-yes | true | 1)
-	input_grab=yes
-	;;
-*)
-	input_grab=no
-	;;
-esac
-
-case "$keep_enabled_message" in
-yes | true | 1)
-	keep_enabled_message=yes
-	;;
-*)
-	keep_enabled_message=no
 	;;
 esac
 
@@ -137,8 +117,6 @@ fi
 
 plymouth_active=0
 current_message=""
-plymouth_keys=""
-plymouth_keys_label=""
 
 if [ "$silent_mode" -eq 0 ] &&
 	command -v plymouth >/dev/null 2>&1 &&
@@ -147,22 +125,8 @@ if [ "$silent_mode" -eq 0 ] &&
 	plymouth_active=1
 fi
 
-if [ "$plymouth_key_fallback" = yes ]; then
-	case "$trigger" in
-	CTRL+B | CONTROL+B)
-		plymouth_keys="$(printf '\002')"
-		plymouth_keys_label=CTRL+B
-		;;
-	*)
-		plymouth_key_fallback=no
-		snapshot-key-listener-stop.log \
-			"Plymouth key fallback disabled for unsupported trigger=${trigger}"
-		;;
-	esac
-fi
-
 snapshot-key-listener-stop.log \
-	"started trigger=${trigger} window_ticks=${window_ticks} result_ticks=${result_ticks} plymouth_active=${plymouth_active} input_grab=${input_grab} plymouth_key_fallback=${plymouth_key_fallback} marker_present=$([ -e "$MARKER" ] && printf yes || printf no)"
+	"started trigger=${trigger} window_ticks=${window_ticks} result_ticks=${result_ticks} plymouth_active=${plymouth_active} plymouth_key_fallback=${plymouth_key_fallback} marker_present=$([ -e "$MARKER" ] && printf yes || printf no)"
 
 #
 # ------------------------------------------------------------
@@ -222,7 +186,6 @@ snapshot-key-listener-stop.show_message() {
 #
 
 listener_pid=""
-listener_owned=0
 plymouth_watch_pid=""
 
 snapshot-key-listener-stop.stop_plymouth_watch() {
@@ -260,9 +223,7 @@ snapshot-key-listener-stop.stop_listener() {
 	fi
 
 	if [ -n "$listener_pid" ]; then
-		if [ "$listener_owned" -eq 0 ]; then
-			listener_status="adopted"
-		elif wait "$listener_pid" 2>/dev/null; then
+		if wait "$listener_pid" 2>/dev/null; then
 			listener_status=0
 		else
 			listener_status=$?
@@ -273,8 +234,7 @@ snapshot-key-listener-stop.stop_listener() {
 		"listener finished status=${listener_status} marker_present=$([ -e "$MARKER" ] && printf yes || printf no)"
 
 	listener_pid=""
-	listener_owned=0
-	rm -f "$PIDFILE" /run/snapshot-key-listener.ready
+	rm -f "$PIDFILE"
 }
 
 #
@@ -303,61 +263,33 @@ trap snapshot-key-listener-stop.cleanup_and_exit HUP INT TERM
 # detected during this boot.
 #
 
-if [ -s "$PIDFILE" ]; then
-	IFS= read -r listener_pid <"$PIDFILE"
+rm -f "$PIDFILE"
 
-	case "$listener_pid" in
-	'' | *[!0-9]*)
-		listener_pid=""
-		;;
-	esac
+if [ ! -e "$MARKER" ] &&
+	[ -x "$LISTENER" ]; then
 
-	if [ -n "$listener_pid" ] &&
-		kill -0 "$listener_pid" 2>/dev/null; then
+	"$LISTENER" "$trigger" \
+		</dev/null \
+		>/dev/null \
+		2>&1 &
 
-		snapshot-key-listener-stop.log \
-			"adopted early listener pid=${listener_pid}"
-	else
-		listener_pid=""
-		rm -f "$PIDFILE" /run/snapshot-key-listener.ready
-	fi
-fi
-
-if [ -n "$listener_pid" ]; then
-	:
+	listener_pid=$!
+	snapshot-key-listener-stop.log \
+		"listener started pid=${listener_pid}"
 elif [ -e "$MARKER" ]; then
 	snapshot-key-listener-stop.log \
 		"listener not started because request marker already exists"
-elif [ -x "$LISTENER" ]; then
-
-	if [ "$input_grab" = yes ]; then
-		"$LISTENER" "$trigger" --grab \
-			</dev/null \
-			>/dev/null \
-			2>&1 &
-	else
-		"$LISTENER" "$trigger" \
-			</dev/null \
-			>/dev/null \
-			2>&1 &
-	fi
-
-	listener_pid=$!
-	listener_owned=1
-	snapshot-key-listener-stop.log \
-		"listener started pid=${listener_pid}"
 else
 	snapshot-key-listener-stop.log \
 		"listener not started because executable is missing"
 fi
 
-if [ "$input_grab" = no ] &&
-	[ "$plymouth_key_fallback" = yes ] &&
+if [ "$plymouth_key_fallback" = yes ] &&
 	[ "$plymouth_active" -eq 1 ] &&
 	[ ! -e "$MARKER" ]; then
 
 	plymouth watch-keystroke \
-		--keys="$plymouth_keys" \
+		--keys="bB" \
 		--command="touch ${MARKER}" \
 		</dev/null \
 		>/dev/null \
@@ -365,7 +297,7 @@ if [ "$input_grab" = no ] &&
 
 	plymouth_watch_pid=$!
 	snapshot-key-listener-stop.log \
-		"Plymouth key fallback started pid=${plymouth_watch_pid} keys=${plymouth_keys_label}"
+		"Plymouth key fallback started pid=${plymouth_watch_pid} keys=bB"
 fi
 
 #
@@ -494,14 +426,7 @@ if [ "$result_ticks" -gt 0 ]; then
 	done
 fi
 
-if [ -e "$MARKER" ] &&
-	[ "$keep_enabled_message" = yes ]; then
-
-	snapshot-key-listener-stop.log \
-		"enabled message retained for cryptsetup prompt"
-else
-	snapshot-key-listener-stop.hide_message
-fi
+snapshot-key-listener-stop.hide_message
 
 if [ "$plymouth_active" -eq 0 ] &&
 	[ -c "$menu_tty" ]; then

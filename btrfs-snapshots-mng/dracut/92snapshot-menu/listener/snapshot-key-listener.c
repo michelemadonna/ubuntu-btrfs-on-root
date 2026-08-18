@@ -19,7 +19,6 @@
 
 #define MARKER_FILE "/run/snapshot-menu-requested"
 #define PID_FILE    "/run/snapshot-key-listener.pid"
-#define READY_FILE  "/run/snapshot-key-listener.ready"
 
 #define BITS_PER_LONG (sizeof(unsigned long) * 8U)
 #define BIT_WORD(bit) ((bit) / BITS_PER_LONG)
@@ -40,7 +39,6 @@ struct trigger_key {
 static struct input_device devices[MAX_INPUT_DEVICES];
 static struct trigger_key trigger_keys[MAX_TRIGGER_KEYS];
 static size_t trigger_key_count = 0;
-static bool grab_input_devices = false;
 
 static volatile sig_atomic_t running = 1;
 
@@ -111,23 +109,6 @@ static bool write_pid_file(void)
         return false;
     }
 
-    return true;
-}
-
-static bool create_ready_file(void)
-{
-    int fd;
-
-    fd = open(
-        READY_FILE,
-        O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
-        0600
-    );
-
-    if (fd < 0)
-        return false;
-
-    close(fd);
     return true;
 }
 
@@ -542,12 +523,8 @@ static void close_input_device(unsigned int index)
     if (index >= MAX_INPUT_DEVICES)
         return;
 
-    if (devices[index].fd >= 0) {
-        if (grab_input_devices)
-            ioctl(devices[index].fd, EVIOCGRAB, 0);
-
+    if (devices[index].fd >= 0)
         close(devices[index].fd);
-    }
 
     devices[index].fd = -1;
 
@@ -613,11 +590,6 @@ static bool open_input_device(unsigned int number)
         return false;
     }
 
-    if (grab_input_devices && ioctl(fd, EVIOCGRAB, 1) < 0) {
-        close(fd);
-        return false;
-    }
-
     if (ioctl(
             fd,
             EVIOCGKEY(sizeof(candidate.pressed)),
@@ -648,18 +620,6 @@ static bool scan_input_devices(void)
          index++) {
 
         if (open_input_device(index))
-            return true;
-    }
-
-    return false;
-}
-
-static bool has_open_input_device(void)
-{
-    unsigned int index;
-
-    for (index = 0; index < MAX_INPUT_DEVICES; index++) {
-        if (devices[index].fd >= 0)
             return true;
     }
 
@@ -759,7 +719,6 @@ static void cleanup(void)
     }
 
     unlink(PID_FILE);
-    unlink(READY_FILE);
 }
 
 int main(int argc, char *argv[])
@@ -772,11 +731,8 @@ int main(int argc, char *argv[])
     nfds_t poll_count;
     int poll_result;
     int exit_status = EXIT_SUCCESS;
-    bool ready = false;
 
     trigger_argument = argc >= 2 ? argv[1] : "ALT";
-    grab_input_devices = argc >= 3 &&
-                         strcmp(argv[2], "--grab") == 0;
 
     if (!parse_trigger(trigger_argument)) {
         fprintf(
@@ -831,15 +787,6 @@ int main(int argc, char *argv[])
                 exit_status = EXIT_FAILURE;
 
             break;
-        }
-
-        if (!ready && has_open_input_device()) {
-            if (!create_ready_file()) {
-                exit_status = EXIT_FAILURE;
-                break;
-            }
-
-            ready = true;
         }
 
         poll_count = 0;

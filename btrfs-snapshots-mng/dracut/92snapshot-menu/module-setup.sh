@@ -62,24 +62,4 @@ install() {
 	inst_simple \
 		"$moddir/systemd-cryptsetup@.service.d/50-snapshot-key-listener-stop.conf" \
 		"/etc/systemd/system/systemd-cryptsetup@.service.d/50-snapshot-key-listener-stop.conf"
-
-	if grep -qE \
-		'^SNAPSHOT_INPUT_GRAB=(yes|true|1)$' \
-		/etc/snapshot-menu.conf; then
-
-		inst_simple \
-			"$moddir/listener/snapshot-key-listener-start" \
-			"/usr/libexec/snapshot-key-listener-start"
-
-		inst_simple \
-			"$moddir/snapshot-key-listener.service" \
-			"/usr/lib/systemd/system/snapshot-key-listener.service"
-
-		mkdir -p \
-			"$initdir/etc/systemd/system/sysinit.target.wants"
-
-		ln -sfn \
-			/usr/lib/systemd/system/snapshot-key-listener.service \
-			"$initdir/etc/systemd/system/sysinit.target.wants/snapshot-key-listener.service"
-	fi
 }
