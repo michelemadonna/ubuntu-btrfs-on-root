@@ -484,7 +484,10 @@ SNAPSHOT_TRIGGER_RESULT_TICKS=0
 
 `PAGE_SIZE` sets the rows per page. `DESCRIPTION_MAX_LENGTH` limits displayed
 Snapper descriptions and is capped at 40 characters. `SNAPSHOT_TRIGGER` selects
-the early-boot key combination. The window and result values use 100 ms ticks:
+the early-boot key combination. Both Ubuntu and Kali default to `Alt+B`. Kali
+temporarily grabs eligible input devices during this window so Plymouth cannot
+interpret Alt as Escape; input is released before cryptsetup prompts. The window
+and result values use 100 ms ticks:
 `50` gives a five-second invitation, while a result value of `0` adds no final
 delay. A zero trigger window hides the countdown but retains a short held-key
 probe. Page size and description length must be positive; timing values must be

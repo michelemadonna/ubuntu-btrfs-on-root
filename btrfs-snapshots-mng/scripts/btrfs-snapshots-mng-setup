@@ -37,6 +37,7 @@ btrfs-snapshots-mng-setup.validate_configuration() {
 btrfs-snapshots-mng-setup.render_base_config() {
 	local root_subvolume=$1
 	local distribution_type=${2:-${suite_type:-ubuntu}}
+	local snapshot_trigger=ALT+B
 
 	cat <<-EOF
 		ROOT_SUBVOL="${root_subvolume}"
@@ -48,14 +49,15 @@ btrfs-snapshots-mng-setup.render_base_config() {
 		SNAPSHOT_CMDLINE="/etc/cmdline.d/99-snapshot.conf"
 		PAGE_SIZE=20
 		DESCRIPTION_MAX_LENGTH=24
-		SNAPSHOT_TRIGGER="ALT+B"
+		SNAPSHOT_TRIGGER="${snapshot_trigger}"
 		SNAPSHOT_TRIGGER_WINDOW_TICKS=50
 		SNAPSHOT_TRIGGER_RESULT_TICKS=0
 	EOF
 
 	if [[ $distribution_type == kali ]]; then
 		cat <<-'EOF'
-			SNAPSHOT_PLYMOUTH_KEY_FALLBACK=yes
+			SNAPSHOT_INPUT_GRAB=yes
+			SNAPSHOT_KEEP_ENABLED_MESSAGE=yes
 		EOF
 	fi
 }

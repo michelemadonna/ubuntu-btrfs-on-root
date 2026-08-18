@@ -127,6 +127,10 @@ if command -v plymouth >/dev/null 2>&1 &&
 
 	plymouth_active=1
 
+	plymouth hide-message \
+		--text="Snapshot menu ENABLED" \
+		>/dev/null 2>&1 || :
+
 	plymouth hide-splash \
 		>/dev/null 2>&1 || :
 fi

@@ -39,6 +39,7 @@ struct trigger_key {
 static struct input_device devices[MAX_INPUT_DEVICES];
 static struct trigger_key trigger_keys[MAX_TRIGGER_KEYS];
 static size_t trigger_key_count = 0;
+static bool grab_input_devices = false;
 
 static volatile sig_atomic_t running = 1;
 
@@ -523,8 +524,12 @@ static void close_input_device(unsigned int index)
     if (index >= MAX_INPUT_DEVICES)
         return;
 
-    if (devices[index].fd >= 0)
+    if (devices[index].fd >= 0) {
+        if (grab_input_devices)
+            ioctl(devices[index].fd, EVIOCGRAB, 0);
+
         close(devices[index].fd);
+    }
 
     devices[index].fd = -1;
 
@@ -586,6 +591,11 @@ static bool open_input_device(unsigned int number)
      * This prevents combining keys from unrelated devices.
      */
     if (!device_supports_trigger(&candidate)) {
+        close(fd);
+        return false;
+    }
+
+    if (grab_input_devices && ioctl(fd, EVIOCGRAB, 1) < 0) {
         close(fd);
         return false;
     }
@@ -733,6 +743,8 @@ int main(int argc, char *argv[])
     int exit_status = EXIT_SUCCESS;
 
     trigger_argument = argc >= 2 ? argv[1] : "ALT";
+    grab_input_devices = argc >= 3 &&
+                         strcmp(argv[2], "--grab") == 0;
 
     if (!parse_trigger(trigger_argument)) {
         fprintf(

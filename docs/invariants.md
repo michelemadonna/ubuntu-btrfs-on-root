@@ -111,10 +111,11 @@ producer and consumer before altering one.
 - `/etc/snapshot-menu.conf` defaults remain `PAGE_SIZE=20`,
   `DESCRIPTION_MAX_LENGTH=24`, `SNAPSHOT_TRIGGER="ALT+B"`,
   `SNAPSHOT_TRIGGER_WINDOW_TICKS=50`, `SNAPSHOT_TRIGGER_RESULT_TICKS=0`.
-- Kali enables `SNAPSHOT_PLYMOUTH_KEY_FALLBACK=yes` so `plymouthd`, when it
-  owns early-boot input, can forward the `B` portion of Alt+B to the selector;
-  Ubuntu keeps the evdev-only listener path.
-  Ticks are 100 ms, description width is capped at 40, and changes require UKI
+- Kali keeps `SNAPSHOT_TRIGGER="ALT+B"` and enables `SNAPSHOT_INPUT_GRAB=yes`
+  so the listener temporarily owns eligible input devices during the trigger
+  window and releases them before cryptsetup prompts. Ubuntu keeps its existing
+  non-grabbing listener path.
+- Ticks are 100 ms, description width is capped at 40, and changes require UKI
   regeneration.
 
 ## Configuration and installed artifacts

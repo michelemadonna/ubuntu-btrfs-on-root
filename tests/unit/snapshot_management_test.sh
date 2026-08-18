@@ -29,7 +29,13 @@ snapshot-management-test.base_config() {
 	kali_output="$(btrfs-snapshots-mng-setup.render_base_config '@kali/@' kali)"
 	snapshot-management-test.assert_contains \
 		"$kali_output" \
-		'SNAPSHOT_PLYMOUTH_KEY_FALLBACK=yes'
+		'SNAPSHOT_TRIGGER="ALT+B"'
+	snapshot-management-test.assert_contains \
+		"$kali_output" \
+		'SNAPSHOT_INPUT_GRAB=yes'
+	snapshot-management-test.assert_contains \
+		"$kali_output" \
+		'SNAPSHOT_KEEP_ENABLED_MESSAGE=yes'
 }
 
 snapshot-management-test.pin_config() {
@@ -56,13 +62,17 @@ snapshot-management-test.kernel_guard() {
 
 snapshot-management-test.initramfs_logging() {
 	local listener_stop="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/listener/snapshot-key-listener-stop"
+	local listener_source="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/listener/snapshot-key-listener.c"
 
 	rg -Fq "snapshot-menu: listener-stop:" "$listener_stop"
 	rg -Fq "listener finished status=" "$listener_stop"
 	rg -Fq "snapshot menu requested" "$listener_stop"
 	rg -Fq "plymouth watch-keystroke" "$listener_stop"
 	rg -Fq "Plymouth splash restored after trigger" "$listener_stop"
-	rg -Fq "plymouth toggle-details" "$listener_stop"
+	rg -Fq "plymouth_keys=\"\$(printf '\\002')\"" "$listener_stop"
+	rg -Fq '"$LISTENER" "$trigger" --grab' "$listener_stop"
+	rg -Fq 'EVIOCGRAB, 1' "$listener_source"
+	rg -Fq 'EVIOCGRAB, 0' "$listener_source"
 }
 
 snapshot-management-test.run() {
