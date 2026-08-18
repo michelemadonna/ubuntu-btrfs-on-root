@@ -80,7 +80,7 @@ shim-setup.install_dependencies() {
 	#
 	# Try distro Shim first.
 	#
-	if ! dpkg-query -W -f='${Status}' shim-signed \
+	if [[ ${suite_type:-ubuntu} != kali ]] && ! dpkg-query -W -f='${Status}' shim-signed \
 		2>/dev/null |
 		grep -q 'install ok installed'; then
 

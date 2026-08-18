@@ -164,7 +164,7 @@ btrfs-root-setup.run() {
 		log.die "boot_dev must be empty or a device name relative to /dev."
 	[[ -z $boot_dev || ($boot_dev != "$root_dev" && $boot_dev != "$efi_dev") ]] ||
 		log.die "boot_dev must be distinct from root_dev and efi_dev."
-	common.require_commands awk btrfs cmp cp install mktemp mount mountpoint umount mv rm find cryptsetup lsblk tr blkid fatlabel findmnt grep readlink sed paste sync
+	common.require_commands awk btrfs cmp cp install mktemp mount mountpoint umount mv rm find cryptsetup lsblk tr blkid fatlabel findmnt grep readlink sed paste sync rsync
 	if [[ $enlarge == yes ]]; then
 		common.require_commands parted
 	fi

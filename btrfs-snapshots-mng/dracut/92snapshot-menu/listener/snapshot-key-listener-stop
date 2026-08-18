@@ -6,11 +6,16 @@ LISTENER="/usr/libexec/snapshot-key-listener"
 PIDFILE="/run/snapshot-key-listener.pid"
 MARKER="/run/snapshot-menu-requested"
 
-DEFAULT_TRIGGER="ALT"
+DEFAULT_TRIGGER="B"
 DEFAULT_WINDOW_TICKS=20
 DEFAULT_RESULT_TICKS=10
 DEFAULT_PROBE_TICKS=5
 DEFAULT_TTY="/dev/tty1"
+
+snapshot-key-listener-stop.log() {
+	printf '<6>snapshot-menu: listener-stop: %s\n' "$1" \
+		2>/dev/null >/dev/kmsg || :
+}
 
 #
 # ------------------------------------------------------------
@@ -28,6 +33,7 @@ window_ticks="${SNAPSHOT_TRIGGER_WINDOW_TICKS:-$DEFAULT_WINDOW_TICKS}"
 result_ticks="${SNAPSHOT_TRIGGER_RESULT_TICKS:-$DEFAULT_RESULT_TICKS}"
 probe_ticks="${SNAPSHOT_TRIGGER_PROBE_TICKS:-$DEFAULT_PROBE_TICKS}"
 menu_tty="${TTY:-$DEFAULT_TTY}"
+plymouth_key_fallback="${SNAPSHOT_PLYMOUTH_KEY_FALLBACK:-no}"
 
 #
 # ------------------------------------------------------------
@@ -60,6 +66,15 @@ fi
 if [ ! -c "$menu_tty" ]; then
 	menu_tty="/dev/console"
 fi
+
+case "$plymouth_key_fallback" in
+yes | true | 1)
+	plymouth_key_fallback=yes
+	;;
+*)
+	plymouth_key_fallback=no
+	;;
+esac
 
 #
 # A zero interactive window must still allow the C listener to
@@ -109,6 +124,9 @@ if [ "$silent_mode" -eq 0 ] &&
 
 	plymouth_active=1
 fi
+
+snapshot-key-listener-stop.log \
+	"started trigger=${trigger} window_ticks=${window_ticks} result_ticks=${result_ticks} plymouth_active=${plymouth_active} plymouth_key_fallback=${plymouth_key_fallback} marker_present=$([ -e "$MARKER" ] && printf yes || printf no)"
 
 #
 # ------------------------------------------------------------
@@ -168,11 +186,30 @@ snapshot-key-listener-stop.show_message() {
 #
 
 listener_pid=""
+plymouth_watch_pid=""
+
+snapshot-key-listener-stop.stop_plymouth_watch() {
+	if [ -n "$plymouth_watch_pid" ] &&
+		kill -0 "$plymouth_watch_pid" 2>/dev/null; then
+
+		kill -TERM "$plymouth_watch_pid" 2>/dev/null || :
+	fi
+
+	if [ -n "$plymouth_watch_pid" ]; then
+		wait "$plymouth_watch_pid" 2>/dev/null || :
+	fi
+
+	plymouth_watch_pid=""
+}
 
 snapshot-key-listener-stop.stop_listener() {
+	listener_status="not-started"
+
 	if [ -n "$listener_pid" ] &&
 		kill -0 "$listener_pid" 2>/dev/null; then
 
+		snapshot-key-listener-stop.log \
+			"stopping listener pid=${listener_pid}"
 		kill -TERM "$listener_pid" 2>/dev/null || :
 
 		count=0
@@ -186,8 +223,15 @@ snapshot-key-listener-stop.stop_listener() {
 	fi
 
 	if [ -n "$listener_pid" ]; then
-		wait "$listener_pid" 2>/dev/null || :
+		if wait "$listener_pid" 2>/dev/null; then
+			listener_status=0
+		else
+			listener_status=$?
+		fi
 	fi
+
+	snapshot-key-listener-stop.log \
+		"listener finished status=${listener_status} marker_present=$([ -e "$MARKER" ] && printf yes || printf no)"
 
 	listener_pid=""
 	rm -f "$PIDFILE"
@@ -203,6 +247,7 @@ snapshot-key-listener-stop.stop_listener() {
 # shellcheck disable=SC2329
 snapshot-key-listener-stop.cleanup_and_exit() {
 	snapshot-key-listener-stop.stop_listener
+	snapshot-key-listener-stop.stop_plymouth_watch
 	snapshot-key-listener-stop.hide_message
 	exit 0
 }
@@ -229,6 +274,30 @@ if [ ! -e "$MARKER" ] &&
 		2>&1 &
 
 	listener_pid=$!
+	snapshot-key-listener-stop.log \
+		"listener started pid=${listener_pid}"
+elif [ -e "$MARKER" ]; then
+	snapshot-key-listener-stop.log \
+		"listener not started because request marker already exists"
+else
+	snapshot-key-listener-stop.log \
+		"listener not started because executable is missing"
+fi
+
+if [ "$plymouth_key_fallback" = yes ] &&
+	[ "$plymouth_active" -eq 1 ] &&
+	[ ! -e "$MARKER" ]; then
+
+	plymouth watch-keystroke \
+		--keys="bB" \
+		--command="touch ${MARKER}" \
+		</dev/null \
+		>/dev/null \
+		2>&1 &
+
+	plymouth_watch_pid=$!
+	snapshot-key-listener-stop.log \
+		"Plymouth key fallback started pid=${plymouth_watch_pid} keys=bB"
 fi
 
 #
@@ -311,6 +380,7 @@ fi
 #
 
 snapshot-key-listener-stop.stop_listener
+snapshot-key-listener-stop.stop_plymouth_watch
 
 #
 # ------------------------------------------------------------
@@ -332,8 +402,15 @@ fi
 #
 
 if [ -e "$MARKER" ]; then
+	snapshot-key-listener-stop.log "snapshot menu requested"
+	if [ "$plymouth_active" -eq 1 ]; then
+		plymouth show-splash >/dev/null 2>&1 || :
+		snapshot-key-listener-stop.log \
+			"Plymouth splash restored after trigger"
+	fi
 	snapshot-key-listener-stop.show_message "Snapshot menu ENABLED"
 else
+	snapshot-key-listener-stop.log "snapshot menu not requested"
 	if [ "$result_ticks" -gt 0 ]; then
 		snapshot-key-listener-stop.show_message "Snapshot menu not requested"
 	fi
@@ -349,7 +426,12 @@ if [ "$result_ticks" -gt 0 ]; then
 	done
 fi
 
-snapshot-key-listener-stop.hide_message
+if [ -e "$MARKER" ]; then
+	snapshot-key-listener-stop.log \
+		"enabled message retained until pre-mount"
+else
+	snapshot-key-listener-stop.hide_message
+fi
 
 if [ "$plymouth_active" -eq 0 ] &&
 	[ -c "$menu_tty" ]; then

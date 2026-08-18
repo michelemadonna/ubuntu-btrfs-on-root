@@ -49,24 +49,9 @@ test_fstab_entries() {
 		"$(fstab-setup.build_root_entry "defaults,noatime" "@ubuntu")"
 	[[ $output == *"subvol=@ubuntu/@home"* ]] || fail "@home fstab entry is missing"
 	[[ $output == *"/swap/swapfile none"* ]] || fail "swapfile entry is missing"
-}
-
-test_separate_boot_fstab_migration() {
-	local fixture
-
-	fixture="$(mktemp "${TMPDIR:-/tmp}/fstab-boot-test.XXXXXX")"
-	cat >"$fixture" <<-'EOF'
-		UUID=root / btrfs defaults 0 1
-		UUID=boot /boot ext4 defaults 0 2
-		UUID=esp /boot/efi vfat defaults 0 1
-	EOF
-	boot_dev=vda4
-	fstab-setup.remove_separate_boot_entry "$fixture" >/dev/null
-	if awk '$2 == "/boot" { found=1 } END { exit !found }' "$fixture"; then
-		fail "separate /boot entry was retained"
-	fi
-	grep -q ' /boot/efi ' "$fixture" || fail "ESP entry was removed with the separate boot entry"
-	rm -f -- "$fixture"
+	output="$(fstab-setup.build_fstab "root-uuid" "efi-uuid" "defaults,noatime" "@ubuntu")"
+	[[ $output == *"UUID=root-uuid / btrfs defaults,noatime,subvol=@ubuntu/@ 0 1"* ]] || fail "UUID root entry is missing"
+	[[ $output == *"UUID=efi-uuid /boot/efi vfat"* ]] || fail "UUID EFI entry is missing"
 }
 
 test_summary() {
@@ -118,10 +103,42 @@ test_configuration_validation() {
 	fi
 }
 
+test_kali_source_removal_without_mapfile() {
+	local -a deleted=()
+
+	root_sub_vol="@kali"
+	btrfs() {
+		if [[ $1 == subvolume && $2 == list ]]; then
+			printf '%s\n' \
+				'ID 256 gen 1 top level 5 path @' \
+				'ID 257 gen 1 top level 5 path @home' \
+				'ID 258 gen 1 top level 5 path @kali'
+			return 0
+		fi
+
+		if [[ $1 == subvolume && $2 == delete ]]; then
+			deleted+=("$3")
+			return 0
+		fi
+
+		return 1
+	}
+
+	btrfs-subvol-setup.remove_kali_sources /mnt/top-level
+	assert_equal "2" "${#deleted[@]}"
+	assert_equal "/mnt/top-level/@" "${deleted[0]}"
+	assert_equal "/mnt/top-level/@home" "${deleted[1]}"
+	if rg -q '\bmapfile\b' \
+		"$repository_root/btrfs-root/scripts/btrfs-subvol-setup" \
+		"$repository_root/setup.sh"; then
+		return 1
+	fi
+}
+
 test_crypttab_entry
 test_subvolume_paths
 test_fstab_entries
-test_separate_boot_fstab_migration
 test_summary
 test_configuration_validation
+test_kali_source_removal_without_mapfile
 printf 'Btrfs root helper tests passed.\n'

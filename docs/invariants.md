@@ -5,12 +5,15 @@ producer and consumer before altering one.
 
 ## Execution and devices
 
-- Primary setup runs as root in the post-Ubiquity Ubuntu live session, before
-  reboot, with manual partitioning and UEFI x86-64.
+- Primary setup runs as root before first boot: from the post-Ubiquity live
+  session for Ubuntu or against the selected fresh Kali installation. Both
+  paths require manual partitioning and UEFI x86-64.
 - Destructive targets must be explicit, distinct where required, real block
   devices and validated for expected type/source before mutation.
 - Root starts as unencrypted Btrfs mounted at `mp`; the ESP is FAT and receives
   label `ESP` without reformatting.
+- Kali mode may start with no filesystems mounted; setup mounts the configured
+  root, ESP and optional separate `/boot` before conversion.
 - An exact separate mount at `/target/boot` is optional and never created for
   discovery; the ESP path still remains `/target/boot/efi`.
 - `setup.prepare_target` preserves target mounts except conditional
@@ -29,7 +32,14 @@ producer and consumer before altering one.
 - Do not delete original top-level data until root snapshot and relocations
   succeed.
 - A configured separate boot is copied and validated in `@$suite/@/boot` before
-  unmount; remove `/boot` from fstab but retain `/boot/efi`.
+  unmount; regenerated fstab contains `/boot/efi` but no separate `/boot`.
+- `fstab` is regenerated from scratch using the UUIDs of the encrypted Btrfs
+  filesystem and ESP, then includes the configured root, data and swap
+  subvolume entries.
+- Kali conversion validates `@`, `@home`, `@root`, `@usr@local`, `@var@log`
+  and `@.snapshots`; it copies their root, home, root-account, local, cache and
+  log data into the `@kali` layout, then deletes migrated top-level source
+  subvolumes while preserving `@kali`.
 - In-place encryption uses LUKS2 mapper `root`, reserves 32 MiB and identifies
   the volume by LUKS UUID in crypttab.
 - `iter_time` is a positive Argon2id calibration target in milliseconds, not a
@@ -80,7 +90,8 @@ producer and consumer before altering one.
 - Reject and remove a UKI that fails signature, required PE section, embedded
   version or configured initramfs-content validation.
 - Keep `tpm2-pin=yes` in the command line for both PIN and PINless TPM modes.
-- `generate-uki` remains standalone after repository removal.
+- `generate-uki` remains standalone at `/usr/sbin/generate-uki` after
+  repository removal.
 
 ## TPM
 
@@ -91,19 +102,26 @@ producer and consumer before altering one.
   tokens and requires explicit wipe acknowledgement.
 - PCR-policy or key changes may invalidate unlock and require documented
   resealing.
-- `tpm-enroll`, `tpm-reseal` and `tpm-status` remain standalone.
+- `tpm-enroll`, `tpm-reseal` and `tpm-status` remain standalone in `/usr/sbin`.
 
 ## Snapshot boot
 
 - No request, cancellation or any selector failure falls back to normal boot.
-- Release input devices before cryptsetup may prompt.
+- Stop the listener and close its evdev descriptors before cryptsetup may
+  prompt.
 - Discover after LUKS availability and before real-root mount.
 - Mount top level and selected snapshot read-only; runtime writes are ephemeral.
 - Never delete or mutate a snapshot during validation.
 - `/etc/snapshot-menu.conf` defaults remain `PAGE_SIZE=20`,
-  `DESCRIPTION_MAX_LENGTH=24`, `SNAPSHOT_TRIGGER="ALT+B"`,
+  `DESCRIPTION_MAX_LENGTH=24`, `SNAPSHOT_TRIGGER="B"`,
   `SNAPSHOT_TRIGGER_WINDOW_TICKS=50`, `SNAPSHOT_TRIGGER_RESULT_TICKS=0`.
-  Ticks are 100 ms, description width is capped at 40, and changes require UKI
+- The generated configuration records `SUITE`; every current-system label and
+  snapshot-menu title is derived from it rather than a distribution literal.
+- Ubuntu and Kali use the same evdev B/b trigger path; generated configurations
+  do not enable the Plymouth character fallback.
+- Kali must not use a trigger containing `Alt`, because it makes Plymouth leave
+  the graphical splash and moves LUKS prompting to the text console.
+- Ticks are 100 ms, description width is capped at 40, and changes require UKI
   regeneration.
 
 ## Configuration and installed artifacts

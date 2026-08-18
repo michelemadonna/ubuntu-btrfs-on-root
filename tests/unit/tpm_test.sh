@@ -76,6 +76,10 @@ tpm-test.runtime_commands_are_standalone() {
 			return 1
 		fi
 	done
+
+	rg -Fq '/usr/sbin/tpm-enroll' "$repository_root/tpm/scripts/install-tpm"
+	rg -Fq '/usr/sbin/tpm-reseal' "$repository_root/tpm/scripts/install-tpm"
+	rg -Fq '/usr/sbin/tpm-status' "$repository_root/tpm/scripts/install-tpm"
 }
 
 tpm-test.run() {

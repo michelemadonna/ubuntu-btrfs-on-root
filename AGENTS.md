@@ -49,10 +49,11 @@ When a task requires substantial reasoning, delegate that portion to the
 
 ## Scope and safety
 
-`setup.sh` runs as root from the same Ubuntu live session in which Ubiquity has
-just completed a manual installation. The expected mounted target is `/target`,
-the ESP is `/target/boot/efi`, the live source is `/cdrom`, and an optional
-separate boot may be mounted at `/target/boot`.
+`setup.sh` runs as root against a fresh Ubuntu or Kali installation. Ubuntu is
+converted from the same live session after Ubiquity, with the target normally
+mounted at `/target`; Kali may start with its configured filesystems unmounted.
+The target ESP is `/target/boot/efi`, an optional separate boot is
+`/target/boot`, and `/cdrom` is the Ubuntu rescue source.
 
 The default devices are an optional rescue `/dev/sda1`, ESP `/dev/sda2` and
 unencrypted Btrfs root `/dev/sda3`. Configuration may override them. Root
@@ -102,23 +103,11 @@ firmware, LUKS tokens, TPM state and snapshots.
 
 ## Change-sensitive contracts
 
-The complete contract is in `docs/invariants.md`. In particular:
-
-- validate exact devices, filesystem types and mounts before mutation;
-- `setup.prepare_target` preserves target mounts, except that `/target/cdrom`
-  is conditionally unmounted; successful setup leaves target mounts and the
-  `root` mapper open;
-- optional `boot_dev` is copied into encrypted root before its old `/boot`
-  fstab entry is removed;
-- rescue is optional; suggest an eligible `boot_dev`, otherwise ask for a
-  distinct rescue partition only when rescue is enabled;
-- suite roots are sibling containers such as `@noble/@` and `@resolute/@`;
-- Secure Boot choice is explicit (`sbctl` or `mok`) and never auto-falls back;
-- default direct enrollment is exactly `sbctl enroll-keys --microsoft`;
-  partial append behavior requires `EXPERIMENTAL_SBCTL_APPEND=true`;
-- only public certificates belong in `$ESP/EFI/keys`;
-- keep `tpm2-pin=yes` in the UKI command line even for PINless enrollment;
-- snapshot boot is read-only with ephemeral writes and normal boot fallback.
+The complete contract is in `docs/invariants.md`; do not duplicate it here.
+Before changing storage, Secure Boot, UKI, TPM or snapshot behavior, trace the
+relevant invariant to every producer, installed artifact and consumer. Treat
+device validation, recoverable LUKS access and verified boot artifacts as hard
+preconditions rather than cleanup work.
 
 ## Configuration
 
@@ -126,20 +115,22 @@ The complete contract is in `docs/invariants.md`. In particular:
 secret-bearing. `setup.conf.example` is reference data only; wizard defaults
 remain built into `setup.sh`.
 
-The wizard discovers mounted target devices, groups prompts, uses hidden secret
-input and yes/no toggles, validates its generated file, displays a non-secret
-summary and requires confirmation before installation. It does not prompt for
-`mp`, `keyslot_size`, `btrfs_options` or experimental sbctl append behavior.
+The wizard discovers mounted Ubuntu targets or selects Kali target partitions,
+groups prompts, uses hidden secret input and yes/no toggles, validates its
+generated file, displays a non-secret summary and requires confirmation before
+installation. It does not prompt for `mp`, `keyslot_size`, `btrfs_options` or
+experimental sbctl append behavior.
 
 Only these closed selections are supported currently:
 
-- `suite`: `resolute`, `noble`;
-- `suite_type`: `ubuntu`;
+- `suite`: `resolute`, `noble`, `kali`;
+- `suite_type`: `ubuntu`, `kali`; selecting suite `kali` forces type `kali`;
 - `secure_boot_enrollment`: `sbctl`, `mok`;
 - `secure_boot_mode`: detected `setup`, `enabled`, `disabled`, `unknown`;
 - `EXPERIMENTAL_SBCTL_APPEND`: `true`, `false`.
 
-`mok_pin` is required only for MOK. `install_rescue=no` permits an empty
+`mok_pin` is required only for MOK. Kali forces `install_rescue=no` during the
+main installation. Otherwise, `install_rescue=no` permits an empty
 `rescue_dev`; the standalone rescue action still requires one. `sb_key_dir` is
 currently unused. Preserve the repository-root `refind_themes.zip` dependency.
 

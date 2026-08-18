@@ -115,6 +115,7 @@ secure-boot-test.test_sbctl_enrollment_contract() {
 
 	rg -q '^\s*sbctl enroll-keys --microsoft$' "$script" || secure-boot-test.fail "standard sbctl enrollment command is missing"
 	rg -q 'EXPERIMENTAL_SBCTL_APPEND != true' "$script" || secure-boot-test.fail "experimental append guard is missing"
+	rg -Fq '/usr/sbin/sbctl' "$script" || secure-boot-test.fail "sbctl is not installed in /usr/sbin"
 }
 
 secure-boot-test.test_trust_path

@@ -10,6 +10,8 @@ repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
 # shellcheck disable=SC1090,SC1091
 source "$repository_root/lib/common.sh"
 
+export PATH="/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin:$PATH"
+
 # ============================================================
 # Configuration
 # ============================================================
@@ -76,21 +78,15 @@ sbctl-setup.install_dependencies() {
 		findutils \
 		coreutils
 
-	#
-	# Prefer distro package.
-	#
 	if ! command -v sbctl >/dev/null 2>&1; then
+		log.info "Build sbctl version $SBCTL_VERSION from upstream source"
+		sbctl-setup.install_upstream
+	fi
 
-		log.info "Try to install sbctl from the distribution repository"
-		if apt-cache show sbctl >/dev/null 2>&1; then
-			log.info "sbctl package available in distribution repository"
-			apt-get install -y sbctl || true
-		else
-			log.info "sbctl package unavailable in distribution repository"
-			log.info "Build sbctl version $SBCTL_VERSION from upstream source"
-			sbctl-setup.install_upstream
-		fi
-
+	if [[ -x /usr/local/sbin/sbctl ]]; then
+		log.info "Move the upstream sbctl executable into /usr/sbin"
+		install -m 0755 /usr/local/sbin/sbctl /usr/sbin/sbctl
+		rm -f /usr/local/sbin/sbctl
 	fi
 }
 
@@ -145,7 +141,7 @@ sbctl-setup.install_upstream() {
 	install \
 		-m 0755 \
 		"$tmp/sbctl" \
-		/usr/local/sbin/sbctl
+		/usr/sbin/sbctl
 
 	rm -rf "$tmp"
 	trap - RETURN

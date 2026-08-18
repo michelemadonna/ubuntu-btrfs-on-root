@@ -14,6 +14,10 @@ shellcheck -x <file>
 shfmt -d <file>
 ```
 
+Dracut sources hook files through `/bin/sh` regardless of their shebang. Run
+`dash -n` on sourced hooks as well; function names and syntax must therefore be
+accepted by Dash even when the hook file declares Bash.
+
 Run relevant tests directly from the repository root:
 
 ```bash
@@ -35,10 +39,10 @@ does not execute the unit tests.
 | --- | --- |
 | `common_test.sh` | framework and logging |
 | `tui_test.sh` | prompts, defaults and generated configuration contract |
-| `btrfs_root_test.sh` | subvolume paths, fstab and storage summaries |
+| `btrfs_root_test.sh` | subvolume paths, Kali cleanup, fstab and storage summaries |
 | `rescue_test.sh` | sizing, persistence and optional orchestration |
 | `secure_boot_test.sh` | trust-path selection, certificate export and sbctl contract |
-| `snapshot_management_test.sh` | menu configuration and fallback behavior |
+| `snapshot_management_test.sh` | distro menu configuration, B/b trigger and installed artifacts |
 | `uki_test.sh` | command line, UKI and kernel-hook behavior |
 | `tpm_test.sh` | TPM configuration and enrollment argv |
 
@@ -59,6 +63,15 @@ Safe checks may inspect temporary or prebuilt artifacts:
 
 Post-summary validation may inspect current artifacts, but must not enroll keys,
 alter tokens, delete snapshots or modify firmware.
+
+Snapshot-menu initramfs diagnostics are written to the kernel journal with the
+`snapshot-menu:` prefix. They include compatible evdev discovery, matching
+trigger events, marker creation, root-device resolution, menu result and
+Plymouth restoration. After a boot, inspect them with:
+
+```bash
+journalctl -b -k --no-pager | grep 'snapshot-menu:'
+```
 
 ## External tools used by production scripts
 
@@ -82,7 +95,8 @@ Package names installed/pre-downloaded by setup include providers such as
 `dosfstools`, `e2fsprogs`, `sbsigntool`, `systemd-ukify`, `tpm2-tools`,
 `tpm2-tss`, `refind`, `fwupd`, `snapper`, `inotify-tools`, `dracut` and build
 dependencies.
-Availability still depends on the selected Ubuntu suite and fallback paths.
+Availability still depends on the selected distribution, suite and dependency
+fallback paths.
 
 ## Development tools used for repository validation
 
@@ -95,9 +109,11 @@ Availability still depends on the selected Ubuntu suite and fallback paths.
 ## Destructive integration test
 
 Use only a disposable UEFI VM or explicitly allocated hardware. Reproduce the
-post-Ubiquity live-session state, use non-production credentials and exercise:
+post-Ubiquity Ubuntu state or a fresh Kali target, use non-production
+credentials and exercise:
 
-1. Btrfs conversion, separate-boot migration and LUKS password recovery;
+1. Ubuntu snapshot conversion, Kali top-level migration, separate-boot
+   migration and LUKS password recovery;
 2. optional rescue disabled, separate rescue, and accepted/declined boot reuse;
 3. both Secure Boot paths, including sbctl outside Setup Mode and MOK reboot;
 4. kernel install/removal and rEFInd newest/submenu behavior;

@@ -25,9 +25,14 @@ tui-test.with_input() {
 }
 
 tui-test.input_and_password_defaults() {
-	local output
+	local output prompt
 	output="$(tui-test.with_input $'\n' tui.input "Value" "default" 2>/dev/null)"
 	tui-test.assert_equal default "$output"
+	prompt="$(tui-test.with_input $'secret\n' tui.password "Password" "fallback" 2>&1 >/dev/null)"
+	[[ $prompt == *'Password [default: ********]: ******'* ]] || {
+		printf 'Password prompt must mask the default and entered value.\n' >&2
+		return 1
+	}
 	output="$(tui-test.with_input $'secret\n' tui.password "Password" "fallback" 2>/dev/null)"
 	tui-test.assert_equal secret "$output"
 }
@@ -81,9 +86,10 @@ tui-test.generated_config_contract() {
 	rg -q 'setup\.write_config_value "\$temporary_config" mp "\$mp"' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" keyslot_size "\$keyslot_size"' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" btrfs_options "\$btrfs_options"' "$repository_root/setup.sh"
-	rg -q "'resolute|Ubuntu Resolute' 'noble|Ubuntu Noble'" "$repository_root/setup.sh"
+	rg -q "'resolute|Ubuntu Resolute' 'noble|Ubuntu Noble' 'kali|Kali Linux'" "$repository_root/setup.sh"
 	rg -q 'not suitable for converting an existing production system' "$repository_root/setup.sh"
-	rg -q "'ubuntu|Ubuntu'" "$repository_root/setup.sh"
+	rg -q "'ubuntu|Ubuntu' 'kali|Kali Linux'" "$repository_root/setup.sh"
+	rg -q 'suite_type == kali' "$repository_root/setup.sh"
 	rg -q 'log\.section "Storage configuration"' "$repository_root/setup.sh"
 	rg -q 'log\.section "Distribution configuration"' "$repository_root/setup.sh"
 	rg -q 'log\.section "Encryption and boot security"' "$repository_root/setup.sh"

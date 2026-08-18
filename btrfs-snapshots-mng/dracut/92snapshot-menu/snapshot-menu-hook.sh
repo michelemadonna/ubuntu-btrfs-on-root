@@ -9,6 +9,11 @@ SNAPSHOT_MENU_DONE="/run/snapshot-menu-done"
 SNAPSHOT_MENU_REQUESTED="/run/snapshot-menu-requested"
 SNAPSHOT_SELECTION="/run/snapshot-menu-selected"
 
+snapshot_menu_hook_log() {
+	printf '<6>snapshot-menu: pre-mount: %s\n' "$1" \
+		2>/dev/null >/dev/kmsg || :
+}
+
 #
 # Dracut hooks are sourced.
 # Never use exit here.
@@ -17,12 +22,21 @@ SNAPSHOT_SELECTION="/run/snapshot-menu-selected"
 #
 # Menu already handled.
 #
-[ -e "$SNAPSHOT_MENU_DONE" ] && return 0
+if [ -e "$SNAPSHOT_MENU_DONE" ]; then
+	snapshot_menu_hook_log "skipped because completion marker exists"
+	return 0
+fi
 
 #
 # The early keyboard listener did not request the menu.
 #
-[ -e "$SNAPSHOT_MENU_REQUESTED" ] || return 0
+if [ ! -e "$SNAPSHOT_MENU_REQUESTED" ]; then
+	snapshot_menu_hook_log "skipped because request marker is absent"
+	return 0
+fi
+
+snapshot_menu_hook_log \
+	"entered with request marker present root=${root:-<unset>} dev_root=$([ -e /dev/root ] && readlink -f /dev/root 2>/dev/null || printf absent)"
 
 #
 # ------------------------------------------------------------
@@ -31,6 +45,7 @@ SNAPSHOT_SELECTION="/run/snapshot-menu-selected"
 #
 
 if [ ! -r "$SNAPSHOT_MENU_CONF" ]; then
+	snapshot_menu_hook_log "configuration is missing"
 	warn "snapshot-menu: configuration missing"
 
 	rm -f "$SNAPSHOT_MENU_REQUESTED"
@@ -66,6 +81,10 @@ if [ -z "$root_dev" ] && [ -n "${root:-}" ]; then
 	/dev/*)
 		root_dev="$root"
 		;;
+
+	UUID=*)
+		root_dev="/dev/disk/by-uuid/${root#UUID=}"
+		;;
 	esac
 fi
 
@@ -76,9 +95,13 @@ fi
 # completed: Dracut must be allowed to invoke the hook again.
 #
 if [ -z "$root_dev" ] || [ ! -b "$root_dev" ]; then
+	snapshot_menu_hook_log \
+		"root device is not ready resolved=${root_dev:-<empty>}"
 	unset root_dev
 	return 0
 fi
+
+snapshot_menu_hook_log "root device resolved to ${root_dev}"
 
 #
 # From this point onward execute only once.
@@ -104,9 +127,15 @@ if command -v plymouth >/dev/null 2>&1 &&
 
 	plymouth_active=1
 
+	plymouth hide-message \
+		--text="Snapshot menu ENABLED" \
+		>/dev/null 2>&1 || :
+
 	plymouth hide-splash \
 		>/dev/null 2>&1 || :
 fi
+
+snapshot_menu_hook_log "plymouth_active=${plymouth_active}"
 
 #
 # ------------------------------------------------------------
@@ -142,9 +171,13 @@ fi
 menu_rc=1
 
 if [ -x "$SNAPSHOT_MENU" ]; then
+	snapshot_menu_hook_log "starting snapshot menu"
 	"$SNAPSHOT_MENU" "$root_dev"
 	menu_rc=$?
+	snapshot_menu_hook_log \
+		"snapshot menu finished status=${menu_rc} selection_present=$([ -s "$SNAPSHOT_SELECTION" ] && printf yes || printf no)"
 else
+	snapshot_menu_hook_log "snapshot menu executable is missing"
 	warn "snapshot-menu: $SNAPSHOT_MENU is missing"
 fi
 
@@ -257,6 +290,9 @@ if [ "$plymouth_active" -eq 1 ]; then
 	plymouth show-splash \
 		>/dev/null 2>&1 || :
 fi
+
+snapshot_menu_hook_log \
+	"completed status=${menu_rc} plymouth_restored=${plymouth_active}"
 
 #
 # Menu failure is non-fatal.

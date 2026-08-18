@@ -47,7 +47,7 @@ rescue-test.setup_integration() {
 	rescue_line="$(rg -n 'setup\.install_rescue_system' "$repository_root/setup.sh" | tail -n1 | cut -d: -f1)"
 	storage_line="$(rg -n $'^\t"\$repository_root/btrfs-root/scripts/btrfs-root-setup"$' "$repository_root/setup.sh" | cut -d: -f1)"
 	((rescue_line > storage_line))
-	rg -q 'if \[\[ \$install_rescue == yes \]\]' "$repository_root/setup.sh"
+	rg -q 'if \[\[ \$install_rescue == yes && \$suite_type != kali \]\]' "$repository_root/setup.sh"
 	rg -q 'install_rescue="\$\(tui\.toggle "Create the persistent rescue system"' "$repository_root/setup.sh"
 	rg -q -- '--install-rescue-live' "$repository_root/setup.sh"
 	rg -q 'setup_action=install-rescue-live' "$repository_root/setup.sh"
@@ -58,7 +58,8 @@ rescue-test.partition_backed_persistence_contract() {
 	local installer="$repository_root/rescue/script/install-rescue-live"
 
 	rg -q 'resizepart' "$installer"
-	rg -q -- '---pretend-input-tty' "$installer"
+	rg -q "parted ---pretend-input-tty.*resizepart" "$installer"
+	rg -q "printf 'Yes\\\\n' \\| LC_ALL=C parted" "$installer"
 	rg -q 'mkpart writable ext4' "$installer"
 	rg -q 'mkfs\.ext4 -F -L writable "\$writable_dev"' "$installer"
 	if rg -q 'of=.*writable|mkfs\.ext4.*rescue_mount_dir/writable' "$installer"; then

@@ -15,6 +15,10 @@ depends() {
 # Dracut defines moddir before invoking this module API function.
 # shellcheck disable=SC2154
 install() {
+	# Kali ships the evdev input handler as a module. Without it, keyboards can
+	# drive the console while exposing no /dev/input/event* node to the listener.
+	instmods evdev
+
 	inst_multiple \
 		/bin/bash \
 		mount \

@@ -10,6 +10,8 @@ repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
 # shellcheck disable=SC1090,SC1091
 source "$repository_root/lib/common.sh"
 
+export PATH="/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin:$PATH"
+
 # ============================================================
 # Configuration
 # ============================================================
@@ -409,6 +411,23 @@ refind-setup.sign_refind() {
 # Main
 # ============================================================
 
+refind-setup.hold_boot_packages() {
+	local package
+	local -a installed_packages=()
+
+	for package in refind grub-common grub2-common grub-efi-amd64 grub-efi-amd64-bin; do
+		if dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q 'install ok installed'; then
+			installed_packages+=("$package")
+		fi
+	done
+	if ((${#installed_packages[@]} > 0)); then
+		log.info "Hold installed boot-loader packages: ${installed_packages[*]}"
+		apt-mark hold "${installed_packages[@]}"
+	else
+		log.info "No distribution boot-loader packages require an apt hold"
+	fi
+}
+
 refind-setup.run() {
 	common.require_root
 	trap refind-setup.cleanup EXIT
@@ -416,7 +435,7 @@ refind-setup.run() {
 	common.require_commands apt-get debconf-set-selections
 	printf '%s\n' "refind refind/install_to_esp boolean false" | debconf-set-selections
 	refind-setup.install_dependencies
-	common.require_commands apt-cache apt-mark find grep install mktemp readlink rm sbctl sbverify unzip
+	common.require_commands apt-cache apt-mark dpkg-query find grep install mktemp readlink rm sbctl sbverify unzip
 	refind-setup.remove_grubefi_directories
 
 	if [[ -f /etc/securebootmode.conf ]]; then
@@ -455,14 +474,7 @@ refind-setup.run() {
 
 	refind-setup.verify
 
-	apt-mark hold \
-		refind \
-		grub-common \
-		grub2-common \
-		grub-pc \
-		grub-pc-bin \
-		grub-efi-amd64 \
-		grub-efi-amd64-bin
+	refind-setup.hold_boot_packages
 
 	log.success "rEFInd installation, signing and verification completed"
 }

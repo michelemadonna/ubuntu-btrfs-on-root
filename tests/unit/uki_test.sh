@@ -37,6 +37,10 @@ uki-test.artifact_contract() {
 	rg -q '^[[:space:]]*\.linux' "$generator"
 	rg -q '\.pcrsig' "$generator"
 	rg -q '\.sbat' "$generator"
+	rg -Fq '/usr/sbin/generate-uki' "$repository_root/uki/scripts/install-uki"
+	if rg -Fq '/usr/local/sbin/generate-uki --all' "$repository_root/uki/scripts/install-uki"; then
+		return 1
+	fi
 	rg -q 'sort -Vr' "$menu_hook"
 	rg -q 'refind-menu\.generate' "$menu_hook"
 	rg -q 'ICON_TOKEN_FILE="/etc/kernel/refind-icon"' "$menu_hook"

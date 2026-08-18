@@ -1,6 +1,6 @@
 # Ubuntu Btrfs on Root
 
-This repository converts an Ubuntu system installed by Ubiquity into a
+This repository converts a fresh Ubuntu or Kali Linux installation into a
 full-disk-encryption solution with:
 
 - a LUKS2-encrypted Btrfs root;
@@ -12,9 +12,10 @@ full-disk-encryption solution with:
 - a persistent Ubuntu live rescue system on a separate partition;
 - rEFInd as the installed boot manager.
 
-This is not an installer and it is not intended to be run on an already booted
-production installation. The supported workflow starts in an Ubuntu live
-session immediately after Ubiquity finishes installing Ubuntu.
+This is not an operating-system installer and it is not intended to convert an
+existing production installation. Ubuntu setup starts in the same live session
+immediately after Ubiquity finishes. Kali setup must start from a Kali Live
+session after the fresh Kali installation has been created.
 
 > [!WARNING]
 > Setup reformats the rescue partition, restructures the Btrfs filesystem,
@@ -68,6 +69,18 @@ session. The scripts expect:
 The device names are configurable, but the repository defaults and documented
 workflow use `/dev/sda1`, `/dev/sda2` and `/dev/sda3`.
 
+### Kali Live requirement
+
+Run this repository from a full Kali Live environment, not from the shell
+provided by Kali Installer. The installer environment exposes only a limited
+BusyBox console and does not provide the complete Bash shell and userspace
+tools required by `setup.sh` and its subsystem scripts.
+
+After creating the fresh Kali installation, boot or remain in Kali Live, open a
+normal terminal, clone the repository there and run `sudo ./setup.sh`. The Kali
+workflow mounts the selected root, ESP and optional separate `/boot` itself.
+Do not start the conversion from an installed, normally booted Kali system.
+
 ## Before installation
 
 Clone the repository from the live session:
@@ -98,10 +111,10 @@ enabled, an adequately sized `boot_dev` is suggested as the default rescue
 target after its files are migrated. If no boot partition exists or the user
 declines its reuse, the wizard asks for another partition. When rescue is
 disabled, no rescue partition is requested and `rescue_dev` remains empty.
-`suite` is a single selection limited
-to `resolute` or `noble`; `suite_type` is a single selection currently limited
-to `ubuntu`. Every `yes`/`no` setting is presented as a toggle and normalized to
-one of those two literal values. Secrets use hidden input. The generated file is
+`suite` supports `resolute`, `noble` and `kali`; `suite_type` supports `ubuntu`
+and `kali`. Kali installations do not create a rescue system. Every `yes`/`no`
+setting is presented as a toggle and normalized to one of those two literal
+values. Secrets use hidden input. The generated file is
 written atomically with mode `0600`, then checked for Bash syntax, required
 values and permissions. After showing the complete non-secret configuration
 summary, setup asks whether installation should proceed. Answering `no` leaves
@@ -180,7 +193,8 @@ The main flow performs these operations:
 1. verifies that the configured root device is Btrfs and mounted at `mp`;
 2. creates `@$suite/@` and the dedicated Btrfs data subvolumes;
 3. when `boot_dev` is set, copies it into `@$suite/@/boot`, unmounts it and
-   removes its obsolete `/boot` fstab entry;
+   regenerates `fstab` from the encrypted root and ESP UUIDs, without relying
+   on the installer-generated file;
 4. creates a Btrfs swap file;
 5. encrypts `/dev/sda3` in place as LUKS2 and mounts it as
    `/dev/mapper/root`;
@@ -372,7 +386,8 @@ sudo tpm-status
 ```
 
 `tpm-enroll`, `tpm-reseal`, `tpm-status` and `generate-uki` are installed as
-standalone commands. They remain functional after the repository directory is
+standalone commands in `/usr/sbin`, which is available through the standard
+`sudo` secure path. They remain functional after the repository directory is
 deleted.
 
 The generated kernel command line always contains:
@@ -441,7 +456,7 @@ The early-boot Snapper selector is a distinctive feature of this project. It can
 boot a historical root snapshot before the real root is mounted, including when
 that root is inside LUKS, without modifying the selected snapshot.
 
-When `snapshot_menu=yes`, a small listener watches TTY1 for Alt+B during the
+When `snapshot_menu=yes`, a small evdev listener watches for B/b during the
 five-second early-boot window. It releases the input devices before cryptsetup
 may need the keyboard. If triggered, the dracut pre-mount hook waits for the
 unlocked root device, mounts the Btrfs top level read-only and reads Snapper
@@ -477,7 +492,7 @@ The menu can be customized through `/etc/snapshot-menu.conf`:
 ```bash
 PAGE_SIZE=20
 DESCRIPTION_MAX_LENGTH=24
-SNAPSHOT_TRIGGER="ALT+B"
+SNAPSHOT_TRIGGER="B"
 SNAPSHOT_TRIGGER_WINDOW_TICKS=50
 SNAPSHOT_TRIGGER_RESULT_TICKS=0
 ```
@@ -489,6 +504,10 @@ the early-boot key combination. The window and result values use 100 ms ticks:
 delay. A zero trigger window hides the countdown but retains a short held-key
 probe. Page size and description length must be positive; timing values must be
 non-negative.
+
+On Kali, triggers that use the `Alt` modifier are not supported: pressing
+`Alt` during early boot makes Plymouth leave the graphical splash and moves the
+LUKS prompt to the text console. Keep the default `B` trigger on Kali.
 
 The file is embedded into the initramfs. After editing it, regenerate all UKIs:
 

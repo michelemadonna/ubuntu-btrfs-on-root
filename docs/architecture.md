@@ -6,8 +6,9 @@ for verification.
 
 ## System boundary
 
-The project converts a fresh Ubiquity installation from the same Ubuntu live
-session, before first reboot. The default layout is:
+The project converts a fresh Ubuntu Ubiquity installation from its live session
+or a fresh Kali installation selected by the wizard. The default device layout
+is:
 
 | Device | Initial role | Result |
 | --- | --- | --- |
@@ -15,9 +16,11 @@ session, before first reboot. The default layout is:
 | `/dev/sda2` | FAT32 ESP at `/boot/efi` | label `ESP`; rEFInd, UKIs, fwupd and public certificates |
 | `/dev/sda3` | unencrypted Btrfs `/` | in-place LUKS2 container exposed as `/dev/mapper/root` |
 
-Device names are configurable. Ubiquity leaves the installed root at `/target`,
-the ESP at `/target/boot/efi` and, when present, a separate boot at
-`/target/boot`. `/cdrom` supplies the live rescue source.
+Device names are configurable. Ubuntu discovery expects the installed root at
+`/target`, the ESP at `/target/boot/efi` and an optional separate boot at
+`/target/boot`. Kali setup can mount those configured filesystems itself.
+`/cdrom` supplies the Ubuntu live rescue source; rescue creation is disabled by
+the Kali installation flow.
 
 Installed persistent data and swap live inside LUKS2. The ESP and optional
 rescue environment are outside that encryption boundary. A migrated old boot
@@ -60,15 +63,16 @@ Each suite is a top-level sibling container:
 └── @swap/swapfile
 ```
 
-For example, `@noble` and `@resolute` coexist directly below Btrfs top level.
+For example, `@noble`, `@resolute` and `@kali` can coexist directly below Btrfs
+top level.
 Root snapshots are under `@$suite/@/.snapshots`; home snapshots are under
 `@$suite/@home/.snapshots`.
 
 If `boot_dev` is configured, its content is copied to `@$suite/@/boot`, checked
-and its `/boot` fstab entry removed. The partition is preserved unless selected
-for rescue. LUKS conversion reserves 32 MiB, uses Argon2id with configurable
-`iter_time` (milliseconds), opens mapper `root` and then grows Btrfs to the
-available mapped size.
+and the old `/boot` mount is omitted from the regenerated fstab. The partition
+is preserved unless selected for rescue. LUKS conversion reserves 32 MiB, uses
+Argon2id with configurable `iter_time` (milliseconds), opens mapper `root` and
+then grows Btrfs to the available mapped size.
 
 ## Rescue subsystem
 
@@ -95,6 +99,7 @@ suggests an eligible `boot_dev`; otherwise it requests another partition.
   state never causes an automatic path change.
 
 `EXPERIMENTAL_SBCTL_APPEND=true` alone enables the older partial append flow.
+The upstream fallback executable is installed at `/usr/sbin/sbctl`.
 Private keys stay below `/var/lib/sbctl/keys`; the ESP receives only `PK.pem`,
 `KEK.pem`, `db.pem` and optional `db.cer` under `/boot/efi/EFI/keys`.
 
@@ -107,11 +112,14 @@ containing a regular `grubx64.efi`.
 ## Snapshot subsystem
 
 `btrfs-snapshots-mng/` installs Snapper root/home profiles and optional dracut
-module `92snapshot-menu`. A compiled listener detects Alt+B before cryptsetup,
-then releases input devices. The hook runs after LUKS availability but before
-the real-root mount, offers compatible root snapshots, mounts the selection
-read-only and uses an ephemeral overlay. Failure or cancellation returns to
-normal boot.
+module `92snapshot-menu`. A compiled evdev listener detects B/b before
+cryptsetup, then exits and closes its input descriptors. The hook runs after
+LUKS availability but before the real-root mount, offers compatible root
+snapshots, mounts the selection read-only and uses an ephemeral overlay.
+Failure or cancellation returns to normal boot.
+
+The dracut module explicitly includes the kernel `evdev` handler so modular
+Kali kernels expose `/dev/input/event*` during the early trigger window.
 
 Menu settings come from `/etc/snapshot-menu.conf` and are embedded in the
 initramfs, so changes require `generate-uki --all`.
@@ -139,7 +147,7 @@ read-only.
 These installed commands contain their own logging and remain independent of
 the repository:
 
-- `/usr/local/sbin/generate-uki`;
-- `tpm-enroll`;
-- `tpm-reseal`;
-- `tpm-status`.
+- `/usr/sbin/generate-uki`;
+- `/usr/sbin/tpm-enroll`;
+- `/usr/sbin/tpm-reseal`;
+- `/usr/sbin/tpm-status`.
