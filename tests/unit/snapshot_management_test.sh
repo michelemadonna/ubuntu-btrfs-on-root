@@ -63,6 +63,8 @@ snapshot-management-test.kernel_guard() {
 snapshot-management-test.initramfs_logging() {
 	local listener_stop="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/listener/snapshot-key-listener-stop"
 	local listener_source="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/listener/snapshot-key-listener.c"
+	local listener_service="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/snapshot-key-listener.service"
+	local module_setup="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/module-setup.sh"
 
 	rg -Fq "snapshot-menu: listener-stop:" "$listener_stop"
 	rg -Fq "listener finished status=" "$listener_stop"
@@ -73,6 +75,9 @@ snapshot-management-test.initramfs_logging() {
 	rg -Fq '"$LISTENER" "$trigger" --grab' "$listener_stop"
 	rg -Fq 'EVIOCGRAB, 1' "$listener_source"
 	rg -Fq 'EVIOCGRAB, 0' "$listener_source"
+	rg -Fq 'Before=plymouth-start.service' "$listener_service"
+	rg -Fq 'snapshot-key-listener.service' "$module_setup"
+	rg -Fq 'adopted early listener pid=' "$listener_stop"
 }
 
 snapshot-management-test.run() {

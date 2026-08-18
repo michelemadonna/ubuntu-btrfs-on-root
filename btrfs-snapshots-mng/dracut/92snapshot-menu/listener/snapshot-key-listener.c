@@ -19,6 +19,7 @@
 
 #define MARKER_FILE "/run/snapshot-menu-requested"
 #define PID_FILE    "/run/snapshot-key-listener.pid"
+#define READY_FILE  "/run/snapshot-key-listener.ready"
 
 #define BITS_PER_LONG (sizeof(unsigned long) * 8U)
 #define BIT_WORD(bit) ((bit) / BITS_PER_LONG)
@@ -110,6 +111,23 @@ static bool write_pid_file(void)
         return false;
     }
 
+    return true;
+}
+
+static bool create_ready_file(void)
+{
+    int fd;
+
+    fd = open(
+        READY_FILE,
+        O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
+        0600
+    );
+
+    if (fd < 0)
+        return false;
+
+    close(fd);
     return true;
 }
 
@@ -636,6 +654,18 @@ static bool scan_input_devices(void)
     return false;
 }
 
+static bool has_open_input_device(void)
+{
+    unsigned int index;
+
+    for (index = 0; index < MAX_INPUT_DEVICES; index++) {
+        if (devices[index].fd >= 0)
+            return true;
+    }
+
+    return false;
+}
+
 static bool process_input_device(unsigned int index)
 {
     struct input_event events[16];
@@ -729,6 +759,7 @@ static void cleanup(void)
     }
 
     unlink(PID_FILE);
+    unlink(READY_FILE);
 }
 
 int main(int argc, char *argv[])
@@ -741,6 +772,7 @@ int main(int argc, char *argv[])
     nfds_t poll_count;
     int poll_result;
     int exit_status = EXIT_SUCCESS;
+    bool ready = false;
 
     trigger_argument = argc >= 2 ? argv[1] : "ALT";
     grab_input_devices = argc >= 3 &&
@@ -799,6 +831,15 @@ int main(int argc, char *argv[])
                 exit_status = EXIT_FAILURE;
 
             break;
+        }
+
+        if (!ready && has_open_input_device()) {
+            if (!create_ready_file()) {
+                exit_status = EXIT_FAILURE;
+                break;
+            }
+
+            ready = true;
         }
 
         poll_count = 0;

@@ -109,7 +109,8 @@ btrfs-snapshots-mng-setup.install_module() {
 		"$module_target/snapshot-menu-hook.sh" \
 		"$module_target/snapshot-menu.sh" \
 		"$module_target/listener/snapshot-key-listener" \
-		"$module_target/listener/snapshot-key-listener-stop"
+		"$module_target/listener/snapshot-key-listener-stop" \
+		"$module_target/listener/snapshot-key-listener-start"
 
 	log.info "Write snapshot-menu configuration for normal root $root_subvolume"
 	btrfs-snapshots-mng-setup.render_base_config \

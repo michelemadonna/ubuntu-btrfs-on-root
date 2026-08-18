@@ -222,6 +222,7 @@ snapshot-key-listener-stop.show_message() {
 #
 
 listener_pid=""
+listener_owned=0
 plymouth_watch_pid=""
 
 snapshot-key-listener-stop.stop_plymouth_watch() {
@@ -259,7 +260,9 @@ snapshot-key-listener-stop.stop_listener() {
 	fi
 
 	if [ -n "$listener_pid" ]; then
-		if wait "$listener_pid" 2>/dev/null; then
+		if [ "$listener_owned" -eq 0 ]; then
+			listener_status="adopted"
+		elif wait "$listener_pid" 2>/dev/null; then
 			listener_status=0
 		else
 			listener_status=$?
@@ -270,7 +273,8 @@ snapshot-key-listener-stop.stop_listener() {
 		"listener finished status=${listener_status} marker_present=$([ -e "$MARKER" ] && printf yes || printf no)"
 
 	listener_pid=""
-	rm -f "$PIDFILE"
+	listener_owned=0
+	rm -f "$PIDFILE" /run/snapshot-key-listener.ready
 }
 
 #
@@ -299,10 +303,32 @@ trap snapshot-key-listener-stop.cleanup_and_exit HUP INT TERM
 # detected during this boot.
 #
 
-rm -f "$PIDFILE"
+if [ -s "$PIDFILE" ]; then
+	IFS= read -r listener_pid <"$PIDFILE"
 
-if [ ! -e "$MARKER" ] &&
-	[ -x "$LISTENER" ]; then
+	case "$listener_pid" in
+	'' | *[!0-9]*)
+		listener_pid=""
+		;;
+	esac
+
+	if [ -n "$listener_pid" ] &&
+		kill -0 "$listener_pid" 2>/dev/null; then
+
+		snapshot-key-listener-stop.log \
+			"adopted early listener pid=${listener_pid}"
+	else
+		listener_pid=""
+		rm -f "$PIDFILE" /run/snapshot-key-listener.ready
+	fi
+fi
+
+if [ -n "$listener_pid" ]; then
+	:
+elif [ -e "$MARKER" ]; then
+	snapshot-key-listener-stop.log \
+		"listener not started because request marker already exists"
+elif [ -x "$LISTENER" ]; then
 
 	if [ "$input_grab" = yes ]; then
 		"$LISTENER" "$trigger" --grab \
@@ -317,11 +343,9 @@ if [ ! -e "$MARKER" ] &&
 	fi
 
 	listener_pid=$!
+	listener_owned=1
 	snapshot-key-listener-stop.log \
 		"listener started pid=${listener_pid}"
-elif [ -e "$MARKER" ]; then
-	snapshot-key-listener-stop.log \
-		"listener not started because request marker already exists"
 else
 	snapshot-key-listener-stop.log \
 		"listener not started because executable is missing"
