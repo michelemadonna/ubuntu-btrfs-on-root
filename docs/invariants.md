@@ -90,7 +90,8 @@ producer and consumer before altering one.
 - Reject and remove a UKI that fails signature, required PE section, embedded
   version or configured initramfs-content validation.
 - Keep `tpm2-pin=yes` in the command line for both PIN and PINless TPM modes.
-- `generate-uki` remains standalone after repository removal.
+- `generate-uki` remains standalone at `/usr/sbin/generate-uki` after
+  repository removal.
 
 ## TPM
 
@@ -101,7 +102,7 @@ producer and consumer before altering one.
   tokens and requires explicit wipe acknowledgement.
 - PCR-policy or key changes may invalidate unlock and require documented
   resealing.
-- `tpm-enroll`, `tpm-reseal` and `tpm-status` remain standalone.
+- `tpm-enroll`, `tpm-reseal` and `tpm-status` remain standalone in `/usr/sbin`.
 
 ## Snapshot boot
 

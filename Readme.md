@@ -386,7 +386,8 @@ sudo tpm-status
 ```
 
 `tpm-enroll`, `tpm-reseal`, `tpm-status` and `generate-uki` are installed as
-standalone commands. They remain functional after the repository directory is
+standalone commands in `/usr/sbin`, which is available through the standard
+`sudo` secure path. They remain functional after the repository directory is
 deleted.
 
 The generated kernel command line always contains:

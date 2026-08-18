@@ -14,7 +14,7 @@ source "$repository_root/lib/common.sh"
 # shellcheck disable=SC1090,SC1091
 source "${SETUP_CONFIG_FILE:-$repository_root/setup.conf}"
 
-export PATH="/usr/local/sbin:/usr/local/bin:$PATH"
+export PATH="/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin:$PATH"
 
 export ESP="${ESP:-/boot/efi}"
 export SBCTL_KEYROOT="${SBCTL_KEYROOT:-/var/lib/sbctl/keys}"

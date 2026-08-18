@@ -90,6 +90,9 @@ snapshot-management-test.function_key_mapping() {
 		return 1
 	fi
 	rg -Fq 'DEFAULT_TRIGGER="F12"' "$listener_stop"
+	rg -Fq 'accepted input device path=' "$listener"
+	rg -Fq 'trigger event device=event%u code=%u value=%d' "$listener"
+	rg -Fq 'request marker created' "$listener"
 }
 
 snapshot-management-test.run() {

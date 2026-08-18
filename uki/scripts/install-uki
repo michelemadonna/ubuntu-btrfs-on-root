@@ -124,7 +124,8 @@ install-uki.install_hooks() {
 	fi
 
 	log.info "Install the UKI generation and validation command"
-	install -m 0755 "$repository_root/uki/scripts/generate-uki" /usr/local/sbin/generate-uki
+	install -m 0755 "$repository_root/uki/scripts/generate-uki" /usr/sbin/generate-uki
+	rm -f /usr/local/sbin/generate-uki
 }
 
 install-uki.print_summary() {
@@ -149,7 +150,7 @@ install-uki.validate_result() {
 	for uki in "$INSTALL_UKI_KERNEL_CONFIG" "$INSTALL_UKI_UKIFY_CONFIG" "$INSTALL_UKI_CMDLINE" "$INSTALL_UKI_ENTRY_TOKEN" "$INSTALL_UKI_REFIND_ICON"; do
 		common.require_readable_file "$uki" "UKI configuration artifact"
 	done
-	[[ -x /usr/local/sbin/generate-uki ]] || log.die "Standalone generate-uki command is missing or not executable."
+	[[ -x /usr/sbin/generate-uki ]] || log.die "Standalone generate-uki command is missing or not executable."
 	[[ -x /usr/lib/kernel/install.d/99-refind-menu.install ]] || log.die "rEFInd kernel-install hook is missing or not executable."
 	while IFS= read -r -d '' uki; do
 		sbverify --cert /var/lib/sbctl/keys/db/db.pem "$uki" >/dev/null || log.die "UKI signature validation failed after summary: $uki"
@@ -201,7 +202,7 @@ install-uki.run() {
 
 	install-uki.install_hooks
 	log.info "Generate and validate UKIs for every installed kernel"
-	/usr/local/sbin/generate-uki --all
+	/usr/sbin/generate-uki --all
 	install-uki.print_summary
 	install-uki.validate_result
 }

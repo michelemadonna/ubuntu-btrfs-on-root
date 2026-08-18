@@ -99,6 +99,7 @@ suggests an eligible `boot_dev`; otherwise it requests another partition.
   state never causes an automatic path change.
 
 `EXPERIMENTAL_SBCTL_APPEND=true` alone enables the older partial append flow.
+The upstream fallback executable is installed at `/usr/sbin/sbctl`.
 Private keys stay below `/var/lib/sbctl/keys`; the ESP receives only `PK.pem`,
 `KEK.pem`, `db.pem` and optional `db.cer` under `/boot/efi/EFI/keys`.
 
@@ -143,7 +144,7 @@ read-only.
 These installed commands contain their own logging and remain independent of
 the repository:
 
-- `/usr/local/sbin/generate-uki`;
-- `tpm-enroll`;
-- `tpm-reseal`;
-- `tpm-status`.
+- `/usr/sbin/generate-uki`;
+- `/usr/sbin/tpm-enroll`;
+- `/usr/sbin/tpm-reseal`;
+- `/usr/sbin/tpm-status`.

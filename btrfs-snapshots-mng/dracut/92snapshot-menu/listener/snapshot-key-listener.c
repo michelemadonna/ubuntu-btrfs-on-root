@@ -6,6 +6,7 @@
 #include <linux/input.h>
 #include <poll.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,6 +42,23 @@ static struct trigger_key trigger_keys[MAX_TRIGGER_KEYS];
 static size_t trigger_key_count = 0;
 
 static volatile sig_atomic_t running = 1;
+
+static void log_kernel(const char *format, ...)
+{
+    va_list arguments;
+    int fd;
+
+    fd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
+    if (fd < 0)
+        return;
+
+    dprintf(fd, "<6>snapshot-menu: listener: ");
+    va_start(arguments, format);
+    vdprintf(fd, format, arguments);
+    va_end(arguments);
+    dprintf(fd, "\n");
+    close(fd);
+}
 
 static void handle_signal(int signal_number)
 {
@@ -82,10 +100,16 @@ static bool create_marker(void)
         0600
     );
 
-    if (fd < 0)
+    if (fd < 0) {
+        log_kernel(
+            "marker creation failed errno=%d",
+            errno
+        );
         return false;
+    }
 
     close(fd);
+    log_kernel("request marker created");
     return true;
 }
 
@@ -548,6 +572,27 @@ static bool trigger_is_pressed(
     return true;
 }
 
+static bool key_code_is_part_of_trigger(unsigned short key_code)
+{
+    size_t index;
+    size_t alternative;
+
+    for (index = 0;
+         index < trigger_key_count;
+         index++) {
+
+        for (alternative = 0;
+             alternative < trigger_keys[index].alternative_count;
+             alternative++) {
+
+            if (trigger_keys[index].alternatives[alternative] == key_code)
+                return true;
+        }
+    }
+
+    return false;
+}
+
 static void close_input_device(unsigned int index)
 {
     if (index >= MAX_INPUT_DEVICES)
@@ -634,6 +679,7 @@ static bool open_input_device(unsigned int number)
     }
 
     devices[number] = candidate;
+    log_kernel("accepted input device path=%s", path);
 
     /*
      * Detect a trigger already being held when the listener starts.
@@ -698,6 +744,15 @@ static bool process_input_device(unsigned int index)
         if (event->code > KEY_MAX)
             continue;
 
+        if (key_code_is_part_of_trigger(event->code)) {
+            log_kernel(
+                "trigger event device=event%u code=%u value=%d",
+                index,
+                event->code,
+                event->value
+            );
+        }
+
         /*
          * EV_KEY:
          *
@@ -761,6 +816,7 @@ int main(int argc, char *argv[])
     nfds_t poll_count;
     int poll_result;
     int exit_status = EXIT_SUCCESS;
+    bool no_compatible_device_logged = false;
 
     trigger_argument = argc >= 2 ? argv[1] : "F12";
 
@@ -773,6 +829,12 @@ int main(int argc, char *argv[])
 
         return EXIT_FAILURE;
     }
+
+    log_kernel(
+        "started trigger=%s trigger_keys=%zu",
+        trigger_argument,
+        trigger_key_count
+    );
 
     for (index = 0;
          index < MAX_INPUT_DEVICES;
@@ -841,6 +903,13 @@ int main(int argc, char *argv[])
             poll_count++;
         }
 
+        if (poll_count == 0 && !no_compatible_device_logged) {
+            log_kernel("no compatible input device available");
+            no_compatible_device_logged = true;
+        } else if (poll_count > 0) {
+            no_compatible_device_logged = false;
+        }
+
         poll_result = poll(
             poll_fds,
             poll_count,
@@ -888,6 +957,7 @@ int main(int argc, char *argv[])
         }
     }
 
+    log_kernel("finished status=%d", exit_status);
     cleanup();
     return exit_status;
 }

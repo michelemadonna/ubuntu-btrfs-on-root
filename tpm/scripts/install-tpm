@@ -39,12 +39,16 @@ install-tpm.merge_kernel_option() {
 
 install-tpm.install_runtime() {
 	log.info "Install TPM configuration at $INSTALL_TPM_CONFIG"
-	install -d -m 0755 /etc/uki /usr/local/sbin
+	install -d -m 0755 /etc/uki /usr/sbin
 	install -m 0644 "$repository_root/tpm/config/tpm.conf" "$INSTALL_TPM_CONFIG"
 	sed -i "s|^LUKS_DEVICE=.*|LUKS_DEVICE=\"/dev/${root_dev}\"|" "$INSTALL_TPM_CONFIG"
-	install -m 0755 "$repository_root/tpm/scripts/tpm-enroll" /usr/local/sbin/tpm-enroll
-	install -m 0755 "$repository_root/tpm/scripts/tpm-reseal" /usr/local/sbin/tpm-reseal
-	install -m 0755 "$repository_root/tpm/scripts/tpm-status" /usr/local/sbin/tpm-status
+	install -m 0755 "$repository_root/tpm/scripts/tpm-enroll" /usr/sbin/tpm-enroll
+	install -m 0755 "$repository_root/tpm/scripts/tpm-reseal" /usr/sbin/tpm-reseal
+	install -m 0755 "$repository_root/tpm/scripts/tpm-status" /usr/sbin/tpm-status
+	rm -f \
+		/usr/local/sbin/tpm-enroll \
+		/usr/local/sbin/tpm-reseal \
+		/usr/local/sbin/tpm-status
 }
 
 install-tpm.write_boot_configuration() {
@@ -67,7 +71,7 @@ install-tpm.print_summary() {
 	log.summary_item "LUKS device" "/dev/$root_dev"
 	log.summary_item "Configuration" "$INSTALL_TPM_CONFIG"
 	log.summary_item "PCR public key" "/etc/uki/keys/pcr-public.pem"
-	log.summary_item "Enrollment" "/usr/local/sbin/tpm-enroll"
+	log.summary_item "Enrollment" "/usr/sbin/tpm-enroll"
 	log.summary_item "Destructive reseal" "tpm-reseal --wipe-all-tpm2"
 	log.warn "Verify a normal LUKS passphrase before TPM enrollment."
 	log.success "TPM integration installed without changing LUKS tokens"
@@ -82,7 +86,7 @@ install-tpm.validate_result() {
 	# shellcheck source=/dev/null
 	source "$INSTALL_TPM_CONFIG"
 	common.require_readable_file /etc/uki/keys/pcr-public.pem "Installed PCR public key"
-	[[ -x /usr/local/sbin/tpm-enroll && -x /usr/local/sbin/tpm-reseal && -x /usr/local/sbin/tpm-status ]] ||
+	[[ -x /usr/sbin/tpm-enroll && -x /usr/sbin/tpm-reseal && -x /usr/sbin/tpm-status ]] ||
 		log.die "One or more standalone TPM commands are missing or not executable."
 	option="$(install-tpm.build_kernel_option "$TPM_DEVICE")"
 	grep -Fq "$option" "$INSTALL_TPM_CMDLINE" || log.die "Kernel command line does not contain the required TPM option."
