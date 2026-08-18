@@ -5,9 +5,9 @@ safety requirements are in `invariants.md`.
 
 ## Configuration discovery
 
-Run `setup.sh` as root after Ubiquity completes, without leaving the live
-session. For Kali, the wizard mounts the configured root, ESP and optional
-separate `/boot` itself. If `setup.conf` is absent, the wizard:
+Run `setup.sh` as root after the fresh installation. For Ubuntu, remain in the
+Ubiquity live session; for Kali, the wizard mounts the configured root, ESP and
+optional separate `/boot`. If `setup.conf` is absent, the wizard:
 
 1. detects exact sources mounted at `/target`, `/target/boot/efi` and optional
    `/target/boot`;
@@ -25,7 +25,11 @@ unmounted only when it is a mount point; its absence is non-fatal.
 
 1. Validate configuration, exact devices, mounts and Btrfs root type.
 2. Unmount the ESP for FAT label `ESP` validation/application.
-3. Snapshot the installed root into `@$suite/@` and create data subvolumes.
+3. Build the suite layout and data subvolumes:
+   - Ubuntu snapshots the installed root into `@$suite/@`;
+   - Kali mounts Btrfs top level (`subvolid=5`), validates and copies its source
+     subvolumes, then removes migrated top-level sources while preserving the
+     new suite container.
 4. If `boot_dev` exists, copy it into the new encrypted-root `/boot`, validate
    the copy and unmount the old boot.
 5. Shrink Btrfs, unmount it, perform in-place LUKS2 reencryption, open mapper
@@ -34,10 +38,6 @@ unmounted only when it is a mount point; its absence is non-fatal.
    including the root, EFI, data and swap entries; then prepare chroot bind
    mounts.
 
-For Kali, the storage phase first mounts the Btrfs top-level (`subvolid=5`),
-copies the original Kali subvolumes into `@$suite/@`, migrates a configured
-separate `/boot`, removes the old Kali subvolumes after validation, and mounts
-the new root subvolume.
 7. Copy the repository into the target and invoke `setup.sh //inner` in an
    isolated mount namespace.
 
@@ -96,8 +96,8 @@ pressing `Tab` on it exposes all older installed versions.
 1. Firmware validates direct rEFInd or shim.
 2. rEFInd launches the selected signed UKI.
 3. The UKI starts its kernel and dracut initramfs.
-4. When installed, the listener watches for Alt+B, then releases input before
-   cryptsetup can request credentials.
+4. When installed, the listener watches for F12, then exits and closes its
+   input descriptors before cryptsetup can request credentials.
 5. LUKS unlock uses a valid TPM token when enrolled, otherwise retained
    password/recovery access.
 6. Without a snapshot request, dracut mounts `@$suite/@` and switches root.
@@ -108,7 +108,8 @@ PINless enrollment.
 
 ## Snapshot branch
 
-When Alt+B is detected after LUKS availability and before real-root mount:
+When F12 is detected during the pre-cryptsetup window, a request marker is
+retained until LUKS is available. Before the real-root mount, the hook then:
 
 1. mount the Btrfs top level read-only;
 2. list current root and compatible `@$suite/@/.snapshots/*/snapshot` entries;
@@ -118,6 +119,7 @@ When Alt+B is detected after LUKS availability and before real-root mount:
 
 Current-system selection, cancellation, invalid input, authentication failure
 or menu failure follows normal boot. Home snapshots are never boot choices.
+Kali follows the `Alt`-trigger prohibition defined in `invariants.md`.
 
 ## Maintenance flows
 

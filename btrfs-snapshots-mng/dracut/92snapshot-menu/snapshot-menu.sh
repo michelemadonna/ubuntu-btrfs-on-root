@@ -21,6 +21,7 @@ source "$CONFIG"
 # Required configuration.
 #
 : "${ROOT_SUBVOL:?ROOT_SUBVOL is not configured}"
+: "${SUITE:?SUITE is not configured}"
 : "${SNAPSHOT_DIR:?SNAPSHOT_DIR is not configured}"
 : "${TTY:?TTY is not configured}"
 : "${MOUNTPOINT:?MOUNTPOINT is not configured}"
@@ -281,7 +282,7 @@ SNAPSHOT_INFOS+=("")
 SNAPSHOT_NUMBERS+=("")
 
 LABELS+=(
-	"Ubuntu - current system"
+	"$SUITE - current system"
 )
 
 KERNEL_STATUS+=(
@@ -528,7 +529,7 @@ snapshot-menu.draw_menu() {
 	printf '\033[2J\033[H' >&3
 
 	printf '\033[1;36m' >&3
-	printf 'Ubuntu Snapshot Boot\n' >&3
+	printf '%s Snapshot Boot\n' "$SUITE" >&3
 	printf '\033[0m' >&3
 
 	printf 'Kernel: %s\n' \
@@ -825,7 +826,7 @@ snapshot-menu.check_snapshot_pin() {
 		printf '\033[2J\033[H' >&3
 
 		printf '\033[1;36m' >&3
-		printf 'Ubuntu Snapshot Boot\n' >&3
+		printf '%s Snapshot Boot\n' "$SUITE" >&3
 		printf '\033[0m' >&3
 
 		printf '\nSnapshot: %s\n' \

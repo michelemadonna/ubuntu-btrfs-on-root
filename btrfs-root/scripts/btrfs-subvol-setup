@@ -119,17 +119,16 @@ btrfs-subvol-setup.copy_kali_tree() {
 btrfs-subvol-setup.remove_kali_sources() {
 	local source_root=$1
 	local name
-	local -a top_level_subvolumes=()
 
-	mapfile -t top_level_subvolumes < <(
-		btrfs subvolume list "$source_root" |
-			awk '$3 == "top" && $4 == "level" && $5 == "5" { print $6 }'
-	)
-	for name in "${top_level_subvolumes[@]}"; do
+	while IFS= read -r name; do
+		[[ -n $name ]] || continue
 		[[ $name == "$root_sub_vol" ]] && continue
 		log.info "Remove migrated Kali source subvolume $name"
 		btrfs subvolume delete "$source_root/$name"
-	done
+	done < <(
+		btrfs subvolume list "$source_root" |
+			awk '$5 == "top" && $6 == "level" && $7 == "5" && $8 == "path" { print $9 }'
+	)
 }
 
 btrfs-subvol-setup.run_kali() {

@@ -5,8 +5,9 @@ producer and consumer before altering one.
 
 ## Execution and devices
 
-- Primary setup runs as root in the post-Ubiquity Ubuntu live session, before
-  reboot, with manual partitioning and UEFI x86-64.
+- Primary setup runs as root before first boot: from the post-Ubiquity live
+  session for Ubuntu or against the selected fresh Kali installation. Both
+  paths require manual partitioning and UEFI x86-64.
 - Destructive targets must be explicit, distinct where required, real block
   devices and validated for expected type/source before mutation.
 - Root starts as unencrypted Btrfs mounted at `mp`; the ESP is FAT and receives
@@ -35,9 +36,10 @@ producer and consumer before altering one.
 - `fstab` is regenerated from scratch using the UUIDs of the encrypted Btrfs
   filesystem and ESP, then includes the configured root, data and swap
   subvolume entries.
-- Kali conversion copies `@`, `@root`, `@usr@local`, `@home`, `/var/cache` and
-  `@var@log` into the repository layout, then deletes the original Kali
-  subvolumes, including `@.snapshots`, only after copy validation.
+- Kali conversion validates `@`, `@home`, `@root`, `@usr@local`, `@var@log`
+  and `@.snapshots`; it copies their root, home, root-account, local, cache and
+  log data into the `@kali` layout, then deletes migrated top-level source
+  subvolumes while preserving `@kali`.
 - In-place encryption uses LUKS2 mapper `root`, reserves 32 MiB and identifies
   the volume by LUKS UUID in crypttab.
 - `iter_time` is a positive Argon2id calibration target in milliseconds, not a
@@ -104,16 +106,20 @@ producer and consumer before altering one.
 ## Snapshot boot
 
 - No request, cancellation or any selector failure falls back to normal boot.
-- Release input devices before cryptsetup may prompt.
+- Stop the listener and close its evdev descriptors before cryptsetup may
+  prompt.
 - Discover after LUKS availability and before real-root mount.
 - Mount top level and selected snapshot read-only; runtime writes are ephemeral.
 - Never delete or mutate a snapshot during validation.
 - `/etc/snapshot-menu.conf` defaults remain `PAGE_SIZE=20`,
-  `DESCRIPTION_MAX_LENGTH=24`, `SNAPSHOT_TRIGGER="ALT+B"`,
+  `DESCRIPTION_MAX_LENGTH=24`, `SNAPSHOT_TRIGGER="F12"`,
   `SNAPSHOT_TRIGGER_WINDOW_TICKS=50`, `SNAPSHOT_TRIGGER_RESULT_TICKS=0`.
-- Kali enables `SNAPSHOT_PLYMOUTH_KEY_FALLBACK=yes` so `plymouthd`, when it
-  owns early-boot input, can forward the `B` portion of Alt+B to the selector;
-  Ubuntu keeps the evdev-only listener path.
+- The generated configuration records `SUITE`; every current-system label and
+  snapshot-menu title is derived from it rather than a distribution literal.
+- Ubuntu and Kali use the same evdev F12 trigger path; generated configurations
+  do not enable the Plymouth character fallback.
+- Kali must not use a trigger containing `Alt`, because it makes Plymouth leave
+  the graphical splash and moves LUKS prompting to the text console.
 - Ticks are 100 ms, description width is capped at 40, and changes require UKI
   regeneration.
 

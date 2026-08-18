@@ -20,16 +20,21 @@ snapshot-management-test.assert_contains() {
 snapshot-management-test.base_config() {
 	local kali_output output
 
-	output="$(btrfs-snapshots-mng-setup.render_base_config '@ubuntu/@')"
-	snapshot-management-test.assert_contains "$output" 'ROOT_SUBVOL="@ubuntu/@"'
-	snapshot-management-test.assert_contains "$output" 'SNAPSHOT_TRIGGER="ALT+B"'
+	output="$(btrfs-snapshots-mng-setup.render_base_config '@noble/@' ubuntu noble)"
+	snapshot-management-test.assert_contains "$output" 'ROOT_SUBVOL="@noble/@"'
+	snapshot-management-test.assert_contains "$output" 'SUITE="noble"'
+	snapshot-management-test.assert_contains "$output" 'SNAPSHOT_TRIGGER="F12"'
 	snapshot-management-test.assert_contains "$output" 'PAGE_SIZE=20'
+	[[ $output != *'Alt-based triggers are unsupported'* ]]
 	[[ $output != *'SNAPSHOT_PLYMOUTH_KEY_FALLBACK'* ]]
 
-	kali_output="$(btrfs-snapshots-mng-setup.render_base_config '@kali/@' kali)"
+	kali_output="$(btrfs-snapshots-mng-setup.render_base_config '@kali/@' kali kali)"
+	snapshot-management-test.assert_contains "$kali_output" 'SUITE="kali"'
+	snapshot-management-test.assert_contains "$kali_output" 'SNAPSHOT_TRIGGER="F12"'
 	snapshot-management-test.assert_contains \
 		"$kali_output" \
-		'SNAPSHOT_PLYMOUTH_KEY_FALLBACK=yes'
+		'Alt-based triggers are unsupported'
+	[[ $kali_output != *'SNAPSHOT_PLYMOUTH_KEY_FALLBACK'* ]]
 }
 
 snapshot-management-test.pin_config() {
@@ -65,11 +70,22 @@ snapshot-management-test.initramfs_logging() {
 	rg -Fq 'keys=bB' "$listener_stop"
 }
 
+snapshot-management-test.suite_labels() {
+	local menu="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/snapshot-menu.sh"
+
+	rg -Fq '"$SUITE - current system"' "$menu"
+	rg -Fq "printf '%s Snapshot Boot\\n' \"\$SUITE\"" "$menu"
+	if rg -Fq 'Ubuntu Snapshot Boot' "$menu" || rg -Fq 'Ubuntu - current system' "$menu"; then
+		return 1
+	fi
+}
+
 snapshot-management-test.run() {
 	snapshot-management-test.base_config
 	snapshot-management-test.pin_config
 	snapshot-management-test.kernel_guard
 	snapshot-management-test.initramfs_logging
+	snapshot-management-test.suite_labels
 	printf 'snapshot_management_test: PASS\n'
 }
 

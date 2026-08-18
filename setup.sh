@@ -555,7 +555,9 @@ setup.unmount_everything() {
 
 	[[ -e $mp ]] || return 0
 	setup.restore_chroot_files
-	mapfile -t mounts < <(findmnt -Rrn -o TARGET "$mp" 2>/dev/null)
+	while IFS= read -r target; do
+		[[ -n $target ]] && mounts+=("$target")
+	done < <(findmnt -Rrn -o TARGET "$mp" 2>/dev/null)
 
 	for ((index = ${#mounts[@]} - 1; index >= 0; index--)); do
 		target="${mounts[index]}"

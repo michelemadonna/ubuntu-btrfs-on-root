@@ -37,9 +37,11 @@ btrfs-snapshots-mng-setup.validate_configuration() {
 btrfs-snapshots-mng-setup.render_base_config() {
 	local root_subvolume=$1
 	local distribution_type=${2:-${suite_type:-ubuntu}}
+	local distribution_suite=${3:-${suite:-$distribution_type}}
 
 	cat <<-EOF
 		ROOT_SUBVOL="${root_subvolume}"
+		SUITE="${distribution_suite}"
 		SNAPSHOT_DIR=".snapshots"
 		TTY="/dev/tty1"
 		MOUNTPOINT="/run/snapshot-menu-root"
@@ -48,14 +50,15 @@ btrfs-snapshots-mng-setup.render_base_config() {
 		SNAPSHOT_CMDLINE="/etc/cmdline.d/99-snapshot.conf"
 		PAGE_SIZE=20
 		DESCRIPTION_MAX_LENGTH=24
-		SNAPSHOT_TRIGGER="ALT+B"
+		SNAPSHOT_TRIGGER="F12"
 		SNAPSHOT_TRIGGER_WINDOW_TICKS=50
 		SNAPSHOT_TRIGGER_RESULT_TICKS=0
 	EOF
 
 	if [[ $distribution_type == kali ]]; then
 		cat <<-'EOF'
-			SNAPSHOT_PLYMOUTH_KEY_FALLBACK=yes
+			# Kali: Alt-based triggers are unsupported because Alt makes Plymouth
+			# switch away from the graphical splash during early boot. Use F12.
 		EOF
 	fi
 }
@@ -113,6 +116,7 @@ btrfs-snapshots-mng-setup.install_module() {
 	btrfs-snapshots-mng-setup.render_base_config \
 		"$root_subvolume" \
 		"${suite_type:-ubuntu}" \
+		"${suite:-${suite_type:-ubuntu}}" \
 		>"$menu_config"
 	if [[ $snapshot_menu_pin == yes ]]; then
 		salt="$(openssl rand -hex 16)"
@@ -144,7 +148,7 @@ btrfs-snapshots-mng-setup.print_summary() {
 		log.summary_item "Normal root" "$root_sub_vol/@"
 		log.summary_item "Module" "$module_target"
 		log.summary_item "Configuration" "$menu_config"
-		log.summary_item "Trigger" "ALT+B (5.0 seconds)"
+		log.summary_item "Trigger" "F12 (5.0 seconds)"
 		log.summary_item "Snapshot root" "read-only lower layer + tmpfs overlay"
 	fi
 	log.success "Btrfs snapshot management setup completed"
@@ -159,6 +163,7 @@ btrfs-snapshots-mng-setup.validate_result() {
 		[[ -x $module_target/snapshot-menu.sh ]] || log.die "Snapshot-menu executable is missing."
 		[[ -x $module_target/listener/snapshot-key-listener ]] || log.die "Compiled snapshot key listener is missing."
 		grep -Fqx "ROOT_SUBVOL=\"$root_sub_vol/@\"" "$menu_config" || log.die "Snapshot-menu root subvolume is incorrect."
+		grep -Fqx "SUITE=\"$suite\"" "$menu_config" || log.die "Snapshot-menu suite is incorrect."
 	fi
 	log.success "Validated Snapper profiles and configured snapshot-menu artifacts"
 	log.section_end

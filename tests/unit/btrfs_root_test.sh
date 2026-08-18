@@ -103,9 +103,42 @@ test_configuration_validation() {
 	fi
 }
 
+test_kali_source_removal_without_mapfile() {
+	local -a deleted=()
+
+	root_sub_vol="@kali"
+	btrfs() {
+		if [[ $1 == subvolume && $2 == list ]]; then
+			printf '%s\n' \
+				'ID 256 gen 1 top level 5 path @' \
+				'ID 257 gen 1 top level 5 path @home' \
+				'ID 258 gen 1 top level 5 path @kali'
+			return 0
+		fi
+
+		if [[ $1 == subvolume && $2 == delete ]]; then
+			deleted+=("$3")
+			return 0
+		fi
+
+		return 1
+	}
+
+	btrfs-subvol-setup.remove_kali_sources /mnt/top-level
+	assert_equal "2" "${#deleted[@]}"
+	assert_equal "/mnt/top-level/@" "${deleted[0]}"
+	assert_equal "/mnt/top-level/@home" "${deleted[1]}"
+	if rg -q '\bmapfile\b' \
+		"$repository_root/btrfs-root/scripts/btrfs-subvol-setup" \
+		"$repository_root/setup.sh"; then
+		return 1
+	fi
+}
+
 test_crypttab_entry
 test_subvolume_paths
 test_fstab_entries
 test_summary
 test_configuration_validation
+test_kali_source_removal_without_mapfile
 printf 'Btrfs root helper tests passed.\n'
