@@ -756,16 +756,36 @@ setup.ensure_target_journal() {
 
 setup.configure_target_networkd() {
 	install -d -m 0755 "$mp/etc/systemd/network"
-	cat >"$mp/etc/systemd/network/ethernet.network" <<-'EOF'
-		[Match]
-		Name=enp1s0
+	install -d -m 0755 "$mp/etc/netplan"
+	cat >"$mp/etc/netplan/01_netcfg.yaml" <<-'EOF'
+		network:
+		  version: 2
+		  renderer: NetworkManager
+		  ethernets:
+		    alleths:
+		      optional: true
+		      match:
+		        name: e*
+		      dhcp4: true
+		      dhcp6: true
 
-		[Network]
-		DHCP=yes
+		# Optional bridge example, intentionally disabled:
+		# bridges:
+		#   br0:
+		#     interfaces: [alleths]
+		#     dhcp4: true
+		#     dhcp6: true
+	EOF
+	install -d -m 0755 "$mp/etc/NetworkManager/conf.d"
+	cat >"$mp/etc/NetworkManager/conf.d/10-globally-managed-devices.conf" <<-'EOF'
+		[keyfile]
+		unmanaged-devices=*,except:type:wifi,except:type:wwan,except:type:ethernet
 	EOF
 	systemctl --root="$mp" unmask systemd-networkd.service >/dev/null 2>&1 || true
-	systemctl --root="$mp" enable systemd-networkd.service >/dev/null 2>&1 ||
-		log.die "Unable to enable systemd-networkd in the target."
+	systemctl --root="$mp" disable systemd-networkd.service >/dev/null 2>&1 || true
+	systemctl --root="$mp" unmask NetworkManager.service >/dev/null 2>&1 || true
+	systemctl --root="$mp" enable NetworkManager.service >/dev/null 2>&1 ||
+		log.die "Unable to enable NetworkManager in the target."
 }
 
 setup.start_chroot_dbus() {

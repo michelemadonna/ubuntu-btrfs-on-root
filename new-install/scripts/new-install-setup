@@ -327,19 +327,6 @@ new-install.configure_target() {
 		127.0.1.1 $target_hostname
 		::1 localhost ip6-localhost ip6-loopback
 	EOF
-	install -d -m 0755 "$mp/etc/netplan"
-	cat >"$mp/etc/netplan/01_netcfg.yaml" <<-'EOF'
-		network:
-		  version: 2
-		  renderer: NetworkManager
-		  ethernets:
-		    alleths:
-		      optional: true
-		      match:
-		        name: e*
-		      dhcp4: true
-		      dhcp6: true
-	EOF
 	printf '%s UTF-8\n' "$target_locale" >"$mp/etc/locale.gen"
 	printf 'LANG=%s\n' "$target_locale" >"$mp/etc/default/locale"
 	ln -sfn "/usr/share/zoneinfo/$target_timezone" "$mp/etc/localtime"
