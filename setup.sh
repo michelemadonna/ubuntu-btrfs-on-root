@@ -113,7 +113,7 @@ setup.generate_configuration() {
 	local PASSPHRASE=password TARGET_USERNAME=ubuntu TARGET_USER_PASSWORD=password mok_pin='' secure_boot_enrollment=sbctl secure_boot_mode EXPERIMENTAL_SBCTL_APPEND=false
 	local pre_download=yes enable_tpm=yes snapshot_menu=yes enlarge=no snapshot_menu_pin=yes snapshot_menu_pin_value=123456
 	local mp=/mnt/root keyslot_size=32m btrfs_options='defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1'
-	local install_mode=migration install_disk='' disk_size_mib=0 esp_size_mib=1024 root_size_strategy=all root_size_percent=70 root_size_mib=0
+	local install_mode=migration install_disk='' disk_size_mib=0 esp_size_mib=1024 root_size_strategy=all root_size_percent=70 root_size_mib=0 install_hwe=no
 	local install_windows=no windows_size_mib=65536 target_locale=en_US.UTF-8 target_timezone=Europe/Rome keyboard_layout=it keyboard_variant=''
 	local target_hostname=linux install_disk_identity=''
 	local -a disk_items=() partition_items=() efi_items=() boot_items=() rescue_items=()
@@ -248,6 +248,9 @@ setup.generate_configuration() {
 	fi
 	[[ $suite =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Suite must be a safe lowercase identifier."
 	[[ $suite_type =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Distribution icon identifier is invalid."
+	if [[ $install_mode == new && $suite_type == ubuntu ]]; then
+		install_hwe="$(tui.toggle "Install the Ubuntu HWE kernel" "$install_hwe")" || log.die "Invalid HWE kernel toggle."
+	fi
 
 	if [[ $install_mode == migration ]]; then
 		if [[ $suite_type == kali ]]; then
@@ -373,6 +376,7 @@ setup.generate_configuration() {
 	setup.write_config_value "$temporary_config" btrfs_options "$btrfs_options"
 	setup.write_config_value "$temporary_config" suite "$suite"
 	setup.write_config_value "$temporary_config" suite_type "$suite_type"
+	setup.write_config_value "$temporary_config" install_hwe "$install_hwe"
 	setup.write_config_value "$temporary_config" secure_boot_mode "$secure_boot_mode"
 	setup.write_config_value "$temporary_config" secure_boot_enrollment "$secure_boot_enrollment"
 	setup.write_config_value "$temporary_config" EXPERIMENTAL_SBCTL_APPEND "$EXPERIMENTAL_SBCTL_APPEND"
@@ -416,6 +420,7 @@ setup.generate_configuration() {
 		log.summary_item "Localization" "$target_locale; $target_timezone; $keyboard_layout${keyboard_variant:+/$keyboard_variant}"
 		log.summary_item "Hostname" "$target_hostname"
 		log.summary_item "Initial sudo user" "$TARGET_USERNAME"
+		log.summary_item "Ubuntu HWE kernel" "$install_hwe"
 	fi
 	log.summary_item "Root" "$root_path"
 	log.summary_item "ESP" "$efi_path"
@@ -446,7 +451,7 @@ setup.generate_configuration() {
 	config_mode=$(stat -c '%a' "$config_file")
 	[[ $config_mode == 600 ]] || log.die "Generated configuration permissions are $config_mode; expected 600."
 	for config_name in root_dev efi_dev boot_dev mp rescue_dev install_rescue keyslot_size iter_time enlarge swap_size btrfs_options suite suite_type secure_boot_mode secure_boot_enrollment EXPERIMENTAL_SBCTL_APPEND \
-		PASSPHRASE TARGET_USERNAME TARGET_USER_PASSWORD NEW_INSTALL_PHASE install_mode install_disk install_disk_identity disk_size_mib esp_size_mib root_size_strategy root_size_percent root_size_mib install_windows windows_size_mib target_hostname target_locale target_timezone keyboard_layout keyboard_variant \
+		PASSPHRASE TARGET_USERNAME TARGET_USER_PASSWORD NEW_INSTALL_PHASE install_hwe install_mode install_disk install_disk_identity disk_size_mib esp_size_mib root_size_strategy root_size_percent root_size_mib install_windows windows_size_mib target_hostname target_locale target_timezone keyboard_layout keyboard_variant \
 		pre_download root_sub_vol enable_tpm snapshot_menu snapshot_menu_pin snapshot_menu_pin_value mok_pin; do
 		grep -q "^export ${config_name}=" "$config_file" ||
 			log.die "Generated configuration is missing required value: $config_name"
@@ -477,6 +482,8 @@ setup.load_configuration() {
 	NEW_INSTALL_PHASE=${NEW_INSTALL_PHASE:-none}
 	[[ $NEW_INSTALL_PHASE == none || $NEW_INSTALL_PHASE == partitions || $NEW_INSTALL_PHASE == filesystems || $NEW_INSTALL_PHASE == encrypted || $NEW_INSTALL_PHASE == subvolumes || $NEW_INSTALL_PHASE == bootstrapped || $NEW_INSTALL_PHASE == configured || $NEW_INSTALL_PHASE == complete ]] ||
 		log.die "NEW_INSTALL_PHASE is invalid: $NEW_INSTALL_PHASE"
+	install_hwe=${install_hwe:-no}
+	[[ $install_hwe == yes || $install_hwe == no ]] || log.die "install_hwe must be yes or no."
 	if [[ $install_mode == new && $invocation != "$INNER_MODE" && $configuration_generated == false ]]; then
 		[[ -r $TUI_INPUT_DEVICE ]] || log.die "Interactive terminal is unavailable: $TUI_INPUT_DEVICE"
 		TARGET_USERNAME="$(tui.input "Initial user name to create" "$TARGET_USERNAME")"
@@ -485,6 +492,10 @@ setup.load_configuration() {
 		[[ -n $TARGET_USER_PASSWORD ]] || log.die "Initial user password cannot be empty."
 		setup.persist_config_value "$config_file" TARGET_USERNAME "$TARGET_USERNAME"
 		setup.persist_config_value "$config_file" TARGET_USER_PASSWORD "$TARGET_USER_PASSWORD"
+		if [[ ${suite_type:-} == ubuntu ]]; then
+			install_hwe="$(tui.toggle "Install the Ubuntu HWE kernel" "${install_hwe:-no}")" || log.die "Invalid HWE kernel toggle."
+			setup.persist_config_value "$config_file" install_hwe "$install_hwe"
+		fi
 	fi
 
 	common.require_nonempty "root_dev" "${root_dev:-}"

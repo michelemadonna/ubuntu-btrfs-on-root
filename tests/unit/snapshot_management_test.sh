@@ -47,6 +47,13 @@ snapshot-management-test.pin_config() {
 	snapshot-management-test.assert_contains "$output" 'SNAPSHOT_PIN_HASH="fake-hash"'
 }
 
+snapshot-management-test.snapper_chroot_mode() {
+	local script="$repository_root/btrfs-snapshots-mng/scripts/snapper-setup"
+
+	rg -q 'snapper --no-dbus -c "\$profile" create-config' "$script"
+	rg -q 'snapper --no-dbus -c "\$profile" set-config' "$script"
+}
+
 snapshot-management-test.kernel_guard() {
 	local menu="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/snapshot-menu.sh"
 	local hook="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/snapshot-menu-hook.sh"
@@ -104,6 +111,7 @@ snapshot-management-test.function_key_mapping() {
 snapshot-management-test.run() {
 	snapshot-management-test.base_config
 	snapshot-management-test.pin_config
+	snapshot-management-test.snapper_chroot_mode
 	snapshot-management-test.kernel_guard
 	snapshot-management-test.initramfs_logging
 	snapshot-management-test.suite_labels

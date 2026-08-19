@@ -26,6 +26,9 @@ selects an unused whole disk and records its size/identity. It calculates ESP,
 optional 10 GiB rescue, root and Windows ranges; gathers suite, LUKS,
 hostname/localization and the initial sudo user/password. Root-all disables
 Windows; insufficient Windows space returns to sizing.
+For Ubuntu new installations, the wizard also asks whether to install HWE:
+Resolute uses `linux-generic-hwe-26.04` and Noble uses
+`linux-generic-hwe-24.04`. The option is not shown for Kali or migration.
 
 New-installation progress is persisted in `NEW_INSTALL_PHASE` in `setup.conf`.
 After a failure, rerunning the script revalidates the live environment and

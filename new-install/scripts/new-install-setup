@@ -294,6 +294,13 @@ new-install.install_ubuntu_manual_packages() {
 	)
 
 	[[ $suite_type == ubuntu ]] || return 0
+	if [[ $install_hwe == yes ]]; then
+		case $suite in
+		resolute) packages+=(linux-generic-hwe-26.04) ;;
+		noble) packages+=(linux-generic-hwe-24.04) ;;
+		*) log.die "No HWE kernel package mapping exists for Ubuntu suite: $suite" ;;
+		esac
+	fi
 	log.info "Install the required Ubuntu desktop and language packages"
 	apt-get install -y "${packages[@]}"
 	apt-mark manual "${packages[@]}"

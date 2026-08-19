@@ -165,6 +165,15 @@ new-install-test.ubuntu_manual_package_contract() {
 	grep -Fq 'new-install.install_ubuntu_manual_packages' "$repository_root/setup.sh" || new-install-test.fail "Ubuntu manual package phase is not invoked"
 }
 
+new-install-test.hwe_kernel_contract() {
+	local installer="$repository_root/new-install/scripts/new-install-setup"
+
+	grep -Fq 'linux-generic-hwe-26.04' "$installer" || new-install-test.fail "Resolute HWE package is missing"
+	grep -Fq 'linux-generic-hwe-24.04' "$installer" || new-install-test.fail "Noble HWE package is missing"
+	grep -Fq 'Install the Ubuntu HWE kernel' "$repository_root/setup.sh" || new-install-test.fail "HWE prompt is missing"
+	grep -Fq 'install_hwe' "$repository_root/setup.sh" || new-install-test.fail "HWE choice is not persisted"
+}
+
 new-install-test.layout_all_space
 new-install-test.layout_with_rescue_and_windows
 new-install-test.reject_windows_with_all_space
@@ -179,4 +188,5 @@ new-install-test.deferred_device_validation_contract
 new-install-test.configuration_prompt_contract
 new-install-test.checkpoint_contract
 new-install-test.ubuntu_manual_package_contract
+new-install-test.hwe_kernel_contract
 printf 'new_install_test: PASS\n'

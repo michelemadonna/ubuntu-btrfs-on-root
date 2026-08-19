@@ -13,9 +13,11 @@ snapper-setup.configure_profile() {
 	local mountpoint=$2
 
 	log.info "Create Snapper profile '$profile' for $mountpoint"
-	snapper -c "$profile" create-config "$mountpoint"
+	# The installer runs in a chroot where the target system bus is unavailable;
+	# use Snapper's local path for profile creation and configuration.
+	snapper --no-dbus -c "$profile" create-config "$mountpoint"
 	log.info "Enable timeline snapshots, sudo access and ACL synchronization for '$profile'"
-	snapper -c "$profile" set-config \
+	snapper --no-dbus -c "$profile" set-config \
 		'TIMELINE_CREATE=yes' \
 		'ALLOW_GROUPS=sudo' \
 		'SYNC_ACL=yes'

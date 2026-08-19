@@ -54,6 +54,9 @@ and consumers before editing behavior.
 - A new Ubuntu target installs and manually marks the required desktop,
   language/input-method, VMware and base package set after `debootstrap`;
   this policy does not apply to Kali.
+- Ubuntu new-install HWE selection maps exactly `resolute` to
+  `linux-generic-hwe-26.04` and `noble` to `linux-generic-hwe-24.04`; no HWE
+  prompt or package is used for Kali or migration.
 - New-installation checkpoints in `NEW_INSTALL_PHASE` are persisted atomically;
   destructive phases are never marked complete before their commands succeed,
   and a rerun never recreates a completed GPT, filesystem, LUKS, subvolume or
