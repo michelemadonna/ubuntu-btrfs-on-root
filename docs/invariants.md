@@ -61,6 +61,9 @@ and consumers before editing behavior.
   destructive phases are never marked complete before their commands succeed,
   and a rerun never recreates a completed GPT, filesystem, LUKS, subvolume or
   bootstrap phase.
+- Common chroot checkpoints are persisted atomically in the target at
+  `/var/lib/ubuntu-btrfs-on-root/install-phase`; Secure Boot, Snapper and UKI
+  are skipped only after their preceding command succeeds.
 - The configured Btrfs swapfile is mode 0600 and has a `/swap/swapfile` fstab
   entry before the new-installation validation succeeds.
 - Kali verifies downloaded archive keys against the pinned official fingerprint;

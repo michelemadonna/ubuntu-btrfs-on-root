@@ -84,6 +84,12 @@ and persistent storage files, restores resolver/policy files and leaves target
 mounts and mapper `root` open. Failures after destructive storage operations use
 the outer cleanup trap to retain those resources for diagnosis.
 
+The target stores a second checkpoint at
+`/var/lib/ubuntu-btrfs-on-root/install-phase`. It records `secure_boot`,
+`snapshots`, `uki` and `complete` only after each common chroot phase succeeds.
+On a rerun, completed common phases are skipped; `NEW_INSTALL_PHASE=complete`
+alone means only that the storage/bootstrap phase is complete.
+
 ## Secure Boot branches
 
 Detected `secure_boot_mode` affects warnings, never the selected

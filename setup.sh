@@ -50,6 +50,37 @@ setup.persist_config_value() {
 	mv -- "$temporary_file" "$config_file"
 }
 
+setup.inner_phase_number() {
+	case $1 in
+	none) printf '0\n' ;;
+	secure_boot) printf '1\n' ;;
+	snapshots) printf '2\n' ;;
+	uki) printf '3\n' ;;
+	complete) printf '4\n' ;;
+	*) log.die "Unknown inner installation phase: $1" ;;
+	esac
+}
+
+setup.inner_phase_reached() {
+	local current=none
+
+	if [[ -r /var/lib/ubuntu-btrfs-on-root/install-phase ]]; then
+		current="$(</var/lib/ubuntu-btrfs-on-root/install-phase)"
+	fi
+	(($(setup.inner_phase_number "$current") >= $(setup.inner_phase_number "$1")))
+}
+
+setup.persist_inner_phase() {
+	local phase=$1 directory=/var/lib/ubuntu-btrfs-on-root temporary_file
+
+	install -d -m 0755 "$directory"
+	temporary_file="$(mktemp "$directory/.install-phase.XXXXXX")"
+	printf '%s\n' "$phase" >"$temporary_file"
+	chmod 0644 "$temporary_file"
+	mv -- "$temporary_file" "$directory/install-phase"
+	log.info "Checkpoint saved: inner installation phase '$phase'"
+}
+
 setup.mounted_device() {
 	local mountpoint_path=$1
 	local source
@@ -764,9 +795,19 @@ setup.inner_installation() {
 
 	# The Btrfs/LUKS storage phase has already completed outside the chroot.
 	# Security-sensitive phase coordinators execute as isolated entry points.
-	"$repository_root/secure-boot/scripts/secure-boot-setup"
-	"$repository_root/btrfs-snapshots-mng/scripts/btrfs-snapshots-mng-setup"
-	"$repository_root/uki/scripts/install-uki"
+	if ! setup.inner_phase_reached secure_boot; then
+		"$repository_root/secure-boot/scripts/secure-boot-setup"
+		setup.persist_inner_phase secure_boot
+	fi
+	if ! setup.inner_phase_reached snapshots; then
+		"$repository_root/btrfs-snapshots-mng/scripts/btrfs-snapshots-mng-setup"
+		setup.persist_inner_phase snapshots
+	fi
+	if ! setup.inner_phase_reached uki; then
+		"$repository_root/uki/scripts/install-uki"
+		setup.persist_inner_phase uki
+	fi
+	setup.persist_inner_phase complete
 }
 
 setup.restore_chroot_files() {
