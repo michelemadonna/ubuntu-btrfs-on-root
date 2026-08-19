@@ -95,7 +95,7 @@ setup.detect_secure_boot_mode() {
 
 setup.generate_configuration() {
 	local config_file=$1
-	local disk default_disk root_path efi_path boot_path rescue_path name type size detail confirmation config_mode config_name
+	local disk default_disk root_path efi_path boot_path='' rescue_path name type size detail confirmation config_mode config_name
 	local detected_root_path detected_efi_path detected_boot_path boot_default reuse_boot_as_rescue=no install_rescue=yes
 	local minimum_rescue_mib boot_size_mib layout layout_status available_mib required_mib
 	local root_dev=sda3 efi_dev=sda2 boot_dev='' rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu

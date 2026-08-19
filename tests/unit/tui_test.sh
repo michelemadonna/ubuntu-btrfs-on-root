@@ -64,6 +64,7 @@ tui-test.generated_config_contract() {
 		return 1
 	fi
 	rg -q "local root_dev=sda3 efi_dev=sda2 boot_dev='' rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu" "$repository_root/setup.sh"
+	rg -q "local disk default_disk root_path efi_path boot_path='' rescue_path" "$repository_root/setup.sh"
 	rg -q 'Select installation mode' "$repository_root/setup.sh"
 	rg -q 'root_size_strategy == percent' "$repository_root/setup.sh"
 	rg -q 'Reserve partitions for Windows and Windows RE' "$repository_root/setup.sh"
