@@ -789,6 +789,28 @@ setup.configure_target_networkd() {
 	systemctl --root="$mp" disable systemd-networkd.service >/dev/null 2>&1 || true
 }
 
+setup.configure_snap_store_install() {
+	if [[ $install_mode == new && $suite_type == ubuntu ]]; then
+		cat >/etc/systemd/system/ubuntu-btrfs-install-snap-store.service <<-'EOF'
+			[Unit]
+			Description=Install Ubuntu Snap Store
+			After=network-online.target snapd.service
+			Wants=network-online.target snapd.service
+			ConditionPathExists=!/var/lib/ubuntu-btrfs-on-root/snap-store-installed
+
+			[Service]
+			Type=oneshot
+			ExecStart=/bin/sh -c '/usr/bin/snap install snap-store --stable && install -D -m 0644 /dev/null /var/lib/ubuntu-btrfs-on-root/snap-store-installed'
+			RemainAfterExit=yes
+
+			[Install]
+			WantedBy=multi-user.target
+		EOF
+		install -d -m 0755 /var/lib/ubuntu-btrfs-on-root
+		systemctl enable ubuntu-btrfs-install-snap-store.service
+	fi
+}
+
 setup.start_chroot_dbus() {
 	local socket="$mp/run/dbus/system_bus_socket"
 
@@ -1005,6 +1027,7 @@ setup.inner_installation() {
 			log.die "Unable to enable systemd-resolved after package installation."
 		rm -f -- /etc/resolv.conf
 		ln -s /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+		setup.configure_snap_store_install
 	fi
 	if [[ $install_mode == new ]]; then
 		env DEBIAN_FRONTEND=noninteractive dpkg-reconfigure locales
