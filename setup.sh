@@ -761,6 +761,27 @@ setup.preseed_kdump() {
 	log.info "Preseed kdump-tools to enable kdump without an interactive prompt"
 }
 
+setup.prepare_apt_environment() {
+	local man_db_dir=/usr/lib/man-db
+
+	install -d -m 0755 /var/lib/apt/lists /var/cache/apt/archives
+	install -d -m 0700 /var/lib/apt/lists/partial /var/cache/apt/archives/partial
+	if id _apt >/dev/null 2>&1; then
+		chown _apt:root /var/lib/apt/lists/partial /var/cache/apt/archives/partial
+	fi
+	if [[ -d $man_db_dir ]]; then
+		chmod 0755 "$man_db_dir"
+		while IFS= read -r library; do
+			chmod 0644 "$library"
+		done < <(find "$man_db_dir" -maxdepth 1 -type f -name 'libmandb-*.so' -print)
+	fi
+	install -d -m 0755 /run/dbus
+	if [[ ! -S /run/dbus/system_bus_socket ]]; then
+		rm -f -- /run/dbus/system_bus_socket
+		dbus-daemon --system --fork --nopidfile
+	fi
+}
+
 setup.pre_download_all() {
 	local -a packages=(
 		asciidoc-base binutils build-essential ca-certificates coreutils cryptsetup-bin
@@ -786,8 +807,8 @@ setup.pre_download_all() {
 setup.inner_installation() {
 	cd "$repository_root"
 	export DEBIAN_FRONTEND=noninteractive
-	dbus-daemon --system --fork
 	rm -rf -- "/boot/efi/EFI/$suite"
+	setup.prepare_apt_environment
 	setup.preseed_kdump
 	apt-get update
 	if [[ $install_mode == new ]]; then
