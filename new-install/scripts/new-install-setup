@@ -146,8 +146,13 @@ new-install.validate_target_disk() {
 	done < <(swapon --noheadings --show=NAME 2>/dev/null || true)
 	while IFS= read -r child_name; do
 		[[ -n $child_name ]] || continue
-		[[ ! -d /sys/class/block/$child_name/holders || -z $(find "/sys/class/block/$child_name/holders" -mindepth 1 -maxdepth 1 -print -quit) ]] ||
-			log.die "Refusing to erase $disk because $child_name has active device-mapper or storage holders."
+		if [[ -d /sys/class/block/$child_name/holders && -n $(find "/sys/class/block/$child_name/holders" -mindepth 1 -maxdepth 1 -print -quit) ]]; then
+			if [[ ${NEW_INSTALL_PHASE:-none} != none && ${mp:-} != '' ]] && mountpoint -q "$mp"; then
+				log.info "Allowing active holders on $child_name while resuming new installation phase $NEW_INSTALL_PHASE"
+			else
+				log.die "Refusing to erase $disk because $child_name has active device-mapper or storage holders."
+			fi
+		fi
 	done < <(lsblk -nrpo KNAME "$canonical_disk" | sed 's|.*/||')
 	log.success "Validated unused whole-disk target $canonical_disk"
 }

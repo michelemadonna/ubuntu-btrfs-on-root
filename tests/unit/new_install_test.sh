@@ -154,6 +154,7 @@ new-install-test.checkpoint_contract() {
 	grep -Fq 'NEW_INSTALL_PHASE' "$repository_root/setup.sh" || new-install-test.fail "checkpoint is not part of setup configuration"
 	grep -Fq 'new-install.phase_reached partitions' "$installer" || new-install-test.fail "partition phase is not resumable"
 	grep -Fq 'Allowing the existing target mount' "$installer" || new-install-test.fail "resume mount is not allowed"
+	grep -Fq 'Allowing active holders' "$installer" || new-install-test.fail "resume device-mapper holder is not allowed"
 }
 
 new-install-test.ubuntu_manual_package_contract() {
