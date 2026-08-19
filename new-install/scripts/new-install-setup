@@ -302,7 +302,7 @@ new-install.install_ubuntu_manual_packages() {
 		ncurses-base ncurses-bin open-vm-tools-desktop thunderbird-locale-en
 		thunderbird-locale-en-gb thunderbird-locale-en-us ubuntu-desktop
 		ubuntu-desktop-minimal ubuntu-minimal ubuntu-restricted-addons
-		ubuntu-standard ubuntu-wallpapers packagekit packagekit-tools
+		ubuntu-standard ubuntu-wallpapers packagekit
 	)
 
 	[[ $suite_type == ubuntu ]] || return 0
