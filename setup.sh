@@ -781,6 +781,10 @@ setup.configure_target_networkd() {
 		[keyfile]
 		unmanaged-devices=*,except:type:wifi,except:type:wwan,except:type:ethernet
 	EOF
+	cat >"$mp/etc/NetworkManager/conf.d/20-systemd-resolved.conf" <<-'EOF'
+		[main]
+		dns=systemd-resolved
+	EOF
 	systemctl --root="$mp" unmask systemd-networkd.service >/dev/null 2>&1 || true
 	systemctl --root="$mp" disable systemd-networkd.service >/dev/null 2>&1 || true
 }
@@ -996,6 +1000,11 @@ setup.inner_installation() {
 		systemctl unmask NetworkManager.service >/dev/null 2>&1 || true
 		systemctl enable NetworkManager.service >/dev/null 2>&1 ||
 			log.die "Unable to enable NetworkManager after package installation."
+		systemctl unmask systemd-resolved.service >/dev/null 2>&1 || true
+		systemctl enable systemd-resolved.service >/dev/null 2>&1 ||
+			log.die "Unable to enable systemd-resolved after package installation."
+		rm -f -- /etc/resolv.conf
+		ln -s /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 	fi
 	if [[ $install_mode == new ]]; then
 		env DEBIAN_FRONTEND=noninteractive dpkg-reconfigure locales
@@ -1031,6 +1040,10 @@ setup.restore_chroot_files() {
 	rm -f -- "$mp/usr/sbin/policy-rc.d" "$mp/etc/resolv.conf"
 	if [[ -e $mp/etc/resolv.conf.chroot-save || -L $mp/etc/resolv.conf.chroot-save ]]; then
 		mv "$mp/etc/resolv.conf.chroot-save" "$mp/etc/resolv.conf"
+	fi
+	if [[ $install_mode == new && $suite_type == ubuntu ]]; then
+		rm -f -- "$mp/etc/resolv.conf"
+		ln -s /run/systemd/resolve/stub-resolv.conf "$mp/etc/resolv.conf"
 	fi
 }
 
