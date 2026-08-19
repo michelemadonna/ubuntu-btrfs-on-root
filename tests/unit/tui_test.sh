@@ -78,6 +78,8 @@ tui-test.generated_config_contract() {
 	rg -q 'setup\.inner_phase_reached snapshots' "$repository_root/setup.sh"
 	rg -q 'setup\.inner_phase_reached uki' "$repository_root/setup.sh"
 	rg -q 'setup\.persist_inner_phase complete' "$repository_root/setup.sh"
+	rg -q "kdump-tools kdump-tools/use_kdump boolean true" "$repository_root/setup.sh"
+	rg -q 'export DEBIAN_FRONTEND=noninteractive' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" secure_boot_enrollment "\$secure_boot_enrollment"' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" install_rescue "\$install_rescue"' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" EXPERIMENTAL_SBCTL_APPEND "\$EXPERIMENTAL_SBCTL_APPEND"' "$repository_root/setup.sh"

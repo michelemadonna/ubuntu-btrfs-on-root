@@ -755,6 +755,12 @@ setup.run_inner_installation() {
 	unshare --mount --fork chroot "$mp" "$inner_repository/$script_name" "$INNER_MODE"
 }
 
+setup.preseed_kdump() {
+	common.require_commands debconf-set-selections
+	printf '%s\n' 'kdump-tools kdump-tools/use_kdump boolean true' | debconf-set-selections
+	log.info "Preseed kdump-tools to enable kdump without an interactive prompt"
+}
+
 setup.pre_download_all() {
 	local -a packages=(
 		asciidoc-base binutils build-essential ca-certificates coreutils cryptsetup-bin
@@ -779,8 +785,10 @@ setup.pre_download_all() {
 
 setup.inner_installation() {
 	cd "$repository_root"
+	export DEBIAN_FRONTEND=noninteractive
 	dbus-daemon --system --fork
 	rm -rf -- "/boot/efi/EFI/$suite"
+	setup.preseed_kdump
 	apt-get update
 	if [[ $install_mode == new ]]; then
 		new-install.install_ubuntu_manual_packages
