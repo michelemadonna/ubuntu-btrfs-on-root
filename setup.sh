@@ -39,6 +39,16 @@ setup.persist_runtime_devices() {
 	mv "$temporary_file" "$config_file"
 }
 
+setup.persist_config_value() {
+	local config_file=$1 name=$2 value=$3 temporary_file
+
+	temporary_file="$(mktemp "${config_file}.XXXXXX")"
+	chmod 0600 "$temporary_file"
+	cp -- "$config_file" "$temporary_file"
+	sed -i "s|^export ${name}=.*$|$(printf 'export %s=%q' "$name" "$value")|" "$temporary_file"
+	mv -- "$temporary_file" "$config_file"
+}
+
 setup.mounted_device() {
 	local mountpoint_path=$1
 	local source
@@ -450,7 +460,7 @@ setup.generate_configuration() {
 }
 
 setup.load_configuration() {
-	local config_file="$repository_root/setup.conf"
+	local config_file="$repository_root/setup.conf" invocation=${1:-}
 
 	if [[ ! -e $config_file ]]; then
 		setup.generate_configuration "$config_file"
@@ -461,6 +471,12 @@ setup.load_configuration() {
 	source "$config_file"
 	install_mode=${install_mode:-migration}
 	[[ $install_mode == migration || $install_mode == new ]] || log.die "install_mode must be migration or new."
+	if [[ $install_mode == new && $invocation != "$INNER_MODE" ]]; then
+		[[ -r $TUI_INPUT_DEVICE ]] || log.die "Interactive terminal is unavailable: $TUI_INPUT_DEVICE"
+		TARGET_USERNAME="$(tui.input "Initial user name to create" "$TARGET_USERNAME")"
+		new-install.validate_username "$TARGET_USERNAME"
+		setup.persist_config_value "$config_file" TARGET_USERNAME "$TARGET_USERNAME"
+	fi
 
 	common.require_nonempty "root_dev" "${root_dev:-}"
 	common.require_nonempty "efi_dev" "${efi_dev:-}"
@@ -820,7 +836,7 @@ setup.main() {
 	if [[ ${1:-} != "$INNER_MODE" ]]; then
 		setup.parse_arguments "$@"
 	fi
-	setup.load_configuration
+	setup.load_configuration "${1:-}"
 	log.info "Script path: $script_path"
 	if [[ $setup_action == install-rescue-live ]]; then
 		setup.install_rescue_system

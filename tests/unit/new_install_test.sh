@@ -123,6 +123,7 @@ new-install-test.user_and_swap_contract() {
 	if grep -Fq 'TARGET_PASSWORD' "$repository_root/setup.sh" "$installer"; then
 		new-install-test.fail "root password variable remains in the new-installation flow"
 	fi
+	grep -Fq 'Initial user name to create' "$repository_root/setup.sh" || new-install-test.fail "existing new configuration does not request the username"
 }
 
 new-install-test.layout_all_space
