@@ -1,12 +1,11 @@
 # Testing
 
-This document owns validation procedure, evidence labels and the external-tool
-inventory. Tests must not mutate workstation disks, firmware, MOK or TPM state.
+Owns validation, evidence labels and tool inventory. Tests never mutate local
+disks, firmware, MOK or TPM.
 
 ## Routine validation
 
-For every changed shell source, including extensionless commands and dracut
-hooks:
+For each changed shell source, including extensionless commands and dracut hooks:
 
 ```bash
 bash -n <file>
@@ -14,11 +13,10 @@ shellcheck -x <file>
 shfmt -d <file>
 ```
 
-Dracut sources hook files through `/bin/sh` regardless of their shebang. Run
-`dash -n` on sourced hooks as well; function names and syntax must therefore be
-accepted by Dash even when the hook file declares Bash.
+Dracut sources hooks through `/bin/sh`; despite Bash shebangs, run `dash -n` and
+keep functions/syntax Dash-compatible.
 
-Run relevant tests directly from the repository root:
+From repository root, run relevant tests:
 
 ```bash
 for test_file in tests/unit/*_test.sh; do
@@ -26,12 +24,11 @@ for test_file in tests/unit/*_test.sh; do
 done
 ```
 
-Then run `git diff --check`, inspect the full diff and search for credentials,
-private keys and unintended device paths.
+Run `git diff --check`; inspect the full diff for credentials, private keys and
+unintended devices.
 
-`tests/validate.sh` is not authoritative: its root calculation currently walks
-above this repository, it selects only `*.sh`, misses extensionless commands and
-does not execute the unit tests.
+`tests/validate.sh` is not authoritative: it resolves above the repository,
+selects only `*.sh`, misses extensionless commands and skips unit tests.
 
 ## Unit-test coverage
 
@@ -47,28 +44,26 @@ does not execute the unit tests.
 | `uki_test.sh` | command line, UKI and kernel-hook behavior |
 | `tpm_test.sh` | TPM configuration and enrollment argv |
 
-Prefer fixtures and command doubles for transformations, path selection,
-configuration rendering, ordering and failure propagation. Never require root
-for logic that can be isolated.
+Use fixtures/doubles for transformations, paths, rendering, ordering and
+failures. Isolatable logic never requires root.
 
 ## Artifact checks
 
-Safe checks may inspect temporary or prebuilt artifacts:
+Safe checks inspect:
 
 - fstab, crypttab and generated `setup.conf`;
-- rescue GRUB/loopback configuration and sizing calculations;
+- rescue GRUB/loopback configuration and sizing;
 - public ESP certificates and absence of private material;
 - kernel-install, ukify, TPM and snapshot-menu configuration;
 - rEFInd ordering and UKI filename correspondence;
-- UKI signature, PE sections, embedded version and initramfs file list.
+- UKI signature, PE sections, version and initramfs file list.
 
-Post-summary validation may inspect current artifacts, but must not enroll keys,
-alter tokens, delete snapshots or modify firmware.
+Post-summary checks inspect artifacts but never enroll keys, alter tokens,
+delete snapshots or modify firmware.
 
-Snapshot-menu initramfs diagnostics are written to the kernel journal with the
-`snapshot-menu:` prefix. They include compatible evdev discovery, matching
-trigger events, marker creation, root-device resolution, menu result and
-Plymouth restoration. After a boot, inspect them with:
+Snapshot initramfs diagnostics prefix `snapshot-menu:` reports compatible evdev
+discovery, matching triggers, marker, root-device resolution, menu result and
+Plymouth restoration:
 
 ```bash
 journalctl -b -k --no-pager | grep 'snapshot-menu:'
@@ -76,9 +71,8 @@ journalctl -b -k --no-pager | grep 'snapshot-menu:'
 
 ## External tools used by production scripts
 
-This inventory is derived from current `require_commands` checks and direct
-invocations. Shell builtins are omitted; common POSIX/coreutils text and file
-commands are grouped.
+Derived from `require_commands` and direct calls; builtins are omitted and
+POSIX/coreutils grouped.
 
 | Area | Tools |
 | --- | --- |
@@ -90,14 +84,12 @@ commands are grouped.
 | Snapshot/initramfs | `snapper`, `dracut`, `dialog`, `gcc`, `sha256sum`, dracut `getarg`, optional `plymouth` |
 | UKI/kernel | `kernel-install`, `ukify`, `lsinitrd`, `objcopy`, `objdump`, `python3` |
 | TPM | `systemd-cryptenroll`, `cryptsetup` |
-| Dependency fallback | `git`, `curl`, Go toolchain, `jq`, `file` |
+| Dependency fallback | `git`, `curl`, `gpg`, Go toolchain, `jq`, `file` |
 
-Package names installed/pre-downloaded by setup include providers such as
-`dosfstools`, `e2fsprogs`, `sbsigntool`, `systemd-ukify`, `tpm2-tools`,
-`tpm2-tss`, `refind`, `fwupd`, `snapper`, `inotify-tools`, `dracut` and build
-dependencies.
-Availability still depends on the selected distribution, suite and dependency
-fallback paths.
+Setup installs/pre-downloads `dosfstools`, `e2fsprogs`,
+`sbsigntool`, `systemd-ukify`, `tpm2-tools`, `tpm2-tss`, `refind`, `fwupd`,
+`snapper`, `inotify-tools`, `dracut` and build dependencies. Availability varies
+by distribution, suite and fallback.
 
 ## Development tools used for repository validation
 
@@ -109,30 +101,28 @@ fallback paths.
 
 ## Destructive integration test
 
-Use only a disposable UEFI VM or explicitly allocated hardware. Exercise both
-new installation and the post-Ubiquity/fresh-Kali migration states with
-non-production credentials:
+Use only disposable UEFI VM/hardware and non-production credentials. Exercise
+new installation and post-Ubiquity/fresh-Kali migration:
 
 1. Ubuntu snapshot conversion, Kali top-level migration, separate-boot
    migration and LUKS password recovery;
-2. optional rescue disabled, separate rescue, and accepted/declined boot reuse;
+2. rescue disabled, separate rescue and accepted/declined boot reuse;
 3. both Secure Boot paths, including sbctl outside Setup Mode and MOK reboot;
 4. kernel install/removal and rEFInd newest/submenu behavior;
 5. explicit TPM enrollment, policy-valid unlock and recovery fallback;
 6. normal boot, selector cancellation and compatible read-only snapshot boot;
 7. rescue boot and persistence when installed;
-8. successful setup leaving target mounts and mapper open.
+8. successful setup leaving target mounts and mapper open;
 9. new GPT installation with root-all, root-percentage, Windows-space retry,
    Ubuntu/Kali bootstrap and SATA/NVMe device discovery.
 
-The environment must tolerate partition formatting, in-place encryption and
-firmware/MOK changes. Static and mocked tests cannot establish bootability.
+The environment must tolerate formatting, in-place encryption and firmware/MOK
+changes; static/mocked tests cannot establish bootability.
 
-New-install unit tests mock partitioning and cover calculations only. They are
-not evidence that a target was bootstrapped, encrypted, booted, or installed
-alongside Windows. Destructive integration must additionally cover SATA, NVMe
-and virtual-disk names, archive keyrings, rescue splitting, and each supported
-suite on disposable media.
+New-install unit tests mock partitioning/calculations; they do not prove a
+bootstrapped, encrypted, booted or Windows-coexisting target. Destructive tests
+also cover SATA/NVMe/virtual disks, archive keyrings, rescue splitting and every
+supported suite.
 
 ## Reporting evidence
 

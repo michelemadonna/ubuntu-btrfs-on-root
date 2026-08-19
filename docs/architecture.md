@@ -1,13 +1,12 @@
 # Architecture
 
-This document owns component boundaries and installed artifacts. See
-`boot-flow.md` for sequencing, `invariants.md` for constraints and `testing.md`
-for verification.
+Owns boundaries/artifacts; see `boot-flow.md` for order,
+`invariants.md` for constraints and `testing.md` for verification.
 
 ## System boundary
 
-The project converts a fresh Ubuntu/Kali installation or creates one from a
-live session with `debootstrap`. The migration default device layout is:
+Project migrates a fresh Ubuntu/Kali installation or creates one with
+`debootstrap`. Migration defaults to:
 
 | Device | Initial role | Result |
 | --- | --- | --- |
@@ -15,49 +14,41 @@ live session with `debootstrap`. The migration default device layout is:
 | `/dev/sda2` | FAT32 ESP at `/boot/efi` | label `ESP`; rEFInd, UKIs, fwupd and public certificates |
 | `/dev/sda3` | unencrypted Btrfs `/` | in-place LUKS2 container exposed as `/dev/mapper/root` |
 
-Device names are configurable. Ubuntu discovery expects the installed root at
-`/target`, the ESP at `/target/boot/efi` and an optional separate boot at
-`/target/boot`. Kali setup can mount those configured filesystems itself.
-`/cdrom` supplies the Ubuntu live rescue source. Kali migration disables rescue;
-new installation requires a source containing `casper/` when rescue is selected.
+Devices are configurable. Ubuntu discovery expects `/target`,
+`/target/boot/efi` and optional `/target/boot`; Kali mounts configured
+filesystems. `/cdrom` supplies Ubuntu rescue. Kali migration disables rescue;
+new installation requires `casper/` when selected.
 
-Installed persistent data and swap live inside LUKS2. The ESP and optional
-rescue environment are outside that encryption boundary. A migrated old boot
-partition is unused afterward unless explicitly reformatted for rescue.
+Persistent data and swap are inside LUKS2. ESP and rescue remain outside it. A
+migrated boot partition is unused unless explicitly reformatted for rescue.
 
 ## Orchestrator and framework
 
-`setup.sh` owns the configuration wizard and the outer live/inner chroot split.
-The outer phase dispatches storage conversion or fresh provisioning and
-optional rescue creation; the inner phase installs Secure Boot, snapshots,
-UKIs and optional TPM support.
-Successful completion restores temporary resolver/service-policy files but
-leaves target mounts and `/dev/mapper/root` open.
+`setup.sh` owns the wizard and live/chroot split. Live setup selects the
+`migration`/`new` storage owner and rescue; chroot installs Secure Boot,
+snapshots, UKIs and optional TPM. The target repository copy is installation
+input, not a runtime dependency.
 
 Shared repository code is limited to:
 
-- `lib/log.sh`: colored, namespaced logging and summaries;
-- `lib/common.sh`: shared validation and lifecycle helpers;
-- `lib/tui.sh`: input, password, single/multiple selection and toggles.
+- `lib/log.sh`: namespaced logging and summaries;
+- `lib/common.sh`: cross-subsystem validation and lifecycle helpers;
+- `lib/tui.sh`: input, password, selection and toggles.
 
-Domain policy remains in its subsystem. The repository copy placed in the
-target is installation input, not a runtime dependency.
+Domain policy stays local. Success restores temporary resolver/policy files and
+leaves target mounts and mapper `root` open.
 
-## Storage subsystem
+## Storage subsystems
 
-`btrfs-root/scripts/btrfs-root-setup` coordinates exact-device/mount checks,
-ESP labelling, subvolume conversion, in-place LUKS2 encryption and fstab/
-crypttab generation.
+`btrfs-root/scripts/btrfs-root-setup` owns migration validation, ESP labelling,
+subvolumes, separate boot, in-place LUKS2 and atomic fstab/crypttab.
 
-`new-install/scripts/new-install-setup` owns whole-disk validation, GPT geometry,
-`sgdisk`, fresh LUKS2/Btrfs creation and `debootstrap`. It discovers partitions
-by unique GPT labels and returns resolved device paths to the orchestrator.
-Both storage paths converge before chroot preparation.
+`new-install/scripts/new-install-setup` owns whole-disk validation/GPT, fresh
+LUKS2/Btrfs, `debootstrap` and base setup. Unique GPT labels resolve paths for
+`setup.sh`; both storage paths share chroot preparation.
 
-New GPT order is ESP, optional rescue reserve, encrypted Linux root, and—only
-for percentage root sizing—optional MSR, Windows and Windows RE. Rescue starts
-as one 10 GiB range so its owning subsystem can split FAT and persistence inside
-that range.
+GPT order is ESP, optional rescue, encrypted Linux root and, only with percentage
+sizing, optional MSR/Windows/Windows RE. Rescue is one split-ready 10 GiB range.
 
 Each suite is a top-level sibling container:
 
@@ -73,89 +64,73 @@ Each suite is a top-level sibling container:
 └── @swap/swapfile
 ```
 
-For example, `@noble`, `@resolute` and `@kali` can coexist directly below Btrfs
-top level.
-Root snapshots are under `@$suite/@/.snapshots`; home snapshots are under
-`@$suite/@home/.snapshots`.
+`@noble`, `@resolute` and `@kali` coexist at Btrfs top level. Root/home
+snapshots are `@$suite/@/.snapshots` and `@$suite/@home/.snapshots`.
 
-If `boot_dev` is configured, its content is copied to `@$suite/@/boot`, checked
-and the old `/boot` mount is omitted from the regenerated fstab. The partition
-is preserved unless selected for rescue. LUKS conversion reserves 32 MiB, uses
-Argon2id with configurable `iter_time` (milliseconds), opens mapper `root` and
-then grows Btrfs to the available mapped size.
+Separate boot moves to `@$suite/@/boot`; fstab omits its old mount and preserves
+the partition unless reused for rescue. Migration reserves 32 MiB for LUKS2,
+uses millisecond Argon2id `iter_time`, opens `root` and grows Btrfs.
 
 ## Rescue subsystem
 
-`rescue/script/install-rescue-live` is enabled by `install_rescue=yes` or run
-independently with `setup.sh --install-rescue-live`. It requires exact target
-confirmation and a GPT partition large enough for:
+`rescue/script/install-rescue-live`, selected by `install_rescue=yes` or
+`setup.sh --install-rescue-live`, owns exact-device confirmation and splitting a
+large enough GPT partition:
 
 ```text
 max(7168 MiB, live-source size + 256 MiB) + 512 MiB
 ```
 
-The leading range becomes FAT32 `UBUNTU_LIVE`; the released trailing range
-becomes ext4 `writable`. Casper entries receive `persistent`. The wizard first
-suggests an eligible `boot_dev`; otherwise it requests another partition.
+It creates leading FAT32 `UBUNTU_LIVE` and trailing ext4 `writable` partitions;
+Casper entries receive `persistent`. The wizard may suggest eligible
+`boot_dev`, otherwise another partition is required.
 
 ## Secure Boot subsystem
 
-`secure-boot/scripts/secure-boot-setup` coordinates key creation, the explicit
-`sbctl`/`mok` choice, public-certificate export, rEFInd and fwupd.
+`secure-boot/scripts/secure-boot-setup` coordinates the explicit `sbctl`/`mok`
+path, key creation, public-certificate export, rEFInd and fwupd. Enrollment
+policy is owned by `invariants.md`.
 
-- `sbctl`: direct loader and default `sbctl enroll-keys --microsoft` enrollment,
-  possible only in firmware Setup Mode. Other states warn and skip enrollment.
-- `mok`: shim, MokManager and `mokutil` import using the wizard PIN; firmware
-  state never causes an automatic path change.
+The upstream fallback executable is `/usr/sbin/sbctl`. Private keys remain in
+`/var/lib/sbctl/keys`; the ESP receives only `PK.pem`, `KEK.pem`, `db.pem` and
+optional `db.cer` below `/boot/efi/EFI/keys`.
 
-`EXPERIMENTAL_SBCTL_APPEND=true` alone enables the older partial append flow.
-The upstream fallback executable is installed at `/usr/sbin/sbctl`.
-Private keys stay below `/var/lib/sbctl/keys`; the ESP receives only `PK.pem`,
-`KEK.pem`, `db.pem` and optional `db.cer` under `/boot/efi/EFI/keys`.
-
-rEFInd, selected drivers, fwupd EFI files and UKIs are signed with the local db
-identity and verified. Direct mode installs signed rEFInd at the fallback path;
-MOK mode boots it through shim. `refind_themes.zip` is a required repository
-artifact. The cleanup in `refind-setup` removes only validated EFI child trees
-containing a regular `grubx64.efi`.
+rEFInd, selected drivers, fwupd EFI files and UKIs are signed and verified with
+the local db identity. Direct mode uses signed fallback rEFInd; MOK mode reaches
+it through shim. `refind_themes.zip` remains a required repository artifact.
+`refind-setup` cleanup removes only validated EFI child trees containing regular
+`grubx64.efi`.
 
 ## Snapshot subsystem
 
-`btrfs-snapshots-mng/` installs Snapper root/home profiles and optional dracut
-module `92snapshot-menu`. A compiled evdev listener detects B/b before
-cryptsetup, then exits and closes its input descriptors. The hook runs after
-LUKS availability but before the real-root mount, offers compatible root
-snapshots, mounts the selection read-only and uses an ephemeral overlay.
-Failure or cancellation returns to normal boot.
+`btrfs-snapshots-mng/` owns Snapper root/home profiles and optional dracut module
+`92snapshot-menu`. Its compiled evdev listener detects B/b before cryptsetup;
+the hook selects compatible root snapshots after unlock but before real-root
+mount, using a read-only snapshot and ephemeral overlay.
 
-The dracut module explicitly includes the kernel `evdev` handler so modular
-Kali kernels expose `/dev/input/event*` during the early trigger window.
-
-Menu settings come from `/etc/snapshot-menu.conf` and are embedded in the
-initramfs, so changes require `generate-uki --all`.
+The module includes kernel `evdev`, exposing `/dev/input/event*` on modular Kali
+kernels. Settings from
+`/etc/snapshot-menu.conf` are embedded in initramfs; changes require
+`generate-uki --all`.
 
 ## UKI and kernel lifecycle
 
 `uki/scripts/install-uki` configures kernel-install `layout=uki`, dracut and
-ukify. UKIs are stored in `/boot/efi/EFI/Linux` and include kernel, initramfs,
+ukify. `/boot/efi/EFI/Linux` holds signed UKIs containing kernel, initramfs,
 command line, metadata, splash and PCR signature.
 
-`debian-kernel-install-bridge` maps Debian postinst/postrm events to
-`kernel-install add/remove`. Hook `99-refind-menu.install` atomically rebuilds
-the menu newest-first: the newest kernel is the main entry and `Tab` exposes all
-older versions. `generate-uki` validates signatures, PE sections, version and
-snapshot-menu content, removing invalid artifacts.
+`debian-kernel-install-bridge` maps Debian postinst/postrm to kernel-install.
+`99-refind-menu.install` atomically rebuilds the newest-first menu;
+`generate-uki` validates and removes invalid artifacts.
 
 ## TPM and standalone artifacts
 
-`tpm/scripts/install-tpm` writes `/etc/tpm.conf` but does not enroll LUKS.
-`tpm-enroll` backs up the LUKS header, preserves recovery access and enrolls the
-configured literal/signed PCR policy, optionally with a PIN. `tpm-reseal`
-requires explicit TPM-token replacement acknowledgement; `tpm-status` is
-read-only.
+`tpm/scripts/install-tpm` writes `/etc/tpm.conf` without enrollment.
+`tpm-enroll` backs up the header, preserves recovery and enrolls configured
+literal/signed PCR policy, optionally with PIN; `tpm-reseal` requires explicit
+token-replacement acknowledgement; `tpm-status` is read-only.
 
-These installed commands contain their own logging and remain independent of
-the repository:
+These commands remain repository-independent:
 
 - `/usr/sbin/generate-uki`;
 - `/usr/sbin/tpm-enroll`;

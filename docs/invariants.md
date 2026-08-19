@@ -1,153 +1,145 @@
 # Invariants
 
-These are change constraints, not a description of the full flow. Trace every
-producer and consumer before altering one.
+These constraints survive every change. Trace affected producers, artifacts
+and consumers before editing behavior.
 
-## Execution and devices
+## Execution, migration and devices
 
-- Primary setup runs as root before first boot from a UEFI x86-64 live session.
-  Migration consumes a fresh distribution installation; new installation owns
-  whole-disk partitioning and bootstraps the target.
-- Destructive targets must be explicit, distinct where required, real block
-  devices and validated for expected type/source before mutation.
-- Root starts as unencrypted Btrfs mounted at `mp`; the ESP is FAT and receives
-  label `ESP` without reformatting.
-- Kali mode may start with no filesystems mounted; setup mounts the configured
-  root, ESP and optional separate `/boot` before conversion.
-- An exact separate mount at `/target/boot` is optional and never created for
-  discovery; the ESP path still remains `/target/boot/efi`.
+- Primary setup requires root and a pre-first-boot UEFI x86-64 live session;
+  migration accepts only fresh distribution installations.
+- Destructive targets are explicit real block devices, distinct where required,
+  and validated for expected type/source before mutation.
+- Migration starts with unencrypted Btrfs at `mp`; its FAT ESP is labelled `ESP`
+  without reformatting.
+- Kali migration may start unmounted; setup mounts root, ESP and optional
+  `/boot`. Discovery never creates `/target/boot`; if present it is exact, while
+  ESP remains `/target/boot/efi`.
 - `setup.prepare_target` preserves target mounts except conditional
-  `/target/cdrom`; successful completion leaves target mounts and mapper `root`
-  open.
+  `/target/cdrom`; success leaves target mounts and mapper `root` open.
 - Secrets and private keys never enter logs, summaries, tests or commits.
-- New installation accepts only an unused whole disk that is not the live/root
-  source and has no mounts, swap or holders. Its exact path must be typed after
-  layout validation and before `sgdisk`.
-- `install_mode` is exactly `migration` or `new`. Windows is allowed only with
-  percentage root sizing; insufficient space returns to sizing without disk
-  mutation.
 
 ## Btrfs, boot and LUKS
 
-- Suite containers are siblings below Btrfs top level: `@noble`, `@resolute`,
-  never `@ubuntu/@noble`.
-- Active root is `@$suite/@`; dedicated data subvolumes remain children of the
-  same suite container.
-- Root snapshots are `@$suite/@/.snapshots`; home snapshots are
-  `@$suite/@home/.snapshots`. Only root snapshots are bootable.
-- Do not delete original top-level data until root snapshot and relocations
-  succeed.
-- A configured separate boot is copied and validated in `@$suite/@/boot` before
-  unmount; regenerated fstab contains `/boot/efi` but no separate `/boot`.
-- `fstab` is regenerated from scratch using the UUIDs of the encrypted Btrfs
-  filesystem and ESP, then includes the configured root, data and swap
-  subvolume entries.
+- Suite containers are top-level siblings (`@noble`, `@resolute`, `@kali`),
+  never `@ubuntu/@noble`; active root is `@$suite/@` and data stays under its
+  suite. Only `@$suite/@/.snapshots`, not `@$suite/@home/.snapshots`, boots.
+- Original top-level data remains until root snapshot and relocations succeed.
+- A separate boot is copied and validated at `@$suite/@/boot` before unmount;
+  regenerated fstab keeps `/boot/efi` but no separate `/boot`.
+- `fstab` is regenerated from encrypted-Btrfs/ESP UUIDs with configured root,
+  data and swap subvolumes.
 - Kali conversion validates `@`, `@home`, `@root`, `@usr@local`, `@var@log`
-  and `@.snapshots`; it copies their root, home, root-account, local, cache and
-  log data into the `@kali` layout, then deletes migrated top-level source
-  subvolumes while preserving `@kali`.
-- In-place encryption uses LUKS2 mapper `root`, reserves 32 MiB and identifies
-  the volume by LUKS UUID in crypttab.
-- New installation creates LUKS2 directly with mapper `root` and creates the
-  same suite/data subvolumes without reencryption.
-- Kali bootstrap verifies the downloaded archive keyring against the pinned
-  official archive fingerprint; signature verification may not be disabled.
-- Ubuntu uses its archive/security mirrors and `main restricted universe
-  multiverse`; Kali uses only `kali-rolling` with `main contrib non-free
-  non-free-firmware`. Their mirrors and archive keyrings must never be mixed.
-- `iter_time` is a positive Argon2id calibration target in milliseconds, not a
-  literal iteration count.
-- Preserve password/recovery access and non-TPM keyslots.
+  and `@.snapshots`; it migrates root, home, root-account, local, cache and log
+  data, then removes source subvolumes while preserving `@kali`.
+- In-place LUKS2 uses mapper `root`, reserves 32 MiB and records its UUID in
+  crypttab. `iter_time` is a positive Argon2id millisecond target, not a count.
+- Password/recovery access and non-TPM keyslots remain recoverable.
+
+## New installation
+
+- New installation accepts only an unused whole disk, neither live/root source
+  nor mounted, swapped or held. Identity, size and layout are revalidated; the
+  exact path is typed before `sgdisk`.
+- GPT order is ESP, optional 10240 MiB rescue reserve, encrypted Linux root and,
+  only with percentage root sizing, optional MSR, Windows and Windows RE.
+  Partitions are resolved uniquely by GPT label after udev settles.
+- `root_size_strategy=all` forbids Windows; insufficient percentage space
+  returns to sizing before mutation.
+- Fresh LUKS2 mapper `root` and suite/data subvolumes precede `debootstrap`;
+  reencryption is not used.
+- Kali verifies downloaded archive keys against the pinned official fingerprint;
+  signatures stay enabled. Ubuntu uses archive/security plus `main restricted
+  universe multiverse`; Kali uses only `kali-rolling` plus `main contrib non-free
+  non-free-firmware`. Mirrors/keyrings never mix.
+- Requested rescue requires a live source containing `casper/`. Resolved root,
+  ESP and rescue devices atomically replace placeholders after GPT creation and
+  before the repository is copied into the target.
 
 ## Rescue
 
-- `install_rescue=no` skips rescue and permits empty `rescue_dev`; the explicit
-  standalone action still requires a target.
-- When enabled, suggest `boot_dev` only if it satisfies
+- `install_rescue=no` skips rescue and permits empty `rescue_dev`; standalone
+  rescue still needs a target.
+- Suggest `boot_dev` only if it satisfies
   `max(7168 MiB, source + 256 MiB) + 512 MiB`; refusal or ineligibility requires
-  another selected partition.
-- Reusing boot requires completed boot migration and explicit confirmation.
-- Rescue requires GPT, exact target confirmation and a source different from
-  the target. It rejects individual FAT files above 4095 MiB.
-- Persistence is a separate trailing ext4 partition labelled `writable`; no
-  file-backed persistence may be introduced.
-- Rescue and persistence remain outside root encryption.
+  another partition. Reuse also requires completed boot migration and explicit
+  confirmation.
+- Rescue requires GPT, exact target confirmation, a distinct source and no FAT
+  file above 4095 MiB.
+- Persistence is a separate trailing ext4 partition labelled `writable`, never
+  a file. Rescue and persistence remain outside root encryption.
 - New installation reserves exactly 10240 MiB before the rescue installer
-  splits that range into FAT live and trailing ext4 persistence.
+  splits it into FAT live and trailing ext4 persistence.
 
 ## Secure Boot
 
-- Never disable verification as a workaround or replace an existing private
-  signing hierarchy automatically.
+- Never bypass verification or automatically replace a private signing hierarchy.
 - `secure_boot_enrollment` is the user's `sbctl`/`mok` choice;
-  `secure_boot_mode` is only the detected `setup`/`enabled`/`disabled`/`unknown`
-  state. No automatic fallback is allowed.
-- Default direct enrollment is exactly `sbctl enroll-keys --microsoft` and can
-  complete only in Setup Mode. Other states warn and skip enrollment.
+  `secure_boot_mode` is only detected `setup`/`enabled`/`disabled`/`unknown`.
+  Detection never changes the selected path.
+- Direct enrollment is exactly `sbctl enroll-keys --microsoft`, only in Setup
+  Mode; other states warn and skip it.
 - Partial db/KEK/PK append/preservation runs only with
   `EXPERIMENTAL_SBCTL_APPEND=true` and keeps PK last.
-- MOK requests a PIN only for the MOK path and may be prepared with Secure Boot
+- `mok_pin` is required only for MOK, which may be prepared with Secure Boot
   enabled or disabled.
 - `$ESP/EFI/keys` contains only public `PK.pem`, `KEK.pem`, `db.pem` and optional
   `db.cer`; private `.key`, `.auth` and `.esl` material is forbidden.
 - rEFInd, selected drivers, fwupd and every accepted UKI retain verified db
   signatures.
-- EFI cleanup remains contained to validated immediate child trees containing a
+- EFI cleanup is limited to validated immediate child trees containing a
   regular file named exactly `grubx64.efi`.
 
 ## UKI lifecycle
 
-- Debian postinst/postrm bridge remains a thin `exec` adapter to
-  `kernel-install add/remove` and propagates failure to package management.
-- Add produces a signed versioned UKI; remove deletes the matching artifact.
-- rEFInd menu regeneration is atomic and newest-first. The newest entry boots
-  normally; `Tab` exposes every older installed version.
-- Reject and remove a UKI that fails signature, required PE section, embedded
+- Debian postinst/postrm remains a thin `exec` to `kernel-install add/remove`,
+  propagating failure to package management.
+- Add creates a signed versioned UKI; remove deletes its matching artifact.
+- rEFInd regeneration is atomic/newest-first; newest boots normally and `Tab`
+  exposes all older installed versions.
+- Reject and remove UKIs failing signature, required PE section, embedded
   version or configured initramfs-content validation.
-- Keep `tpm2-pin=yes` in the command line for both PIN and PINless TPM modes.
-- `generate-uki` remains standalone at `/usr/sbin/generate-uki` after
-  repository removal.
+- Keep `tpm2-pin=yes` in the command line for PIN and PINless TPM modes.
+- `/usr/sbin/generate-uki` remains standalone after repository removal.
 
 ## TPM
 
-- Installation does not enroll a token; enrollment is explicit.
-- Never clear the TPM or enroll during ordinary validation.
+- Installation never enrolls; explicit enrollment is separate. Validation never
+  clears TPM or enrolls.
 - Create a mode-0600 LUKS header backup before token changes.
-- Normal enrollment preserves all existing access. Reseal removes only TPM2
-  tokens and requires explicit wipe acknowledgement.
+- Enrollment preserves all access; reseal removes only TPM2 tokens after
+  explicit wipe acknowledgement.
 - PCR-policy or key changes may invalidate unlock and require documented
   resealing.
 - `tpm-enroll`, `tpm-reseal` and `tpm-status` remain standalone in `/usr/sbin`.
 
 ## Snapshot boot
 
-- No request, cancellation or any selector failure falls back to normal boot.
-- Stop the listener and close its evdev descriptors before cryptsetup may
-  prompt.
-- Discover after LUKS availability and before real-root mount.
-- Mount top level and selected snapshot read-only; runtime writes are ephemeral.
-- Never delete or mutate a snapshot during validation.
+- No request, cancellation or selector failure means normal boot.
+- Stop the listener and close evdev descriptors before cryptsetup may prompt;
+  discovery runs after LUKS availability and before real-root mount.
+- Top level and selected snapshot are read-only; writes are ephemeral and
+  validation never mutates snapshots.
 - `/etc/snapshot-menu.conf` defaults remain `PAGE_SIZE=20`,
   `DESCRIPTION_MAX_LENGTH=24`, `SNAPSHOT_TRIGGER="B"`,
   `SNAPSHOT_TRIGGER_WINDOW_TICKS=50`, `SNAPSHOT_TRIGGER_RESULT_TICKS=0`.
-- The generated configuration records `SUITE`; every current-system label and
-  snapshot-menu title is derived from it rather than a distribution literal.
-- Ubuntu and Kali use the same evdev B/b trigger path; generated configurations
-  do not enable the Plymouth character fallback.
-- Kali must not use a trigger containing `Alt`, because it makes Plymouth leave
-  the graphical splash and moves LUKS prompting to the text console.
+- Generated configuration records `SUITE`; labels/titles derive from it, never a
+  distribution literal.
+- Ubuntu and Kali share the evdev B/b path; generated configurations do not
+  enable the Plymouth character fallback. Kali triggers never contain `Alt`,
+  which would move Plymouth and LUKS prompting to the text console.
 - Ticks are 100 ms, description width is capped at 40, and changes require UKI
   regeneration.
 
-## Configuration and installed artifacts
+## Configuration and artifacts
 
-- Generated `setup.conf` is shell input, mode 0600 and secret-bearing. Wizard
-  defaults do not depend on `setup.conf.example`.
-- Wizard yes/no values remain literal toggles; suite and enrollment selections
-  remain closed sets documented in `AGENTS.md`.
-- `pre_download`, `enable_tpm` and `install_rescue` activate only on literal
-  `yes`. `sb_key_dir` remains unused.
+- Generated `setup.conf` is sourced, mode 0600 and secret-bearing; wizard
+  defaults ignore `setup.conf.example`.
+- Wizard choices: `install_mode` = `migration`/`new`; `root_size_strategy` =
+  `all`/`percent`; `suite`/`suite_type` = `resolute` or `noble` with `ubuntu`,
+  or `kali`/`kali`; `secure_boot_enrollment` = `sbctl`/`mok`; detected
+  `secure_boot_mode` = `setup`/`enabled`/`disabled`/`unknown`;
+  `EXPERIMENTAL_SBCTL_APPEND` = `true`/`false`.
+- Yes/no fields stay literal: only `yes` activates `pre_download`, `enable_tpm`
+  or `install_rescue`; `sb_key_dir` remains unused.
 - Declining final wizard confirmation retains configuration and starts no
   installation work.
-- Resolved new-install device paths replace placeholders atomically after GPT
-  creation and before the repository is copied into the target.

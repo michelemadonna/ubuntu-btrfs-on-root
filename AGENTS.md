@@ -1,85 +1,58 @@
 # Repository Agent Instructions
 
-## Source of truth and documentation ownership
+## Sources and document ownership
 
-The scripts are authoritative. Before changing a subsystem, read its entry
-point, sourced files, installed artifacts and relevant tests.
+Scripts are authoritative. Before changing a subsystem, read its entry point,
+sources, installed artifacts, tests and invariants.
 
-Keep documentation non-duplicative:
-
-- `Readme.md`: user-facing purpose, installation and operation;
+- `Readme.md`: user purpose, installation and operation;
 - `docs/architecture.md`: component ownership and persistent artifacts;
-- `docs/boot-flow.md`: installation, boot and maintenance sequences;
-- `docs/invariants.md`: properties that changes must preserve;
-- `docs/testing.md`: validation procedure and external-tool inventory.
+- `docs/boot-flow.md`: installation, boot and maintenance order;
+- `docs/invariants.md`: properties every change must preserve;
+- `docs/testing.md`: validation, evidence labels and external tools.
 
-Update only the owning document and link to it elsewhere when necessary.
+Update only the owning document; link instead of duplicating content.
 
-## Reasoning policy
+## Working method
 
-Use the default reasoning effort for straightforward tasks.
-
-For tasks involving:
-- architectural decisions
-- changes spanning multiple files
-- non-trivial debugging
-- security-sensitive changes
-- ambiguous requirements
-
-enter Plan mode before making changes.
-
-## Model escalation
-
-Use the primary agent for straightforward tasks.
-
-Delegate to a subagent for tasks that require substantial reasoning, including:
-
-- architectural decisions
-- non-trivial debugging
-- security-sensitive analysis
-- changes spanning multiple subsystems
-- ambiguous requirements
-- investigation requiring comparison of several possible solutions
-
-For straightforward implementation, exploration, formatting, and mechanical
-changes, do not spawn a subagent.
-
-When a task requires substantial reasoning, delegate that portion to the
-`deep_reasoner` agent before implementing it.
+Use default reasoning for straightforward work. Before architectural,
+multi-file, security-sensitive, ambiguous or non-trivial debugging changes,
+enter Plan mode and delegate substantial reasoning to `deep_reasoner`. Keep
+mechanical work in the primary agent.
 
 ## Scope and safety
 
-`setup.sh` runs as root against a fresh Ubuntu or Kali installation. Ubuntu is
-converted from the same live session after Ubiquity, with the target normally
-mounted at `/target`; Kali may start with its configured filesystems unmounted.
-The target ESP is `/target/boot/efi`, an optional separate boot is
-`/target/boot`, and `/cdrom` is the Ubuntu rescue source.
+`setup.sh` runs as root on fresh Ubuntu/Kali. `migration` converts it;
+`new` delegates whole-disk provisioning to `new-install/`. Never mutate storage,
+rescue, firmware, LUKS, TPM or Secure Boot on the development host, or infer a
+destructive target from ambiguous input.
 
-The default devices are an optional rescue `/dev/sda1`, ESP `/dev/sda2` and
-unencrypted Btrfs root `/dev/sda3`. Configuration may override them. Root
-conversion, rescue creation and firmware enrollment are destructive. Never run
-them on the development host or infer a target from ambiguous input.
+Ubuntu migration normally uses root `/target`, ESP `/target/boot/efi`, optional
+boot `/target/boot` and rescue source `/cdrom`; Kali may begin unmounted.
+Defaults—configurable—are rescue `/dev/sda1`, ESP `/dev/sda2` and unencrypted
+Btrfs root `/dev/sda3`.
 
-Priorities are: bootability, data integrity, encryption/recovery, Secure Boot,
+Priorities are bootability, data integrity, encryption/recovery, Secure Boot,
 TPM sealing, rollback, maintainability, then user experience.
 
 ## Repository boundaries
 
-- `setup.sh`: live/chroot orchestration and configuration wizard;
-- `lib/`: functions genuinely shared by repository-bound scripts;
-- `btrfs-root/`: Btrfs layout, separate-boot migration and LUKS conversion;
-- `rescue/`: optional persistent live rescue partition;
+- `setup.sh`: wizard and live/chroot orchestration;
+- `lib/`: genuinely cross-cutting repository helpers;
+- `new-install/`: validated whole-disk GPT, fresh LUKS/Btrfs and bootstrap;
+- `btrfs-root/`: migration layout, separate boot and LUKS conversion;
+- `rescue/`: persistent live rescue partition;
 - `secure-boot/`: keys, enrollment, rEFInd and fwupd;
 - `btrfs-snapshots-mng/`: Snapper and early-boot snapshot selection;
 - `uki/`: kernel-install, dracut, ukify and rEFInd menu integration;
-- `tpm/`: TPM installation and enrollment commands;
+- `tpm/`: TPM installation and explicit enrollment commands;
 - `tests/`: non-destructive shell tests.
 
-Domain logic stays in its subsystem. Add a helper to `lib/` only when multiple
-scripts actually share it. Installed `generate-uki`, `tpm-enroll`, `tpm-reseal`
-and `tpm-status` must remain standalone after the repository is removed.
+Keep domain logic in its subsystem. Add to `lib/` only for real multi-script
+consumers. Installed `generate-uki`, `tpm-enroll`, `tpm-reseal` and `tpm-status`
+remain standalone after repository removal.
 
-## Bash and framework rules
+## Bash, logging and generated files
 
 - Use Bash explicitly, quote expansions, arrays for argv, `local` variables and
   `set -euo pipefail` where compatible.
@@ -87,65 +60,49 @@ and `tpm-status` must remain standalone after the repository is removed.
   failures.
 - Namespace functions by owner, for example `common.require_root` and
   `btrfs-subvol-setup.validate_configuration`.
-- Keep every `cat` heredoc visibly indented. Use `<<-EOF` with leading tabs when
-  generated output must start in column zero.
+- Keep every `cat` heredoc visibly indented; use `<<-EOF` with leading tabs when
+  output must begin in column zero.
 - Never log passphrases, PINs, recovery keys or private material.
 
-Repository logging lives only in `lib/log.sh` and uses `log.*`. Standalone
-installed commands embed compatible local primitives. Preserve icons/colors,
-unstyled summary values and paired rotating `log.section` BEGIN/END banners.
-`log.die` must preserve the failing status; pass captured stderr only when it is
-known not to contain secrets.
+Repository logging lives in `lib/log.sh` as `log.*`; standalone commands embed
+compatible primitives. Preserve icons/colors, unstyled summary values, paired
+rotating `log.section` BEGIN/END banners and `log.die` failure status. Include
+captured stderr only when known secret-free.
 
-Primary setup scripts end with a truthful summary followed immediately by a
-`Post-summary validation`. Validation must be read-only with respect to
-firmware, LUKS tokens, TPM state and snapshots.
+Primary setup scripts end with a truthful summary immediately followed by
+read-only `Post-summary validation`; it never changes firmware, LUKS tokens,
+TPM state or snapshots.
 
 ## Change-sensitive contracts
 
-The complete contract is in `docs/invariants.md`; do not duplicate it here.
-Before changing storage, Secure Boot, UKI, TPM or snapshot behavior, trace the
-relevant invariant to every producer, installed artifact and consumer. Treat
-device validation, recoverable LUKS access and verified boot artifacts as hard
-preconditions rather than cleanup work.
+`docs/invariants.md` is the complete behavioral contract. Before changing
+storage, Secure Boot, UKI, TPM or snapshots, trace the invariant through every
+producer, installed artifact and consumer. Device validation, recoverable LUKS
+access and verified boot artifacts are preconditions, not cleanup.
 
 ## Configuration
 
-`setup.conf` is sourced shell code, mode 0600, ignored by Git and potentially
+`setup.conf` is sourced shell code, mode 0600, Git-ignored and potentially
 secret-bearing. `setup.conf.example` is reference data only; wizard defaults
 remain built into `setup.sh`.
 
-The wizard discovers mounted Ubuntu targets or selects Kali target partitions,
-groups prompts, uses hidden secret input and yes/no toggles, validates its
-generated file, displays a non-secret summary and requires confirmation before
-installation. It does not prompt for `mp`, `keyslot_size`, `btrfs_options` or
-experimental sbctl append behavior.
+The wizard discovers migration mounts or selects an unused disk, groups prompts,
+hides typed secrets, validates configuration, shows a non-secret summary and
+requires confirmation. It does not prompt for `mp`,
+`keyslot_size`, `btrfs_options` or experimental sbctl append behavior.
 
-Only these closed selections are supported currently:
-
-- `install_mode`: `migration`, `new`;
-- `root_size_strategy`: `all`, `percent`;
-- `suite`: `resolute`, `noble`, `kali`;
-- `suite_type`: `ubuntu`, `kali`; selecting suite `kali` forces type `kali`;
-- `secure_boot_enrollment`: `sbctl`, `mok`;
-- `secure_boot_mode`: detected `setup`, `enabled`, `disabled`, `unknown`;
-- `EXPERIMENTAL_SBCTL_APPEND`: `true`, `false`.
-
-`mok_pin` is required only for MOK. Kali migration forces
-`install_rescue=no`; new installation may create rescue only when its live
-source exposes `casper/`. Otherwise, `install_rescue=no` permits an empty
-`rescue_dev`; the standalone rescue action still requires one. `sb_key_dir` is
-currently unused. Preserve the repository-root `refind_themes.zip` dependency.
+Supported closed values, literal-toggle behavior and mode-specific rescue,
+Windows, suite and Secure Boot rules are owned by `docs/invariants.md`.
+Preserve the repository-root `refind_themes.zip` dependency.
 
 ## Validation and completion
 
-For every modified shell file, including extensionless executables, run
-`bash -n`, ShellCheck and `shfmt -d`, then relevant unit tests. Do not rely on
-`tests/validate.sh` alone; its coverage is incomplete. Inspect the final diff
-for secrets, private keys and boot/security regressions.
+Follow `docs/testing.md`; do not rely on `tests/validate.sh`. Validate changed
+shell files, run relevant unit tests and `git diff --check`, then inspect the
+diff for secrets, private keys and boot/security regressions.
 
-Never describe static or mocked checks as proof of boot, reencryption, firmware,
-MOK or TPM behavior. Use the evidence labels defined in `docs/testing.md`.
+Never claim static or mocked checks prove boot, reencryption, firmware, MOK or
+TPM behavior. Report evidence using the labels in `docs/testing.md`.
 
 The repository is GPL-3.0-only. Preserve `LICENSE` and follow `SECURITY.md` for
 private vulnerability reports.
