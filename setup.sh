@@ -944,9 +944,9 @@ setup.inner_installation() {
 	log.info "Install target initramfs integration for the configured LUKS root"
 	apt-get -o APT::Sandbox::User=root install -y btrfs-progs cryptsetup-initramfs zstd
 	if [[ $install_mode == new ]]; then
-		chroot "$mp" env DEBIAN_FRONTEND=noninteractive dpkg-reconfigure locales
-		chroot "$mp" env DEBIAN_FRONTEND=noninteractive dpkg-reconfigure tzdata
-		chroot "$mp" env DEBIAN_FRONTEND=noninteractive dpkg-reconfigure keyboard-configuration
+		env DEBIAN_FRONTEND=noninteractive dpkg-reconfigure locales
+		env DEBIAN_FRONTEND=noninteractive dpkg-reconfigure tzdata
+		env DEBIAN_FRONTEND=noninteractive dpkg-reconfigure keyboard-configuration
 	fi
 	setup.finalize_package_triggers
 
