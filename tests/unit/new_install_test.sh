@@ -125,7 +125,7 @@ new-install-test.user_and_swap_contract() {
 	fi
 	grep -Fq 'Initial user name to create' "$repository_root/setup.sh" || new-install-test.fail "existing new configuration does not request the username"
 	username_prompt_line="$(grep -n 'Initial user name to create' "$repository_root/setup.sh" | cut -d: -f1)"
-	password_prompt_line="$(grep -nF 'Password for $TARGET_USERNAME' "$repository_root/setup.sh" | cut -d: -f1)"
+	password_prompt_line="$(grep -nF "Password for \$TARGET_USERNAME" "$repository_root/setup.sh" | cut -d: -f1)"
 	((username_prompt_line < password_prompt_line)) || new-install-test.fail "existing new configuration requests password before username"
 }
 
@@ -133,8 +133,36 @@ new-install-test.deferred_device_validation_contract() {
 	local body
 
 	body="$(awk '/^setup\.load_configuration\(\)/,/^}/' "$repository_root/setup.sh")"
-	grep -Fq 'if [[ $install_mode == migration ]]; then' <<<"$body" || new-install-test.fail "boot device validation is not migration-scoped"
-	grep -Fq 'if [[ $install_mode == migration || $setup_action == install-rescue-live ]]; then' <<<"$body" || new-install-test.fail "rescue device validation is not deferred for new installation"
+	grep -Fq "if [[ \$install_mode == migration ]]; then" <<<"$body" || new-install-test.fail "boot device validation is not migration-scoped"
+	grep -Fq "if [[ \$install_mode == migration || \$setup_action == install-rescue-live ]]; then" <<<"$body" || new-install-test.fail "rescue device validation is not deferred for new installation"
+}
+
+new-install-test.configuration_prompt_contract() {
+	local body
+
+	body="$(sed -n '/setup\.load_configuration()/,/setup\.show_help()/p' "$repository_root/setup.sh")"
+	grep -Fq 'configuration_generated=true' <<<"$body" || new-install-test.fail "new configuration generation is not tracked"
+	grep -Fq 'configuration_generated == false' <<<"$body" || new-install-test.fail "existing configuration prompt guard is missing"
+}
+
+new-install-test.checkpoint_contract() {
+	local installer="$repository_root/new-install/scripts/new-install-setup"
+
+	for phase in partitions filesystems encrypted subvolumes bootstrapped configured complete; do
+		grep -Fq "new-install.persist_phase $phase" "$installer" || new-install-test.fail "checkpoint is missing for phase $phase"
+	done
+	grep -Fq 'NEW_INSTALL_PHASE' "$repository_root/setup.sh" || new-install-test.fail "checkpoint is not part of setup configuration"
+	grep -Fq 'new-install.phase_reached partitions' "$installer" || new-install-test.fail "partition phase is not resumable"
+}
+
+new-install-test.ubuntu_manual_package_contract() {
+	local installer="$repository_root/new-install/scripts/new-install-setup"
+
+	for package in ubuntu-desktop ubuntu-desktop-minimal ubuntu-minimal ubuntu-standard ubuntu-wallpapers open-vm-tools-desktop language-pack-en; do
+		grep -Fq "$package" "$installer" || new-install-test.fail "Ubuntu manual package is missing: $package"
+	done
+	grep -Fq "apt-mark manual \"\${packages[@]}\"" "$installer" || new-install-test.fail "Ubuntu packages are not marked manual"
+	grep -Fq 'new-install.install_ubuntu_manual_packages' "$repository_root/setup.sh" || new-install-test.fail "Ubuntu manual package phase is not invoked"
 }
 
 new-install-test.layout_all_space
@@ -148,4 +176,7 @@ new-install-test.destructive_ordering_contract
 new-install-test.distribution_repository_contract
 new-install-test.user_and_swap_contract
 new-install-test.deferred_device_validation_contract
+new-install-test.configuration_prompt_contract
+new-install-test.checkpoint_contract
+new-install-test.ubuntu_manual_package_contract
 printf 'new_install_test: PASS\n'

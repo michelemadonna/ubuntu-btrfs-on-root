@@ -27,6 +27,12 @@ optional 10 GiB rescue, root and Windows ranges; gathers suite, LUKS,
 hostname/localization and the initial sudo user/password. Root-all disables
 Windows; insufficient Windows space returns to sizing.
 
+New-installation progress is persisted in `NEW_INSTALL_PHASE` in `setup.conf`.
+After a failure, rerunning the script revalidates the live environment and
+target identity, rediscovers GPT-labelled devices, and skips completed phases:
+`partitions`, `filesystems`, `encrypted`, `subvolumes`, `bootstrapped` and
+`configured`. A marker is written only after its phase succeeds.
+
 ## Live-session outer phase
 
 ### New installation
@@ -41,6 +47,11 @@ Windows; insufficient Windows space returns to sizing.
 6. Configure identity/localization, create the initial user in `sudo`, set its
    password, then write crypttab and atomic UUID-based fstab.
 7. Persist resolved devices and join the common chroot phase.
+
+For a new Ubuntu target, the chroot phase installs the required desktop,
+language, input-method, locale, VMware and base package set, then marks those
+packages manually with `apt-mark manual`. Kali does not receive this Ubuntu-only
+package set.
 
 ### In-place migration
 

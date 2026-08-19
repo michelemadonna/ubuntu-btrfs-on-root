@@ -37,7 +37,7 @@ selects only `*.sh`, misses extensionless commands and skips unit tests.
 | `common_test.sh` | framework and logging |
 | `tui_test.sh` | prompts, defaults and generated configuration contract |
 | `btrfs_root_test.sh` | subvolume paths, Kali cleanup, fstab and storage summaries |
-| `new_install_test.sh` | GPT sizing, Windows gating, retry status, archive trust, mocked `sgdisk` argv, sudo-user and swapfile contracts |
+| `new_install_test.sh` | GPT sizing, Windows gating, retry status, archive trust, mocked `sgdisk` argv, sudo-user, swapfile, checkpoint and Ubuntu package contracts |
 | `rescue_test.sh` | sizing, persistence and optional orchestration |
 | `secure_boot_test.sh` | trust-path selection, certificate export and sbctl contract |
 | `snapshot_management_test.sh` | distro menu configuration, B/b trigger and installed artifacts |

@@ -45,6 +45,11 @@ secure-boot-test.test_refind_loader_path() {
 		"$(refind-setup.repository_signed_loader_path mok)"
 }
 
+secure-boot-test.test_boot_fallback_directory() {
+	rg -q 'mkdir -p -- "\$REFIND_EFI/../BOOT"' "$repository_root/secure-boot/scripts/refind-setup" ||
+		secure-boot-test.fail "EFI fallback directory is not created before BOOTX64.EFI copy"
+}
+
 secure-boot-test.test_remove_grubefi_directories() {
 	local test_root
 
@@ -120,6 +125,7 @@ secure-boot-test.test_sbctl_enrollment_contract() {
 
 secure-boot-test.test_trust_path
 secure-boot-test.test_refind_loader_path
+secure-boot-test.test_boot_fallback_directory
 secure-boot-test.test_remove_grubefi_directories
 secure-boot-test.test_fwupd_trust_mode
 secure-boot-test.test_summary_has_no_secret

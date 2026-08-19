@@ -10,6 +10,7 @@ repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_name="$(basename -- "$repository_root")"
 cleanup_required=false
 setup_action=install
+configuration_generated=false
 
 # The path is runtime-derived so setup.sh works from any current directory.
 # shellcheck disable=SC1090,SC1091
@@ -390,6 +391,7 @@ setup.generate_configuration() {
 	setup.write_config_value "$temporary_config" snapshot_menu_pin "$snapshot_menu_pin"
 	setup.write_config_value "$temporary_config" snapshot_menu_pin_value "$snapshot_menu_pin_value"
 	setup.write_config_value "$temporary_config" mok_pin "$mok_pin"
+	setup.write_config_value "$temporary_config" NEW_INSTALL_PHASE "none"
 	mv "$temporary_config" "$config_file"
 	log.success "Generated protected configuration: $config_file"
 	log.section_end
@@ -444,7 +446,7 @@ setup.generate_configuration() {
 	config_mode=$(stat -c '%a' "$config_file")
 	[[ $config_mode == 600 ]] || log.die "Generated configuration permissions are $config_mode; expected 600."
 	for config_name in root_dev efi_dev boot_dev mp rescue_dev install_rescue keyslot_size iter_time enlarge swap_size btrfs_options suite suite_type secure_boot_mode secure_boot_enrollment EXPERIMENTAL_SBCTL_APPEND \
-		PASSPHRASE TARGET_USERNAME TARGET_USER_PASSWORD install_mode install_disk install_disk_identity disk_size_mib esp_size_mib root_size_strategy root_size_percent root_size_mib install_windows windows_size_mib target_hostname target_locale target_timezone keyboard_layout keyboard_variant \
+		PASSPHRASE TARGET_USERNAME TARGET_USER_PASSWORD NEW_INSTALL_PHASE install_mode install_disk install_disk_identity disk_size_mib esp_size_mib root_size_strategy root_size_percent root_size_mib install_windows windows_size_mib target_hostname target_locale target_timezone keyboard_layout keyboard_variant \
 		pre_download root_sub_vol enable_tpm snapshot_menu snapshot_menu_pin snapshot_menu_pin_value mok_pin; do
 		grep -q "^export ${config_name}=" "$config_file" ||
 			log.die "Generated configuration is missing required value: $config_name"
@@ -463,6 +465,7 @@ setup.load_configuration() {
 	local config_file="$repository_root/setup.conf" invocation=${1:-}
 
 	if [[ ! -e $config_file ]]; then
+		configuration_generated=true
 		setup.generate_configuration "$config_file"
 	fi
 	common.require_readable_file "$config_file" "Configuration file"
@@ -471,7 +474,10 @@ setup.load_configuration() {
 	source "$config_file"
 	install_mode=${install_mode:-migration}
 	[[ $install_mode == migration || $install_mode == new ]] || log.die "install_mode must be migration or new."
-	if [[ $install_mode == new && $invocation != "$INNER_MODE" ]]; then
+	NEW_INSTALL_PHASE=${NEW_INSTALL_PHASE:-none}
+	[[ $NEW_INSTALL_PHASE == none || $NEW_INSTALL_PHASE == partitions || $NEW_INSTALL_PHASE == filesystems || $NEW_INSTALL_PHASE == encrypted || $NEW_INSTALL_PHASE == subvolumes || $NEW_INSTALL_PHASE == bootstrapped || $NEW_INSTALL_PHASE == configured || $NEW_INSTALL_PHASE == complete ]] ||
+		log.die "NEW_INSTALL_PHASE is invalid: $NEW_INSTALL_PHASE"
+	if [[ $install_mode == new && $invocation != "$INNER_MODE" && $configuration_generated == false ]]; then
 		[[ -r $TUI_INPUT_DEVICE ]] || log.die "Interactive terminal is unavailable: $TUI_INPUT_DEVICE"
 		TARGET_USERNAME="$(tui.input "Initial user name to create" "$TARGET_USERNAME")"
 		new-install.validate_username "$TARGET_USERNAME"
@@ -734,6 +740,9 @@ setup.inner_installation() {
 	dbus-daemon --system --fork
 	rm -rf -- "/boot/efi/EFI/$suite"
 	apt-get update
+	if [[ $install_mode == new ]]; then
+		new-install.install_ubuntu_manual_packages
+	fi
 
 	if [[ $pre_download == yes ]]; then
 		setup.pre_download_all

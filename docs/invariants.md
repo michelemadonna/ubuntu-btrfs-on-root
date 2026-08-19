@@ -51,6 +51,13 @@ and consumers before editing behavior.
   membership in the `sudo` group; setup does not request a root password.
 - New installation preflight requires amd64, UEFI, reachable distribution
   archive DNS and a stable unchanged target-disk identity before destruction.
+- A new Ubuntu target installs and manually marks the required desktop,
+  language/input-method, VMware and base package set after `debootstrap`;
+  this policy does not apply to Kali.
+- New-installation checkpoints in `NEW_INSTALL_PHASE` are persisted atomically;
+  destructive phases are never marked complete before their commands succeed,
+  and a rerun never recreates a completed GPT, filesystem, LUKS, subvolume or
+  bootstrap phase.
 - The configured Btrfs swapfile is mode 0600 and has a `/swap/swapfile` fstab
   entry before the new-installation validation succeeds.
 - Kali verifies downloaded archive keys against the pinned official fingerprint;

@@ -268,6 +268,7 @@ refind-setup.install_direct() {
 		include themes/refind-theme-regular/theme.conf
 	EOF
 
+	mkdir -p -- "$REFIND_EFI/../BOOT"
 	cp "$REFIND_EFI/refind_x64.efi" "$REFIND_EFI/../BOOT/BOOTX64.EFI"
 }
 
@@ -316,6 +317,7 @@ refind-setup.install_with_shim() {
 		use_graphics_for osx,linux,windows
 		include themes/refind-theme-regular/theme.conf
 	EOF
+	mkdir -p -- "$REFIND_EFI/../BOOT"
 	cp "$REFIND_EFI/shimx64.efi" "$REFIND_EFI/../BOOT/BOOTX64.EFI"
 	cp "$REFIND_EFI/mmx64.efi" "$REFIND_EFI/../BOOT/mmx64.efi"
 	cp "$REFIND_EFI/grubx64.efi" "$REFIND_EFI/../BOOT/grubx64.efi"
