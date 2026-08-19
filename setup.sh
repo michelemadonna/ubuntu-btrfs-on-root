@@ -730,6 +730,9 @@ setup.prepare_chroot() {
 	if [[ -z ${chroot_nameservers:-} ]]; then
 		chroot_nameservers=$'nameserver 1.1.1.1\nnameserver 8.8.8.8'
 	fi
+	if [[ $install_mode == new ]]; then
+		chroot_nameservers+=$'\nnameserver 1.1.1.1\nnameserver 8.8.8.8\nnameserver 9.9.9.9\noptions timeout:2 attempts:3 single-request-reopen'
+	fi
 	printf '%s\n' "$chroot_nameservers" >"$mp/etc/resolv.conf"
 
 	cat >"$mp/usr/sbin/policy-rc.d" <<-'EOF'
