@@ -745,6 +745,23 @@ setup.prepare_chroot() {
 		exit 101
 	EOF
 	chmod 0755 "$mp/usr/sbin/policy-rc.d"
+	setup.start_chroot_dbus
+}
+
+setup.start_chroot_dbus() {
+	local socket="$mp/run/dbus/system_bus_socket"
+
+	command -v chroot >/dev/null 2>&1 || log.die "chroot is unavailable."
+	[[ -x $mp/usr/bin/dbus-daemon ]] || log.die "The target does not contain dbus-daemon."
+	if [[ ! -s $mp/etc/machine-id ]]; then
+		chroot "$mp" dbus-uuidgen --ensure=/etc/machine-id
+	fi
+	if [[ ! -S $socket ]]; then
+		rm -f -- "$socket"
+		chroot "$mp" dbus-daemon --system --fork --nopidfile
+	fi
+	[[ -S $socket ]] || log.die "The target D-Bus system socket was not created."
+	log.success "D-Bus system bus is running inside the target chroot"
 }
 
 setup.run_inner_installation() {
@@ -784,8 +801,11 @@ setup.prepare_apt_environment() {
 	if [[ -d $man_db_dir ]]; then
 		chmod 0755 "$man_db_dir"
 		while IFS= read -r library; do
-			chmod 0644 "$library"
+			chmod 0755 "$library"
 		done < <(find "$man_db_dir" -maxdepth 1 -type f -name 'libmandb-*.so' -print)
+		if [[ -f /usr/lib/man-db/mandb ]]; then
+			chmod 0755 /usr/lib/man-db/mandb
+		fi
 	fi
 	command -v ldconfig >/dev/null 2>&1 || log.die "ldconfig is unavailable in the target."
 	command -v dbus-uuidgen >/dev/null 2>&1 || log.die "dbus-uuidgen is unavailable in the target."
@@ -851,10 +871,10 @@ setup.pre_download_all() {
 		apt-cache show refind >/dev/null 2>&1 && packages+=(refind)
 	fi
 
-	apt install --no-install-recommends -y --download-only \
+	apt-get -o APT::Sandbox::User=root install --no-install-recommends -y --download-only \
 		btrfs-assistant btrfsmaintenance
-	apt install --download-only -y "${packages[@]}"
-	apt install -y openssh-server open-vm-tools-desktop
+	apt-get -o APT::Sandbox::User=root install --download-only -y "${packages[@]}"
+	apt-get -o APT::Sandbox::User=root install -y openssh-server open-vm-tools-desktop
 }
 
 setup.inner_installation() {
@@ -864,7 +884,7 @@ setup.inner_installation() {
 	setup.prepare_apt_environment
 	setup.preseed_kdump
 	setup.preseed_gdm
-	apt-get update
+	apt-get -o APT::Sandbox::User=root update
 	if [[ $install_mode == new ]]; then
 		new-install.install_ubuntu_manual_packages
 	fi
@@ -874,7 +894,7 @@ setup.inner_installation() {
 	fi
 
 	log.info "Install target initramfs integration for the configured LUKS root"
-	apt-get install -y btrfs-progs cryptsetup-initramfs
+	apt-get -o APT::Sandbox::User=root install -y btrfs-progs cryptsetup-initramfs
 	setup.finalize_package_triggers
 
 	# The Btrfs/LUKS storage phase has already completed outside the chroot.
