@@ -16,7 +16,7 @@ export PATH="/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin:$PATH"
 # Configuration
 # ============================================================
 
-SBCTL_VERSION="${SBCTL_VERSION:-0.17}"
+SBCTL_VERSION="${SBCTL_VERSION:-latest}"
 
 SBCTL_KEYROOT="${SBCTL_KEYROOT:-/var/lib/sbctl/keys}"
 
@@ -120,7 +120,7 @@ sbctl-setup.install_upstream() {
 	go_bin="$(go env GOPATH)/bin"
 	mkdir -p "$go_bin"
 	GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}" \
-		go install "github.com/foxboron/sbctl/cmd/sbctl@v${SBCTL_VERSION}"
+		go install "github.com/foxboron/sbctl/cmd/sbctl@${SBCTL_VERSION}"
 	[[ -x "$go_bin/sbctl" ]] || log.die "go install did not produce sbctl."
 	install -m 0755 "$go_bin/sbctl" /usr/sbin/sbctl
 }
