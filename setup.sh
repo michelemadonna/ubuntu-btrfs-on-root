@@ -704,6 +704,8 @@ setup.install_new_live_dependencies() {
 }
 
 setup.prepare_chroot() {
+	local chroot_nameservers
+
 	log.info "Prepare $mp for chroot"
 	mount --rbind /dev "$mp/dev"
 	mount --make-rslave "$mp/dev"
@@ -722,10 +724,11 @@ setup.prepare_chroot() {
 		mv "$mp/etc/resolv.conf" "$mp/etc/resolv.conf.chroot-save"
 	fi
 
-	cat >"$mp/etc/resolv.conf" <<-'EOF'
-		nameserver 1.1.1.1
-		nameserver 8.8.8.8
-	EOF
+	chroot_nameservers="$(awk '$1 == "nameserver" && $2 !~ /^127\./ && $2 !~ /^::1$/ { print "nameserver " $2 }' /etc/resolv.conf 2>/dev/null | head -n 3)"
+	if [[ -z $chroot_nameservers ]]; then
+		chroot_nameservers=$'nameserver 1.1.1.1\nnameserver 8.8.8.8'
+	fi
+	printf '%s\n' "$chroot_nameservers" >"$mp/etc/resolv.conf"
 
 	cat >"$mp/usr/sbin/policy-rc.d" <<-'EOF'
 		#!/bin/sh
