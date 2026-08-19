@@ -788,10 +788,11 @@ setup.prepare_apt_environment() {
 		done < <(find "$man_db_dir" -maxdepth 1 -type f -name 'libmandb-*.so' -print)
 	fi
 	command -v ldconfig >/dev/null 2>&1 || log.die "ldconfig is unavailable in the target."
-	command -v systemd-machine-id-setup >/dev/null 2>&1 || log.die "systemd-machine-id-setup is unavailable in the target."
+	command -v dbus-uuidgen >/dev/null 2>&1 || log.die "dbus-uuidgen is unavailable in the target."
 	ldconfig
 	if [[ ! -s /etc/machine-id ]]; then
-		systemd-machine-id-setup
+		rm -f -- /etc/machine-id
+		dbus-uuidgen --ensure=/etc/machine-id
 	fi
 	[[ -s /etc/machine-id ]] || log.die "Target machine-id could not be generated."
 	install -d -m 0755 /run/dbus

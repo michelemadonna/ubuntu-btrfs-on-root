@@ -163,7 +163,7 @@ new-install-test.ubuntu_manual_package_contract() {
 	done
 	grep -Fq "apt-mark manual \"\${packages[@]}\"" "$installer" || new-install-test.fail "Ubuntu packages are not marked manual"
 	grep -Fq 'new-install.install_ubuntu_manual_packages' "$repository_root/setup.sh" || new-install-test.fail "Ubuntu manual package phase is not invoked"
-	grep -Fq 'systemd-machine-id-setup' "$installer" || new-install-test.fail "target machine-id setup is missing"
+	grep -Fq 'dbus-uuidgen --ensure=/etc/machine-id' "$installer" || new-install-test.fail "target machine-id setup is missing"
 }
 
 new-install-test.hwe_kernel_contract() {

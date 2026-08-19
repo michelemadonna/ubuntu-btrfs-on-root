@@ -333,7 +333,7 @@ new-install.configure_target() {
 	fstab-setup.run
 	chroot "$mp" locale-gen
 	chroot "$mp" dpkg-reconfigure -f noninteractive tzdata
-	chroot "$mp" systemd-machine-id-setup
+	chroot "$mp" dbus-uuidgen --ensure=/etc/machine-id
 	[[ -s $mp/etc/machine-id ]] || log.die "Target machine-id was not generated."
 	new-install.validate_username "$TARGET_USERNAME"
 	chroot "$mp" useradd --create-home --shell /bin/bash --groups sudo "$TARGET_USERNAME"

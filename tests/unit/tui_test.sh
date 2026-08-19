@@ -83,7 +83,7 @@ tui-test.generated_config_contract() {
 	rg -q 'chown _apt:root /var/lib/apt/lists/partial /var/cache/apt/archives/partial' "$repository_root/setup.sh"
 	rg -q 'dbus-daemon --system --fork --nopidfile' "$repository_root/setup.sh"
 	rg -q -- "-name 'libmandb-\\*.so'" "$repository_root/setup.sh"
-	rg -q 'systemd-machine-id-setup' "$repository_root/setup.sh"
+	rg -q 'dbus-uuidgen --ensure=/etc/machine-id' "$repository_root/setup.sh"
 	rg -q 'dpkg --configure -a' "$repository_root/setup.sh"
 	rg -q 'mandb --quiet' "$repository_root/setup.sh"
 	rg -q 'Storage=persistent' "$repository_root/setup.sh"
