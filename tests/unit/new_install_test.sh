@@ -123,10 +123,12 @@ new-install-test.user_and_swap_contract() {
 	if grep -Fq 'TARGET_PASSWORD' "$repository_root/setup.sh" "$installer"; then
 		new-install-test.fail "root password variable remains in the new-installation flow"
 	fi
-	grep -Fq 'Initial user name to create' "$repository_root/setup.sh" || new-install-test.fail "existing new configuration does not request the username"
-	username_prompt_line="$(grep -n 'Initial user name to create' "$repository_root/setup.sh" | cut -d: -f1)"
-	password_prompt_line="$(grep -nF "Password for \$TARGET_USERNAME" "$repository_root/setup.sh" | cut -d: -f1)"
-	((username_prompt_line < password_prompt_line)) || new-install-test.fail "existing new configuration requests password before username"
+	grep -Fq 'Initial user name' "$repository_root/setup.sh" || new-install-test.fail "new configuration does not request the username"
+	grep -Fq 'Initial user password' "$repository_root/setup.sh" || new-install-test.fail "new configuration does not request the password"
+	load_body="$(awk '/^setup\.load_configuration\(\)/,/^}/' "$repository_root/setup.sh")"
+	grep -Fq 'Initial user name to create' <<<"$load_body" && new-install-test.fail "existing new configuration requests the username again"
+	grep -Fq 'Password for $TARGET_USERNAME' <<<"$load_body" && new-install-test.fail "existing new configuration requests the password again"
+	grep -Fq 'Install the Ubuntu HWE kernel' <<<"$load_body" && new-install-test.fail "existing new configuration requests HWE again"
 }
 
 new-install-test.deferred_device_validation_contract() {

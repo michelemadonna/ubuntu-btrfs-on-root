@@ -10,7 +10,6 @@ repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_name="$(basename -- "$repository_root")"
 cleanup_required=false
 setup_action=install
-configuration_generated=false
 
 # The path is runtime-derived so setup.sh works from any current directory.
 # shellcheck disable=SC1090,SC1091
@@ -489,6 +488,9 @@ setup.generate_configuration() {
 	done
 	log.success "Configuration syntax, permissions, and required values are valid."
 	log.section_end
+	if [[ $install_mode == new ]]; then
+		new-install.print_planned_layout
+	fi
 
 	confirmation="$(tui.toggle "Proceed with the installation using these values" yes)" || log.die "Invalid confirmation."
 	if [[ $confirmation == no ]]; then
@@ -498,10 +500,9 @@ setup.generate_configuration() {
 }
 
 setup.load_configuration() {
-	local config_file="$repository_root/setup.conf" invocation=${1:-}
+	local config_file="$repository_root/setup.conf"
 
 	if [[ ! -e $config_file ]]; then
-		configuration_generated=true
 		setup.generate_configuration "$config_file"
 	fi
 	common.require_readable_file "$config_file" "Configuration file"
@@ -515,20 +516,6 @@ setup.load_configuration() {
 		log.die "NEW_INSTALL_PHASE is invalid: $NEW_INSTALL_PHASE"
 	install_hwe=${install_hwe:-no}
 	[[ $install_hwe == yes || $install_hwe == no ]] || log.die "install_hwe must be yes or no."
-	if [[ $install_mode == new && $invocation != "$INNER_MODE" && $configuration_generated == false ]]; then
-		[[ -r $TUI_INPUT_DEVICE ]] || log.die "Interactive terminal is unavailable: $TUI_INPUT_DEVICE"
-		TARGET_USERNAME="$(tui.input "Initial user name to create" "$TARGET_USERNAME")"
-		new-install.validate_username "$TARGET_USERNAME"
-		TARGET_USER_PASSWORD="$(tui.password_confirm "Password for $TARGET_USERNAME" "$TARGET_USER_PASSWORD")" || log.die "Initial user passwords do not match."
-		[[ -n $TARGET_USER_PASSWORD ]] || log.die "Initial user password cannot be empty."
-		setup.persist_config_value "$config_file" TARGET_USERNAME "$TARGET_USERNAME"
-		setup.persist_config_value "$config_file" TARGET_USER_PASSWORD "$TARGET_USER_PASSWORD"
-		if [[ ${suite_type:-} == ubuntu ]]; then
-			install_hwe="$(tui.toggle "Install the Ubuntu HWE kernel" "${install_hwe:-no}")" || log.die "Invalid HWE kernel toggle."
-			setup.persist_config_value "$config_file" install_hwe "$install_hwe"
-		fi
-	fi
-
 	common.require_nonempty "root_dev" "${root_dev:-}"
 	common.require_nonempty "efi_dev" "${efi_dev:-}"
 	common.require_nonempty "mp" "${mp:-}"
@@ -699,7 +686,7 @@ setup.install_rescue_system() {
 }
 
 setup.install_new_live_dependencies() {
-	local -a packages=(btrfs-progs cryptsetup-bin curl debootstrap dosfstools gdisk gnupg ntfs-3g)
+	local -a packages=(btrfs-progs cryptsetup-bin curl debootstrap dosfstools gdisk gnupg ntfs-3g zstd)
 
 	log.section "New-installation live dependencies"
 	apt-get update
@@ -745,7 +732,10 @@ setup.prepare_chroot() {
 		exit 101
 	EOF
 	chmod 0755 "$mp/usr/sbin/policy-rc.d"
-	setup.ensure_target_journal
+	if [[ $install_mode == new ]]; then
+		setup.ensure_target_journal
+		setup.configure_target_networkd
+	fi
 	setup.start_chroot_dbus
 }
 
@@ -764,6 +754,20 @@ setup.ensure_target_journal() {
 	fi
 }
 
+setup.configure_target_networkd() {
+	install -d -m 0755 "$mp/etc/systemd/network"
+	cat >"$mp/etc/systemd/network/ethernet.network" <<-'EOF'
+		[Match]
+		Name=enp1s0
+
+		[Network]
+		DHCP=yes
+	EOF
+	systemctl --root="$mp" unmask systemd-networkd.service >/dev/null 2>&1 || true
+	systemctl --root="$mp" enable systemd-networkd.service >/dev/null 2>&1 ||
+		log.die "Unable to enable systemd-networkd in the target."
+}
+
 setup.start_chroot_dbus() {
 	local socket="$mp/run/dbus/system_bus_socket"
 
@@ -777,7 +781,19 @@ setup.start_chroot_dbus() {
 		chroot "$mp" dbus-daemon --system --fork --nopidfile
 	fi
 	[[ -S $socket ]] || log.die "The target D-Bus system socket was not created."
-	log.success "D-Bus system bus is running inside the target chroot"
+	if [[ $install_mode != new ]]; then
+		log.success "D-Bus system bus is running inside the target chroot"
+		return 0
+	fi
+	for _ in {1..20}; do
+		if chroot "$mp" dbus-send --system --print-reply --dest=org.freedesktop.DBus \
+			/org/freedesktop/DBus org.freedesktop.DBus.ListNames >/dev/null 2>&1; then
+			log.success "D-Bus system bus is running inside the target chroot"
+			return 0
+		fi
+		sleep 0.25
+	done
+	log.die "The target D-Bus system bus did not become ready."
 }
 
 setup.run_inner_installation() {
@@ -874,12 +890,12 @@ setup.configure_graphical_login() {
 setup.configure_debug_console() {
 	local getty_unit=getty@tty1.service
 
-	[[ -d $mp/etc/systemd/system ]] || log.die "Target systemd unit directory is unavailable."
+	[[ -d /etc/systemd/system ]] || log.die "Target systemd unit directory is unavailable."
 	log.info "Enable virtual debug console on tty1"
-	systemctl --root="$mp" unmask "$getty_unit" >/dev/null 2>&1 || true
-	systemctl --root="$mp" enable "$getty_unit" >/dev/null 2>&1 ||
+	systemctl unmask "$getty_unit" >/dev/null 2>&1 || true
+	systemctl enable "$getty_unit" >/dev/null 2>&1 ||
 		log.die "Unable to enable $getty_unit in the target."
-	[[ -L $mp/etc/systemd/system/getty.target.wants/$getty_unit ]] ||
+	[[ -L /etc/systemd/system/getty.target.wants/$getty_unit ]] ||
 		log.die "$getty_unit is not enabled in the target."
 	log.success "Virtual debug console tty1 enabled"
 }
@@ -909,6 +925,9 @@ setup.pre_download_all() {
 setup.inner_installation() {
 	cd "$repository_root"
 	export DEBIAN_FRONTEND=noninteractive
+	if [[ $install_mode == new ]]; then
+		export LD_LIBRARY_PATH="/usr/lib/man-db${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+	fi
 	rm -rf -- "/boot/efi/EFI/$suite"
 	setup.prepare_apt_environment
 	setup.preseed_kdump
@@ -923,7 +942,12 @@ setup.inner_installation() {
 	fi
 
 	log.info "Install target initramfs integration for the configured LUKS root"
-	apt-get -o APT::Sandbox::User=root install -y btrfs-progs cryptsetup-initramfs
+	apt-get -o APT::Sandbox::User=root install -y btrfs-progs cryptsetup-initramfs zstd
+	if [[ $install_mode == new ]]; then
+		chroot "$mp" env DEBIAN_FRONTEND=noninteractive dpkg-reconfigure locales
+		chroot "$mp" env DEBIAN_FRONTEND=noninteractive dpkg-reconfigure tzdata
+		chroot "$mp" env DEBIAN_FRONTEND=noninteractive dpkg-reconfigure keyboard-configuration
+	fi
 	setup.finalize_package_triggers
 
 	# The Btrfs/LUKS storage phase has already completed outside the chroot.
@@ -940,8 +964,10 @@ setup.inner_installation() {
 		"$repository_root/uki/scripts/install-uki"
 		setup.persist_inner_phase uki
 	fi
-	setup.configure_persistent_journal
-	setup.configure_debug_console
+	if [[ $install_mode == new ]]; then
+		setup.configure_persistent_journal
+		setup.configure_debug_console
+	fi
 	setup.configure_graphical_login
 	rm -f -- /run/dbus/system_bus_socket
 	setup.persist_inner_phase complete
@@ -1031,7 +1057,9 @@ setup.validate_final_state() {
 	mountpoint -q "$mp/boot/efi" || log.die "ESP is not mounted in the target."
 	[[ -s $mp/etc/os-release ]] || log.die "Target operating-system identity is missing."
 	[[ -s $mp/etc/fstab && -s $mp/etc/crypttab ]] || log.die "Target storage configuration is incomplete."
-	[[ -d $mp/var/log/journal ]] || log.die "Persistent journal directory is missing from the target."
+	if [[ $install_mode == new ]]; then
+		[[ -d $mp/var/log/journal ]] || log.die "Persistent journal directory is missing from the target."
+	fi
 	log.success "Validated mounted target, LUKS access and persistent target configuration"
 	log.section_end
 }

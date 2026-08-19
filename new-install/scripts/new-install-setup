@@ -357,7 +357,9 @@ new-install.configure_target() {
 	FSTAB_SETUP_SKIP_CONFIG=yes source "$repository_root/btrfs-root/scripts/fstab-setup"
 	fstab-setup.run
 	chroot "$mp" locale-gen
-	chroot "$mp" dpkg-reconfigure -f noninteractive tzdata
+	chroot "$mp" env DEBIAN_FRONTEND=noninteractive dpkg-reconfigure -f noninteractive locales
+	chroot "$mp" env DEBIAN_FRONTEND=noninteractive dpkg-reconfigure -f noninteractive tzdata
+	chroot "$mp" env DEBIAN_FRONTEND=noninteractive dpkg-reconfigure -f noninteractive keyboard-configuration
 	chroot "$mp" dbus-uuidgen --ensure=/etc/machine-id
 	[[ -s $mp/etc/machine-id ]] || log.die "Target machine-id was not generated."
 	new-install.validate_username "$TARGET_USERNAME"
