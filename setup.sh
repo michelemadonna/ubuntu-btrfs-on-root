@@ -724,8 +724,10 @@ setup.prepare_chroot() {
 		mv "$mp/etc/resolv.conf" "$mp/etc/resolv.conf.chroot-save"
 	fi
 
-	chroot_nameservers="$(awk '$1 == "nameserver" && $2 !~ /^127\./ && $2 !~ /^::1$/ { print "nameserver " $2 }' /etc/resolv.conf 2>/dev/null | head -n 3)"
-	if [[ -z $chroot_nameservers ]]; then
+	if [[ $install_mode == new ]]; then
+		chroot_nameservers="$(awk '$1 == "nameserver" && $2 !~ /^127\./ && $2 !~ /^::1$/ { print "nameserver " $2 }' /etc/resolv.conf 2>/dev/null | head -n 3)"
+	fi
+	if [[ -z ${chroot_nameservers:-} ]]; then
 		chroot_nameservers=$'nameserver 1.1.1.1\nnameserver 8.8.8.8'
 	fi
 	printf '%s\n' "$chroot_nameservers" >"$mp/etc/resolv.conf"
