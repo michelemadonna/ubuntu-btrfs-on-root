@@ -1033,8 +1033,6 @@ setup.inner_installation() {
 		systemctl unmask systemd-resolved.service >/dev/null 2>&1 || true
 		systemctl enable systemd-resolved.service >/dev/null 2>&1 ||
 			log.die "Unable to enable systemd-resolved after package installation."
-		rm -f -- /etc/resolv.conf
-		ln -s /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 		setup.configure_snap_store_install
 	fi
 	if [[ $install_mode == new ]]; then
