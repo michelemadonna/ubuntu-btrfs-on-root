@@ -783,9 +783,6 @@ setup.configure_target_networkd() {
 	EOF
 	systemctl --root="$mp" unmask systemd-networkd.service >/dev/null 2>&1 || true
 	systemctl --root="$mp" disable systemd-networkd.service >/dev/null 2>&1 || true
-	systemctl --root="$mp" unmask NetworkManager.service >/dev/null 2>&1 || true
-	systemctl --root="$mp" enable NetworkManager.service >/dev/null 2>&1 ||
-		log.die "Unable to enable NetworkManager in the target."
 }
 
 setup.start_chroot_dbus() {
@@ -963,6 +960,11 @@ setup.inner_installation() {
 
 	log.info "Install target initramfs integration for the configured LUKS root"
 	apt-get -o APT::Sandbox::User=root install -y btrfs-progs cryptsetup-initramfs zstd
+	if [[ $install_mode == new && $suite_type == ubuntu ]]; then
+		systemctl unmask NetworkManager.service >/dev/null 2>&1 || true
+		systemctl enable NetworkManager.service >/dev/null 2>&1 ||
+			log.die "Unable to enable NetworkManager after package installation."
+	fi
 	if [[ $install_mode == new ]]; then
 		env DEBIAN_FRONTEND=noninteractive dpkg-reconfigure locales
 		env DEBIAN_FRONTEND=noninteractive dpkg-reconfigure tzdata
