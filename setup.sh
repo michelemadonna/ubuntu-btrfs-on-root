@@ -855,6 +855,19 @@ setup.configure_graphical_login() {
 	fi
 }
 
+setup.configure_debug_console() {
+	local getty_unit=getty@tty1.service
+
+	[[ -d $mp/etc/systemd/system ]] || log.die "Target systemd unit directory is unavailable."
+	log.info "Enable virtual debug console on tty1"
+	systemctl --root="$mp" unmask "$getty_unit" >/dev/null 2>&1 || true
+	systemctl --root="$mp" enable "$getty_unit" >/dev/null 2>&1 ||
+		log.die "Unable to enable $getty_unit in the target."
+	[[ -L $mp/etc/systemd/system/getty.target.wants/$getty_unit ]] ||
+		log.die "$getty_unit is not enabled in the target."
+	log.success "Virtual debug console tty1 enabled"
+}
+
 setup.pre_download_all() {
 	local -a packages=(
 		asciidoc-base binutils build-essential ca-certificates coreutils cryptsetup-bin
@@ -912,6 +925,7 @@ setup.inner_installation() {
 		setup.persist_inner_phase uki
 	fi
 	setup.configure_persistent_journal
+	setup.configure_debug_console
 	setup.configure_graphical_login
 	rm -f -- /run/dbus/system_bus_socket
 	setup.persist_inner_phase complete
