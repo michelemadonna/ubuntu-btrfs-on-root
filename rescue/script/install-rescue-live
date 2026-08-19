@@ -142,7 +142,11 @@ install-rescue-live.run() {
 	new_end_sector=$((start_sector + rescue_sectors - 1))
 	writable_start_sector=$((new_end_sector + 1))
 	original_end_sector=$((start_sector + original_sectors - 1))
-	install-rescue-live.confirm_destruction "$disk" "$rescue_size_mib" "$persistence_mib"
+	if [[ ${SKIP_CONFIRMATION:-no} == yes ]]; then
+		log.info "Rescue target $TARGET_DEV was already selected by the setup wizard; skip duplicate confirmation"
+	else
+		install-rescue-live.confirm_destruction "$disk" "$rescue_size_mib" "$persistence_mib"
+	fi
 
 	trap install-rescue-live.cleanup EXIT
 	trap 'log.die "Rescue installation failed at line $LINENO."' ERR

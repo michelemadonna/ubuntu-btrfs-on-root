@@ -51,6 +51,8 @@ rescue-test.setup_integration() {
 	rg -q 'install_rescue="\$\(tui\.toggle "Create the persistent rescue system"' "$repository_root/setup.sh"
 	rg -q -- '--install-rescue-live' "$repository_root/setup.sh"
 	rg -q 'setup_action=install-rescue-live' "$repository_root/setup.sh"
+	rg -q 'SKIP_CONFIRMATION=yes' "$repository_root/setup.sh"
+	rg -q 'SKIP_CONFIRMATION:-no' "$repository_root/rescue/script/install-rescue-live"
 	rg -q 'RESCUE_SOURCE_DIR:-/cdrom' "$repository_root/setup.sh"
 }
 

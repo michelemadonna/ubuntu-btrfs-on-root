@@ -693,6 +693,7 @@ setup.install_rescue_system() {
 		repository_root="$repository_root" \
 		SOURCE_DIR="$rescue_source_dir" \
 		TARGET_DEV="/dev/$rescue_dev" \
+		SKIP_CONFIRMATION=yes \
 		"$repository_root/rescue/script/install-rescue-live"
 	log.section_end
 }
@@ -761,6 +762,17 @@ setup.preseed_kdump() {
 	log.info "Preseed kdump-tools to enable kdump without an interactive prompt"
 }
 
+setup.preseed_gdm() {
+	if [[ $install_mode == new && $suite_type == ubuntu ]]; then
+		common.require_commands debconf-set-selections
+		printf '%s\n' \
+			'shared/default-x-display-manager shared/default-x-display-manager select gdm3' \
+			'gdm3 shared/default-x-display-manager select gdm3' |
+			debconf-set-selections
+		log.info "Preseed GDM as the Ubuntu display manager"
+	fi
+}
+
 setup.prepare_apt_environment() {
 	local man_db_dir=/usr/lib/man-db
 
@@ -775,10 +787,50 @@ setup.prepare_apt_environment() {
 			chmod 0644 "$library"
 		done < <(find "$man_db_dir" -maxdepth 1 -type f -name 'libmandb-*.so' -print)
 	fi
+	command -v ldconfig >/dev/null 2>&1 || log.die "ldconfig is unavailable in the target."
+	command -v systemd-machine-id-setup >/dev/null 2>&1 || log.die "systemd-machine-id-setup is unavailable in the target."
+	ldconfig
+	if [[ ! -s /etc/machine-id ]]; then
+		systemd-machine-id-setup
+	fi
+	[[ -s /etc/machine-id ]] || log.die "Target machine-id could not be generated."
 	install -d -m 0755 /run/dbus
 	if [[ ! -S /run/dbus/system_bus_socket ]]; then
 		rm -f -- /run/dbus/system_bus_socket
 		dbus-daemon --system --fork --nopidfile
+	fi
+}
+
+setup.finalize_package_triggers() {
+	log.info "Finalize package triggers and rebuild man-db cache"
+	dpkg --configure -a
+	ldconfig
+	if command -v mandb >/dev/null 2>&1; then
+		mandb --quiet
+	fi
+}
+
+setup.configure_persistent_journal() {
+	local journal_directory=/var/log/journal
+
+	getent group systemd-journal >/dev/null 2>&1 || log.die "systemd-journal group is unavailable."
+	install -d -m 2755 -o root -g systemd-journal "$journal_directory"
+	install -d -m 0755 /etc/systemd/journald.conf.d
+	cat >/etc/systemd/journald.conf.d/20-installer-persistent.conf <<-'EOF'
+		[Journal]
+		Storage=persistent
+	EOF
+	log.success "Persistent system journal configured at $journal_directory"
+}
+
+setup.configure_graphical_login() {
+	if [[ $install_mode == new && $suite_type == ubuntu ]]; then
+		if dpkg-query -W -f='${Status}' gdm3 2>/dev/null | grep -Fq 'install ok installed'; then
+			dpkg-reconfigure -f noninteractive gdm3
+		fi
+		systemctl enable gdm.service
+		systemctl enable display-manager.service 2>/dev/null || true
+		log.success "Enabled GDM graphical login"
 	fi
 }
 
@@ -810,6 +862,7 @@ setup.inner_installation() {
 	rm -rf -- "/boot/efi/EFI/$suite"
 	setup.prepare_apt_environment
 	setup.preseed_kdump
+	setup.preseed_gdm
 	apt-get update
 	if [[ $install_mode == new ]]; then
 		new-install.install_ubuntu_manual_packages
@@ -821,6 +874,7 @@ setup.inner_installation() {
 
 	log.info "Install target initramfs integration for the configured LUKS root"
 	apt-get install -y btrfs-progs cryptsetup-initramfs
+	setup.finalize_package_triggers
 
 	# The Btrfs/LUKS storage phase has already completed outside the chroot.
 	# Security-sensitive phase coordinators execute as isolated entry points.
@@ -836,6 +890,9 @@ setup.inner_installation() {
 		"$repository_root/uki/scripts/install-uki"
 		setup.persist_inner_phase uki
 	fi
+	setup.configure_persistent_journal
+	setup.configure_graphical_login
+	rm -f -- /run/dbus/system_bus_socket
 	setup.persist_inner_phase complete
 }
 
