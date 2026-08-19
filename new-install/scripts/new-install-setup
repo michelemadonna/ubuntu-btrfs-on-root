@@ -132,7 +132,11 @@ new-install.validate_target_disk() {
 			log.die "Refusing to erase $disk because it contains the running system or live medium source $source."
 	done
 	if lsblk -nrpo MOUNTPOINTS "$disk" | grep -q '[^[:space:]]'; then
-		log.die "Refusing to erase $disk because it or one of its partitions is mounted."
+		if [[ ${NEW_INSTALL_PHASE:-none} != none && ${mp:-} != '' ]] && mountpoint -q "$mp"; then
+			log.info "Allowing the existing target mount $mp while resuming new installation phase $NEW_INSTALL_PHASE"
+		else
+			log.die "Refusing to erase $disk because it or one of its partitions is mounted."
+		fi
 	fi
 	while IFS= read -r source; do
 		[[ -n $source ]] || continue
@@ -411,7 +415,7 @@ new-install.run() {
 	NEW_INSTALL_PHASE=${NEW_INSTALL_PHASE:-none}
 
 	common.require_root
-	common.require_commands awk blkid blockdev btrfs cat chmod chroot cryptsetup debootstrap dpkg find findmnt getent grep lsblk mkfs.btrfs mkfs.ntfs mkfs.vfat mount partprobe readlink sed sgdisk stat swapon tr udevadm umount
+	common.require_commands awk blkid blockdev btrfs cat chmod chroot cryptsetup debootstrap dpkg find findmnt getent grep lsblk mkfs.btrfs mkfs.ntfs mkfs.vfat mount mountpoint partprobe readlink sed sgdisk stat swapon tr udevadm umount
 	[[ $(dpkg --print-architecture) == amd64 ]] || log.die "New installation currently supports amd64 only."
 	[[ -d /sys/firmware/efi ]] || log.die "New installation requires a live session booted in UEFI mode."
 	if [[ $suite_type == kali ]]; then
