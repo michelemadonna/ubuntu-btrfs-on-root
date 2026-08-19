@@ -115,36 +115,14 @@ sbctl-setup.install_upstream() {
 		file \
 		pcscd
 
-	local tmp
+	local go_bin
 
-	tmp="$(mktemp -d /tmp/sbctl-build.XXXXXX)"
-
-	git clone \
-		--depth 1 \
-		--branch "${SBCTL_VERSION}" \
-		https://github.com/Foxboron/sbctl.git \
-		"$tmp/src"
-
-	(
-		cd "$tmp/src"
-
-		go build \
-			-trimpath \
-			-o "$tmp/sbctl" \
-			./cmd/sbctl
-	)
-
-	file "$tmp/sbctl" |
-		grep -q 'ELF' ||
-		log.die "Built sbctl is not an ELF executable."
-
-	install \
-		-m 0755 \
-		"$tmp/sbctl" \
-		/usr/sbin/sbctl
-
-	rm -rf "$tmp"
-	trap - RETURN
+	go_bin="$(go env GOPATH)/bin"
+	mkdir -p "$go_bin"
+	GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}" \
+		go install "github.com/foxboron/sbctl/cmd/sbctl@v${SBCTL_VERSION}"
+	[[ -x "$go_bin/sbctl" ]] || log.die "go install did not produce sbctl."
+	install -m 0755 "$go_bin/sbctl" /usr/sbin/sbctl
 }
 
 # ============================================================
