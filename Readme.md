@@ -36,8 +36,10 @@ sizing; when enabled, setup adds a 16 MiB MSR, the requested NTFS partition and
 a 1 GiB NTFS Windows RE partition. Insufficient space returns to sizing without
 changing the disk. Windows itself is not installed.
 
-The wizard records hostname, root login password, locale, timezone and keyboard
-configuration. Ubuntu uses the selected suite. Kali bootstraps `kali-rolling`
+The wizard records the initial username and password, hostname, locale, timezone
+and keyboard configuration. The user is created with a home directory, Bash
+login shell and membership in the `sudo` group; no root password is requested.
+Ubuntu uses the selected suite. Kali bootstraps `kali-rolling`
 while retaining `suite=kali` for boot and snapshot configuration.
 
 ## Migration required disk layout

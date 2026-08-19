@@ -47,6 +47,12 @@ and consumers before editing behavior.
   returns to sizing before mutation.
 - Fresh LUKS2 mapper `root` and suite/data subvolumes precede `debootstrap`;
   reencryption is not used.
+- New installations create the requested initial user with its password and
+  membership in the `sudo` group; setup does not request a root password.
+- New installation preflight requires amd64, UEFI, reachable distribution
+  archive DNS and a stable unchanged target-disk identity before destruction.
+- The configured Btrfs swapfile is mode 0600 and has a `/swap/swapfile` fstab
+  entry before the new-installation validation succeeds.
 - Kali verifies downloaded archive keys against the pinned official fingerprint;
   signatures stay enabled. Ubuntu uses archive/security plus `main restricted
   universe multiverse`; Kali uses only `kali-rolling` plus `main contrib non-free

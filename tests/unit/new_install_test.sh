@@ -112,6 +112,19 @@ new-install-test.distribution_repository_contract() {
 	grep -Fq "\$suite main restricted universe multiverse" "$installer" || new-install-test.fail "Ubuntu APT components are incomplete"
 }
 
+new-install-test.user_and_swap_contract() {
+	local installer="$repository_root/new-install/scripts/new-install-setup"
+
+	grep -Fq 'keyboard-configuration,sudo' "$installer" || new-install-test.fail "sudo is not included in bootstrap"
+	grep -Fq 'useradd --create-home --shell /bin/bash --groups sudo' "$installer" || new-install-test.fail "initial sudo user creation is missing"
+	grep -Fq 'chpasswd' "$installer" || new-install-test.fail "initial user password setup is missing"
+	grep -Fq 'btrfs filesystem mkswapfile --size' "$installer" || new-install-test.fail "Btrfs swapfile creation is missing"
+	grep -Fq "grep -Fq '/swap/swapfile' \"\$mp/etc/fstab\"" "$installer" || new-install-test.fail "swapfile fstab validation is missing"
+	if grep -Fq 'TARGET_PASSWORD' "$repository_root/setup.sh" "$installer"; then
+		new-install-test.fail "root password variable remains in the new-installation flow"
+	fi
+}
+
 new-install-test.layout_all_space
 new-install-test.layout_with_rescue_and_windows
 new-install-test.reject_windows_with_all_space
@@ -121,4 +134,5 @@ new-install-test.wizard_windows_gate
 new-install-test.archive_trust_contract
 new-install-test.destructive_ordering_contract
 new-install-test.distribution_repository_contract
+new-install-test.user_and_swap_contract
 printf 'new_install_test: PASS\n'

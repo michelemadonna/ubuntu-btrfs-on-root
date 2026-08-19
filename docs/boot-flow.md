@@ -21,9 +21,11 @@ Migration:
 
 Missing exact `/target/boot` and unmounted `/target/cdrom` are non-fatal.
 
-New installation selects an unused whole disk; calculates ESP, optional 10 GiB
-rescue, root and Windows ranges; and gathers suite, LUKS, hostname/localization.
-Root-all disables Windows; insufficient Windows space returns to sizing.
+New installation requires root, amd64 and UEFI, verifies archive DNS reachability,
+selects an unused whole disk and records its size/identity. It calculates ESP,
+optional 10 GiB rescue, root and Windows ranges; gathers suite, LUKS,
+hostname/localization and the initial sudo user/password. Root-all disables
+Windows; insufficient Windows space returns to sizing.
 
 ## Live-session outer phase
 
@@ -33,8 +35,11 @@ Root-all disables Windows; insufficient Windows space returns to sizing.
 2. Revalidate disk identity, size and layout, then require its exact path.
 3. Create GPT with `sgdisk`, settle udev and resolve unique GPT labels.
 4. Format ESP and optional Windows/RE; create/open fresh LUKS2 root.
-5. Create and mount Btrfs suite/data subvolumes, then run `debootstrap`.
-6. Configure identity/localization, crypttab and atomic UUID-based fstab.
+5. Create and mount Btrfs suite/data subvolumes and the configured swapfile,
+   then run `debootstrap` with the minimum kernel, storage, locale and `sudo`
+   packages.
+6. Configure identity/localization, create the initial user in `sudo`, set its
+   password, then write crypttab and atomic UUID-based fstab.
 7. Persist resolved devices and join the common chroot phase.
 
 ### In-place migration
@@ -60,8 +65,10 @@ Root-all disables Windows; insufficient Windows space returns to sizing.
 6. Configure kernel-install, dracut and ukify; generate and validate UKIs.
 7. Optionally install TPM support without enrolling a LUKS token.
 
-After chroot, outer setup optionally creates rescue, restores resolver/policy
-files and leaves target mounts and mapper `root` open.
+After chroot, outer setup optionally creates rescue, validates the user, swapfile
+and persistent storage files, restores resolver/policy files and leaves target
+mounts and mapper `root` open. Failures after destructive storage operations use
+the outer cleanup trap to retain those resources for diagnosis.
 
 ## Secure Boot branches
 

@@ -148,6 +148,12 @@ new-install.validate_target_disk() {
 	log.success "Validated unused whole-disk target $canonical_disk"
 }
 
+new-install.validate_username() {
+	local username=$1
+
+	[[ $username =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || log.die "Initial user name is invalid: $username"
+}
+
 new-install.confirm_destruction() {
 	local disk=$1 confirmation
 
@@ -250,12 +256,12 @@ new-install.bootstrap_target() {
 		bootstrap_suite=kali-rolling
 		mirror=https://http.kali.org/kali
 		keyring=/usr/share/keyrings/kali-archive-keyring.gpg
-		include_packages=linux-image-amd64,kali-archive-keyring,kali-linux-core,btrfs-progs,cryptsetup-initramfs,locales,console-setup,keyboard-configuration
+		include_packages=linux-image-amd64,kali-archive-keyring,kali-linux-core,btrfs-progs,cryptsetup-initramfs,locales,console-setup,keyboard-configuration,sudo
 	else
 		bootstrap_suite=$suite
 		mirror=http://archive.ubuntu.com/ubuntu
 		keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg
-		include_packages=linux-image-generic,ubuntu-minimal,btrfs-progs,cryptsetup-initramfs,locales,console-setup,keyboard-configuration
+		include_packages=linux-image-generic,ubuntu-minimal,btrfs-progs,cryptsetup-initramfs,locales,console-setup,keyboard-configuration,sudo
 	fi
 	[[ -r $keyring ]] || log.die "Archive keyring is unavailable for $suite_type: $keyring"
 	log.info "Bootstrap $suite_type suite $bootstrap_suite into $mp"
@@ -300,7 +306,9 @@ new-install.configure_target() {
 	fstab-setup.run
 	chroot "$mp" locale-gen
 	chroot "$mp" dpkg-reconfigure -f noninteractive tzdata
-	printf 'root:%s\n' "$TARGET_PASSWORD" | chroot "$mp" chpasswd
+	new-install.validate_username "$TARGET_USERNAME"
+	chroot "$mp" useradd --create-home --shell /bin/bash --groups sudo "$TARGET_USERNAME"
+	printf '%s:%s\n' "$TARGET_USERNAME" "$TARGET_USER_PASSWORD" | chroot "$mp" chpasswd
 	chmod 1777 "$mp/tmp"
 }
 
@@ -326,11 +334,16 @@ new-install.validate_result() {
 	[[ $(blkid -c /dev/null -s TYPE -o value "$efi_path") == vfat ]] || log.die "ESP is not FAT."
 	[[ $(blkid -c /dev/null -s LABEL -o value "$efi_path") == ESP ]] || log.die "ESP label is not ESP."
 	[[ -b /dev/mapper/root ]] || log.die "Root mapper is unavailable."
+	[[ -s $mp/swap/swapfile ]] || log.die "Btrfs swapfile is missing."
+	[[ $(stat -c '%a' "$mp/swap/swapfile") == 600 ]] || log.die "Btrfs swapfile permissions are not 0600."
 	listing="$(btrfs subvolume list "$mp")"
 	for name in @ @home @cache @log @tmp @libvirt @docker @swap; do
 		grep -Fq "path $root_sub_vol/$name" <<<"$listing" || log.die "Missing Btrfs subvolume: $root_sub_vol/$name"
 	done
 	[[ -s $mp/etc/fstab && -s $mp/etc/crypttab && -s $mp/etc/hostname ]] || log.die "Base target configuration is incomplete."
+	grep -Fq '/swap/swapfile' "$mp/etc/fstab" || log.die "Swapfile is missing from fstab."
+	chroot "$mp" getent passwd "$TARGET_USERNAME" >/dev/null 2>&1 || log.die "Initial user was not created."
+	chroot "$mp" id -nG "$TARGET_USERNAME" | tr ' ' '\n' | grep -Fxq sudo || log.die "Initial user is not a member of sudo."
 	log.success "Validated partition filesystems, LUKS mapper, subvolumes and base target configuration"
 	log.section_end
 }
@@ -339,9 +352,16 @@ new-install.run() {
 	local current_disk_mib current_identity
 
 	common.require_root
-	common.require_commands awk blkid blockdev btrfs cat chmod chroot cryptsetup debootstrap dpkg find findmnt grep lsblk mkfs.btrfs mkfs.ntfs mkfs.vfat mount partprobe readlink sed sgdisk swapon tr udevadm umount
+	common.require_commands awk blkid blockdev btrfs cat chmod chroot cryptsetup debootstrap dpkg find findmnt getent grep lsblk mkfs.btrfs mkfs.ntfs mkfs.vfat mount partprobe readlink sed sgdisk stat swapon tr udevadm umount
 	[[ $(dpkg --print-architecture) == amd64 ]] || log.die "New installation currently supports amd64 only."
 	[[ -d /sys/firmware/efi ]] || log.die "New installation requires a live session booted in UEFI mode."
+	if [[ $suite_type == kali ]]; then
+		getent hosts http.kali.org >/dev/null 2>&1 || log.die "Kali archive host is not reachable from the live environment."
+	else
+		getent hosts archive.ubuntu.com >/dev/null 2>&1 || log.die "Ubuntu archive host is not reachable from the live environment."
+	fi
+	new-install.validate_username "$TARGET_USERNAME"
+	[[ -n ${TARGET_USER_PASSWORD:-} ]] || log.die "Initial user password cannot be empty."
 	if [[ $install_rescue == yes ]]; then
 		[[ -d ${RESCUE_SOURCE_DIR:-/cdrom}/casper ]] || log.die "Rescue was requested but the live source does not provide casper/."
 	fi

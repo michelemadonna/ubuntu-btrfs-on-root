@@ -99,7 +99,7 @@ setup.generate_configuration() {
 	local detected_root_path detected_efi_path detected_boot_path boot_default reuse_boot_as_rescue=no install_rescue=yes
 	local minimum_rescue_mib boot_size_mib layout layout_status available_mib required_mib
 	local root_dev=sda3 efi_dev=sda2 boot_dev='' rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu
-	local PASSPHRASE=password TARGET_PASSWORD=password mok_pin='' secure_boot_enrollment=sbctl secure_boot_mode EXPERIMENTAL_SBCTL_APPEND=false
+	local PASSPHRASE=password TARGET_USERNAME=ubuntu TARGET_USER_PASSWORD=password mok_pin='' secure_boot_enrollment=sbctl secure_boot_mode EXPERIMENTAL_SBCTL_APPEND=false
 	local pre_download=yes enable_tpm=yes snapshot_menu=yes enlarge=no snapshot_menu_pin=yes snapshot_menu_pin_value=123456
 	local mp=/mnt/root keyslot_size=32m btrfs_options='defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1'
 	local install_mode=migration install_disk='' disk_size_mib=0 esp_size_mib=1024 root_size_strategy=all root_size_percent=70 root_size_mib=0
@@ -302,18 +302,20 @@ setup.generate_configuration() {
 	[[ -n $PASSPHRASE ]] || log.die "LUKS passphrase cannot be empty."
 	if [[ $install_mode == new ]]; then
 		log.section "Target identity and localization"
+		TARGET_USERNAME="$(tui.input "Initial user name" "$TARGET_USERNAME")"
 		target_hostname="$(tui.input "Target hostname" "$target_hostname")"
 		target_locale="$(tui.input "System locale" "$target_locale")"
 		target_timezone="$(tui.input "Timezone" "$target_timezone")"
 		keyboard_layout="$(tui.input "Keyboard layout" "$keyboard_layout")"
 		keyboard_variant="$(tui.input "Keyboard variant (empty for default)" "$keyboard_variant")"
-		TARGET_PASSWORD="$(tui.password_confirm "Target root password" "$TARGET_PASSWORD")" || log.die "Target root passwords do not match."
+		TARGET_USER_PASSWORD="$(tui.password_confirm "Initial user password" "$TARGET_USER_PASSWORD")" || log.die "Initial user passwords do not match."
+		[[ $TARGET_USERNAME =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || log.die "Initial user name is invalid."
 		[[ $target_hostname =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]{0,62}$ ]] || log.die "Target hostname is invalid."
 		[[ $target_locale =~ ^[A-Za-z][A-Za-z0-9_@.-]*$ ]] || log.die "Target locale is invalid."
 		[[ $target_timezone != /* && $target_timezone != *..* && -f /usr/share/zoneinfo/$target_timezone ]] || log.die "Timezone is not available in the live environment: $target_timezone"
 		[[ $keyboard_layout =~ ^[a-z0-9_-]+$ ]] || log.die "Keyboard layout is invalid."
 		[[ -z $keyboard_variant || $keyboard_variant =~ ^[a-z0-9_-]+$ ]] || log.die "Keyboard variant is invalid."
-		[[ -n $TARGET_PASSWORD ]] || log.die "Target root password cannot be empty."
+		[[ -n $TARGET_USER_PASSWORD ]] || log.die "Initial user password cannot be empty."
 	fi
 
 	log.section "Optional features"
@@ -364,7 +366,8 @@ setup.generate_configuration() {
 	setup.write_config_value "$temporary_config" secure_boot_enrollment "$secure_boot_enrollment"
 	setup.write_config_value "$temporary_config" EXPERIMENTAL_SBCTL_APPEND "$EXPERIMENTAL_SBCTL_APPEND"
 	setup.write_config_value "$temporary_config" PASSPHRASE "$PASSPHRASE"
-	setup.write_config_value "$temporary_config" TARGET_PASSWORD "$TARGET_PASSWORD"
+	setup.write_config_value "$temporary_config" TARGET_USERNAME "$TARGET_USERNAME"
+	setup.write_config_value "$temporary_config" TARGET_USER_PASSWORD "$TARGET_USER_PASSWORD"
 	setup.write_config_value "$temporary_config" target_hostname "$target_hostname"
 	setup.write_config_value "$temporary_config" target_locale "$target_locale"
 	setup.write_config_value "$temporary_config" target_timezone "$target_timezone"
@@ -400,6 +403,7 @@ setup.generate_configuration() {
 		fi
 		log.summary_item "Localization" "$target_locale; $target_timezone; $keyboard_layout${keyboard_variant:+/$keyboard_variant}"
 		log.summary_item "Hostname" "$target_hostname"
+		log.summary_item "Initial sudo user" "$TARGET_USERNAME"
 	fi
 	log.summary_item "Root" "$root_path"
 	log.summary_item "ESP" "$efi_path"
@@ -430,7 +434,7 @@ setup.generate_configuration() {
 	config_mode=$(stat -c '%a' "$config_file")
 	[[ $config_mode == 600 ]] || log.die "Generated configuration permissions are $config_mode; expected 600."
 	for config_name in root_dev efi_dev boot_dev mp rescue_dev install_rescue keyslot_size iter_time enlarge swap_size btrfs_options suite suite_type secure_boot_mode secure_boot_enrollment EXPERIMENTAL_SBCTL_APPEND \
-		PASSPHRASE TARGET_PASSWORD install_mode install_disk install_disk_identity disk_size_mib esp_size_mib root_size_strategy root_size_percent root_size_mib install_windows windows_size_mib target_hostname target_locale target_timezone keyboard_layout keyboard_variant \
+		PASSPHRASE TARGET_USERNAME TARGET_USER_PASSWORD install_mode install_disk install_disk_identity disk_size_mib esp_size_mib root_size_strategy root_size_percent root_size_mib install_windows windows_size_mib target_hostname target_locale target_timezone keyboard_layout keyboard_variant \
 		pre_download root_sub_vol enable_tpm snapshot_menu snapshot_menu_pin snapshot_menu_pin_value mok_pin; do
 		grep -q "^export ${config_name}=" "$config_file" ||
 			log.die "Generated configuration is missing required value: $config_name"
@@ -511,7 +515,8 @@ setup.load_configuration() {
 		common.require_nonempty "target_locale" "${target_locale:-}"
 		common.require_nonempty "target_timezone" "${target_timezone:-}"
 		common.require_nonempty "keyboard_layout" "${keyboard_layout:-}"
-		common.require_nonempty "TARGET_PASSWORD" "${TARGET_PASSWORD:-}"
+		common.require_nonempty "TARGET_USERNAME" "${TARGET_USERNAME:-}"
+		common.require_nonempty "TARGET_USER_PASSWORD" "${TARGET_USER_PASSWORD:-}"
 		[[ $install_disk == /dev/* && $install_disk != *..* ]] || log.die "install_disk must be an absolute /dev path."
 		[[ $root_size_strategy == all || $root_size_strategy == percent ]] || log.die "root_size_strategy must be all or percent."
 		[[ $install_windows == yes || $install_windows == no ]] || log.die "install_windows must be yes or no."
