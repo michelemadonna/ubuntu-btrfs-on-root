@@ -842,6 +842,9 @@ setup.preseed_gdm() {
 setup.prepare_apt_environment() {
 	local man_db_dir=/usr/lib/man-db
 
+	if [[ $install_mode == new ]]; then
+		setup.normalize_new_target_permissions
+	fi
 	install -d -m 0755 /var/lib/apt/lists /var/cache/apt/archives
 	install -d -m 0700 /var/lib/apt/lists/partial /var/cache/apt/archives/partial
 	if id _apt >/dev/null 2>&1; then
@@ -871,6 +874,22 @@ setup.prepare_apt_environment() {
 	fi
 }
 
+setup.normalize_new_target_permissions() {
+	local path
+
+	if findmnt -no OPTIONS / 2>/dev/null | tr ',' '\n' | grep -Fxq noexec; then
+		log.die "The new target root is mounted noexec; executable libraries cannot run."
+	fi
+	for path in / /usr /usr/lib /usr/lib/x86_64-linux-gnu /run /run/dbus /var/log; do
+		[[ -d $path ]] && chmod 0755 "$path"
+	done
+	if [[ -d /usr/lib/man-db ]]; then
+		find /usr/lib/man-db -maxdepth 1 -type f -name 'libmandb-*.so' -exec chmod 0755 {} +
+	fi
+	find /usr/lib -maxdepth 3 -type f -name 'libdconf.so*' -exec chmod 0644 {} +
+	ldconfig
+}
+
 setup.finalize_package_triggers() {
 	log.info "Finalize package triggers and rebuild man-db cache"
 	dpkg --configure -a
@@ -895,11 +914,21 @@ setup.configure_persistent_journal() {
 
 setup.configure_graphical_login() {
 	if [[ $install_mode == new && $suite_type == ubuntu ]]; then
+		rm -f -- /etc/systemd/system/gdm3.service /etc/systemd/system/gdm.service
+		systemctl unmask gdm3.service gdm.service >/dev/null 2>&1 || true
 		if dpkg-query -W -f='${Status}' gdm3 2>/dev/null | grep -Fq 'install ok installed'; then
 			dpkg-reconfigure -f noninteractive gdm3
 		fi
-		systemctl enable gdm.service
-		systemctl enable display-manager.service 2>/dev/null || true
+		if [[ -f /lib/systemd/system/gdm3.service ]]; then
+			systemctl enable /lib/systemd/system/gdm3.service
+			install -d -m 0755 /etc/systemd/system
+			rm -f -- /etc/systemd/system/display-manager.service
+			ln -s /lib/systemd/system/gdm3.service /etc/systemd/system/display-manager.service
+			install -d -m 0755 /etc/systemd/system/graphical.target.wants
+			ln -sfn /lib/systemd/system/gdm3.service /etc/systemd/system/graphical.target.wants/gdm3.service
+		else
+			log.die "gdm3.service is not installed in the target."
+		fi
 		log.success "Enabled GDM graphical login"
 	fi
 }
@@ -909,7 +938,10 @@ setup.configure_debug_console() {
 
 	[[ -d /etc/systemd/system ]] || log.die "Target systemd unit directory is unavailable."
 	log.info "Enable virtual debug console on tty1"
+	rm -f -- "/etc/systemd/system/$getty_unit"
+	rm -f -- /etc/systemd/system/getty@.service
 	systemctl unmask "$getty_unit" >/dev/null 2>&1 || true
+	systemctl unmask getty@.service >/dev/null 2>&1 || true
 	systemctl enable "$getty_unit" >/dev/null 2>&1 ||
 		log.die "Unable to enable $getty_unit in the target."
 	[[ -L /etc/systemd/system/getty.target.wants/$getty_unit ]] ||
