@@ -745,7 +745,23 @@ setup.prepare_chroot() {
 		exit 101
 	EOF
 	chmod 0755 "$mp/usr/sbin/policy-rc.d"
+	setup.ensure_target_journal
 	setup.start_chroot_dbus
+}
+
+setup.ensure_target_journal() {
+	local journal_directory="$mp/var/log/journal"
+
+	install -d -m 0755 "$journal_directory"
+	install -d -m 0755 "$mp/etc/systemd/journald.conf.d"
+	cat >"$mp/etc/systemd/journald.conf.d/20-installer-persistent.conf" <<-'EOF'
+		[Journal]
+		Storage=persistent
+	EOF
+	if chroot "$mp" getent group systemd-journal >/dev/null 2>&1; then
+		chroot "$mp" chown root:systemd-journal /var/log/journal
+		chmod 2755 "$journal_directory"
+	fi
 }
 
 setup.start_chroot_dbus() {
@@ -1015,6 +1031,7 @@ setup.validate_final_state() {
 	mountpoint -q "$mp/boot/efi" || log.die "ESP is not mounted in the target."
 	[[ -s $mp/etc/os-release ]] || log.die "Target operating-system identity is missing."
 	[[ -s $mp/etc/fstab && -s $mp/etc/crypttab ]] || log.die "Target storage configuration is incomplete."
+	[[ -d $mp/var/log/journal ]] || log.die "Persistent journal directory is missing from the target."
 	log.success "Validated mounted target, LUKS access and persistent target configuration"
 	log.section_end
 }

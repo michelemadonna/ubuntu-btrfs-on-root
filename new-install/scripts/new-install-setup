@@ -395,6 +395,7 @@ new-install.validate_result() {
 		grep -Fq "path $root_sub_vol/$name" <<<"$listing" || log.die "Missing Btrfs subvolume: $root_sub_vol/$name"
 	done
 	[[ -s $mp/etc/fstab && -s $mp/etc/crypttab && -s $mp/etc/hostname ]] || log.die "Base target configuration is incomplete."
+	[[ -d $mp/var/log/journal ]] || log.die "Persistent journal directory is missing."
 	[[ -s $mp/etc/machine-id ]] || log.die "Target machine-id is missing."
 	grep -Fq '/swap/swapfile' "$mp/etc/fstab" || log.die "Swapfile is missing from fstab."
 	chroot "$mp" getent passwd "$TARGET_USERNAME" >/dev/null 2>&1 || log.die "Initial user was not created."
