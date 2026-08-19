@@ -313,12 +313,12 @@ setup.generate_configuration() {
 	if [[ $install_mode == new ]]; then
 		log.section "Target identity and localization"
 		TARGET_USERNAME="$(tui.input "Initial user name" "$TARGET_USERNAME")"
+		TARGET_USER_PASSWORD="$(tui.password_confirm "Initial user password" "$TARGET_USER_PASSWORD")" || log.die "Initial user passwords do not match."
 		target_hostname="$(tui.input "Target hostname" "$target_hostname")"
 		target_locale="$(tui.input "System locale" "$target_locale")"
 		target_timezone="$(tui.input "Timezone" "$target_timezone")"
 		keyboard_layout="$(tui.input "Keyboard layout" "$keyboard_layout")"
 		keyboard_variant="$(tui.input "Keyboard variant (empty for default)" "$keyboard_variant")"
-		TARGET_USER_PASSWORD="$(tui.password_confirm "Initial user password" "$TARGET_USER_PASSWORD")" || log.die "Initial user passwords do not match."
 		[[ $TARGET_USERNAME =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || log.die "Initial user name is invalid."
 		[[ $target_hostname =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]{0,62}$ ]] || log.die "Target hostname is invalid."
 		[[ $target_locale =~ ^[A-Za-z][A-Za-z0-9_@.-]*$ ]] || log.die "Target locale is invalid."
@@ -475,7 +475,10 @@ setup.load_configuration() {
 		[[ -r $TUI_INPUT_DEVICE ]] || log.die "Interactive terminal is unavailable: $TUI_INPUT_DEVICE"
 		TARGET_USERNAME="$(tui.input "Initial user name to create" "$TARGET_USERNAME")"
 		new-install.validate_username "$TARGET_USERNAME"
+		TARGET_USER_PASSWORD="$(tui.password_confirm "Password for $TARGET_USERNAME" "$TARGET_USER_PASSWORD")" || log.die "Initial user passwords do not match."
+		[[ -n $TARGET_USER_PASSWORD ]] || log.die "Initial user password cannot be empty."
 		setup.persist_config_value "$config_file" TARGET_USERNAME "$TARGET_USERNAME"
+		setup.persist_config_value "$config_file" TARGET_USER_PASSWORD "$TARGET_USER_PASSWORD"
 	fi
 
 	common.require_nonempty "root_dev" "${root_dev:-}"
@@ -507,17 +510,21 @@ setup.load_configuration() {
 		common.require_nonempty "mok_pin" "${mok_pin:-}"
 	fi
 	boot_dev=${boot_dev:-}
-	[[ -z $boot_dev || ($boot_dev != */* && $boot_dev != *..*) ]] ||
-		log.die "boot_dev must be empty or a device name relative to /dev."
-	[[ -z $boot_dev || ($boot_dev != "$root_dev" && $boot_dev != "$efi_dev") ]] ||
-		log.die "boot_dev must be distinct from root_dev and efi_dev."
+	if [[ $install_mode == migration ]]; then
+		[[ -z $boot_dev || ($boot_dev != */* && $boot_dev != *..*) ]] ||
+			log.die "boot_dev must be empty or a device name relative to /dev."
+		[[ -z $boot_dev || ($boot_dev != "$root_dev" && $boot_dev != "$efi_dev") ]] ||
+			log.die "boot_dev must be distinct from root_dev and efi_dev."
+	fi
 	rescue_dev=${rescue_dev:-}
 	if [[ ($install_rescue == yes && ($suite_type != kali || $install_mode == new)) || $setup_action == install-rescue-live ]]; then
 		common.require_nonempty "rescue_dev" "$rescue_dev"
-		[[ $rescue_dev != */* && $rescue_dev != *..* ]] ||
-			log.die "rescue_dev must be a device name relative to /dev."
-		[[ $rescue_dev != "$root_dev" && $rescue_dev != "$efi_dev" ]] ||
-			log.die "rescue_dev must be distinct from root_dev and efi_dev."
+		if [[ $install_mode == migration || $setup_action == install-rescue-live ]]; then
+			[[ $rescue_dev != */* && $rescue_dev != *..* ]] ||
+				log.die "rescue_dev must be a device name relative to /dev."
+			[[ $rescue_dev != "$root_dev" && $rescue_dev != "$efi_dev" ]] ||
+				log.die "rescue_dev must be distinct from root_dev and efi_dev."
+		fi
 	fi
 	if [[ $install_mode == new ]]; then
 		common.require_nonempty "install_disk" "${install_disk:-}"
