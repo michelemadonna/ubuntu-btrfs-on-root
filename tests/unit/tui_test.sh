@@ -125,6 +125,9 @@ tui-test.generated_config_contract() {
 	rg -q 'Target rescue partition is labelled RESCUE' "$repository_root/setup.sh"
 	rg -q 'migration_mode != cross_disk' "$repository_root/setup.sh"
 	rg -q 'Use the target RESCUE partition without requesting a rescue device' "$repository_root/setup.sh"
+	rg -q 'log\.summary_item "Source disk"' "$repository_root/setup.sh"
+	rg -q 'log\.summary_item "Target disk"' "$repository_root/setup.sh"
+	rg -q 'log\.summary_item "Target ROOT"' "$repository_root/setup.sh"
 	rg -q 'subvolid=5 /dev/mapper/sbctl-key-scan' "$repository_root/setup.sh"
 	rg -q 'find "\$scan_mount" -type d -print' "$repository_root/setup.sh"
 	if rg -q 'source_root=/target/var/lib/sbctl/keys' "$repository_root/setup.sh"; then

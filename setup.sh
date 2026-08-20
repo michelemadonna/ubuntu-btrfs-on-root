@@ -493,13 +493,25 @@ setup.generate_configuration() {
 	log.section_end
 
 	log.section "setup.conf summary"
-	log.summary_item "Disk" "$disk"
-	log.summary_item "Root" "$root_path"
-	log.summary_item "ESP" "$efi_path"
-	log.summary_item "Separate boot" "${boot_path:-none}"
-	log.summary_item "Create rescue" "$install_rescue"
-	log.summary_item "Rescue" "${rescue_path:-not configured}"
-	log.summary_item "Boot reused for rescue" "$reuse_boot_as_rescue"
+	if [[ $install_mode == new_setup ]]; then
+		log.summary_item "Source disk" "$disk"
+		log.summary_item "Source root" "$root_path"
+		log.summary_item "Source separate boot" "${boot_path:-none}"
+		log.summary_item "Target disk" "$target_disk"
+		log.summary_item "Target ROOT" "/dev/$root_dev"
+		log.summary_item "Target ESP" "/dev/$efi_dev"
+		log.summary_item "Target rescue" "${rescue_dev:+/dev/$rescue_dev}"
+		log.summary_item "Install rescue live" "$install_rescue"
+		log.summary_item "Rescue filesystem label" "${rescue_filesystem_label:-not configured}"
+	else
+		log.summary_item "Disk" "$disk"
+		log.summary_item "Root" "$root_path"
+		log.summary_item "ESP" "$efi_path"
+		log.summary_item "Separate boot" "${boot_path:-none}"
+		log.summary_item "Create rescue" "$install_rescue"
+		log.summary_item "Rescue" "${rescue_path:-not configured}"
+		log.summary_item "Boot reused for rescue" "$reuse_boot_as_rescue"
+	fi
 	log.summary_item "Mount point" "$mp"
 	log.summary_item "LUKS header space" "$keyslot_size"
 	log.summary_item "Btrfs options" "$btrfs_options"
