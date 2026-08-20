@@ -162,16 +162,23 @@ cross-disk-migration.partition_new_target() {
 
 cross-disk-migration.import_source() {
 	local source_root=$1 source_boot=${2:-}
-	local source_mount target_mount source_boot_mount destination
+	local source_mount target_mount source_boot_mount destination mapper_filesystem
 
 	source_mount="$(mktemp -d /tmp/cross-disk-source.XXXXXX)"
 	target_mount="$mp"
-	common.require_commands mount umount btrfs rsync cryptsetup find
+	common.require_commands blkid mount umount btrfs mkfs.btrfs rsync cryptsetup find
 	[[ $(blkid -c /dev/null -s TYPE -o value "/dev/$source_root") == btrfs ]] ||
 		log.die "Source root /dev/$source_root must contain Btrfs."
 	mount "/dev/$source_root" "$source_mount"
 	trap 'umount "$source_mount" 2>/dev/null || true; rmdir "$source_mount" 2>/dev/null || true' RETURN
 	printf '%s' "$PASSPHRASE" | cryptsetup open --key-file=- "/dev/$root_dev" root
+	mapper_filesystem="$(blkid -c /dev/null -s TYPE -o value /dev/mapper/root 2>/dev/null || true)"
+	if [[ -z $mapper_filesystem ]]; then
+		log.info "Initialize the empty target ROOT mapper as Btrfs"
+		mkfs.btrfs -L ROOT /dev/mapper/root
+	elif [[ $mapper_filesystem != btrfs ]]; then
+		log.die "Target ROOT mapper contains unsupported filesystem '$mapper_filesystem'."
+	fi
 	mount /dev/mapper/root -o subvolid=5 "$target_mount"
 	[[ ! -e "$target_mount/$root_sub_vol" ]] ||
 		log.die "Target already contains the suite container $root_sub_vol."

@@ -105,6 +105,8 @@ tui-test.generated_config_contract() {
 	rg -q 'SETUP_TARGET_LUKS_PASSWORD=\$password' "$repository_root/setup.sh"
 	rg -q 'Reuse the password already entered to unlock target ROOT' "$repository_root/setup.sh"
 	rg -q 'continue migration without imported keys' "$repository_root/setup.sh"
+	rg -q 'ROOT contains no Btrfs filesystem to inspect' "$repository_root/setup.sh"
+	rg -q 'mkfs\.btrfs -L ROOT /dev/mapper/root' "$repository_root/btrfs-root/scripts/cross-disk-migration"
 	rg -q 'require_unique_label "\$target_disk" RESCUE' "$repository_root/setup.sh"
 	rg -q 'Target rescue partition is already labelled UBUNTU_LIVE' "$repository_root/setup.sh"
 	rg -q 'Target rescue partition is labelled RESCUE' "$repository_root/setup.sh"

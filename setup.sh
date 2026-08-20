@@ -80,7 +80,7 @@ setup.detect_secure_boot_mode() {
 
 setup.stage_existing_sbctl_keys() {
 	local target_disk=$1
-	local root_device='' partition partition_type partition_label
+	local root_device='' partition partition_type partition_label mapper_filesystem
 	local scan_mount staged_root=/tmp/ubuntu-btrfs-sbctl-keys password selected
 	local -a key_paths=() key_items=()
 	SETUP_SBCTL_STAGED_ROOT=''
@@ -116,6 +116,11 @@ setup.stage_existing_sbctl_keys() {
 		fi
 	fi
 	trap 'umount "$scan_mount" 2>/dev/null || true; cryptsetup close sbctl-key-scan 2>/dev/null || true; rmdir "$scan_mount" 2>/dev/null || true' RETURN
+	mapper_filesystem="$(blkid -c /dev/null -s TYPE -o value /dev/mapper/sbctl-key-scan 2>/dev/null || true)"
+	if [[ $mapper_filesystem != btrfs ]]; then
+		log.info "ROOT contains no Btrfs filesystem to inspect; continue with new-system migration"
+		return 0
+	fi
 	mount -o subvolid=5 /dev/mapper/sbctl-key-scan "$scan_mount"
 	log.info "Btrfs top-level content from LUKS ROOT on $target_disk"
 	btrfs subvolume list "$scan_mount" || true
