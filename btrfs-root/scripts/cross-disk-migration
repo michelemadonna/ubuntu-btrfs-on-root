@@ -70,6 +70,8 @@ cross-disk-migration.partition_new_target() {
 	local disk_mib total_mib
 	local esp_dev rescue_dev windows_dev winre_dev root_dev
 	local windows_mib=0 msr_mib=0 root_mib
+	local next
+	local -a partition_args=()
 
 	common.require_commands awk blockdev cryptsetup mkfs.fat partprobe sgdisk
 	if [[ $windows == yes ]]; then
@@ -96,29 +98,51 @@ cross-disk-migration.partition_new_target() {
 	((total_mib <= disk_mib)) || log.die "Requested target layout exceeds disk capacity."
 
 	log.section "Create target GPT layout"
-	sgdisk --zap-all "$disk"
-	sgdisk -n "1:0:+${esp_mib}M" -t 1:ef00 -c 1:ESP "$disk"
-	local next=2
+	log.info "Use 1 MiB / 2048-sector alignment for SSD-friendly partition boundaries"
+	sgdisk -a 2048 --zap-all "$disk"
+	partition_args+=(
+		-n "1:0:+${esp_mib}M" -t 1:ef00 -c 1:ESP
+	)
+	next=2
 	if ((rescue > 0)); then
-		sgdisk -n "${next}:0:+${rescue}M" -t "${next}:0700" -c "${next}:RESCUE" "$disk"
+		partition_args+=(
+			-n "${next}:0:+${rescue}M" -t "${next}:0700" -c "${next}:RESCUE"
+		)
 		next=$((next + 1))
 	fi
 	if [[ $windows == yes ]]; then
-		sgdisk -n "${next}:0:+16M" -t "${next}:0C01" -c "${next}:MSR" "$disk"
+		partition_args+=(
+			-n "${next}:0:+16M" -t "${next}:0C01" -c "${next}:MSR"
+		)
 		next=$((next + 1))
-		sgdisk -n "${next}:0:+${windows_mib}M" -t "${next}:0700" -c "${next}:WINDOWS" "$disk"
-		windows_dev="${disk}${next}"
+		partition_args+=(
+			-n "${next}:0:+${windows_mib}M" -t "${next}:0700" -c "${next}:WINDOWS"
+		)
 		next=$((next + 1))
-		sgdisk -n "${next}:0:+1024M" -t "${next}:2700" -c "${next}:WINRE" "$disk"
-		winre_dev="${disk}${next}"
+		partition_args+=(
+			-n "${next}:0:+1024M" -t "${next}:2700" -c "${next}:WINRE"
+		)
 		next=$((next + 1))
 	fi
-	sgdisk -n "${next}:0:+${root_mib}M" -t "${next}:8300" -c "${next}:ROOT" "$disk"
+	if [[ $root_size == all ]]; then
+		partition_args+=(
+			-n "${next}:0:0" -t "${next}:8300" -c "${next}:ROOT"
+		)
+	else
+		partition_args+=(
+			-n "${next}:0:+${root_mib}M" -t "${next}:8300" -c "${next}:ROOT"
+		)
+	fi
+	sgdisk -a 2048 "${partition_args[@]}" "$disk"
 	partprobe "$disk"
 	esp_dev="$(cross-disk-migration.require_unique_label "$disk" ESP)"
 	rescue_dev=""
 	if ((rescue > 0)); then
 		rescue_dev="$(cross-disk-migration.require_unique_label "$disk" RESCUE)"
+	fi
+	if [[ $windows == yes ]]; then
+		windows_dev="$(cross-disk-migration.require_unique_label "$disk" WINDOWS)"
+		winre_dev="$(cross-disk-migration.require_unique_label "$disk" WINRE)"
 	fi
 	root_dev="$(cross-disk-migration.require_unique_label "$disk" ROOT)"
 
