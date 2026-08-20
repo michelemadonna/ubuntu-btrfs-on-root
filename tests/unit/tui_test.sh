@@ -134,8 +134,8 @@ tui-test.generated_config_contract() {
 	rg -q 'mount -o ro,subvolid=5 "\$scan_device"' "$repository_root/setup.sh"
 	rg -q 'btrfs subvolume list "\$scan_mount" \| awk' "$repository_root/setup.sh"
 	rg -q 'findmnt -rn -S /dev/mapper/sbctl-key-scan -o TARGET' "$repository_root/setup.sh"
-	rg -q 'key_search_root="\$scan_mount/var/lib/sbctl/keys"' "$repository_root/setup.sh"
-	rg -q 'find "\$key_search_root" -type d -print' "$repository_root/setup.sh"
+	rg -q 'key_search_root="\$scan_mount"' "$repository_root/setup.sh"
+	rg -q 'find "\$key_search_root" -type d -name \.snapshots -prune -o -type d -print' "$repository_root/setup.sh"
 	if rg -q 'source_root=/target/var/lib/sbctl/keys' "$repository_root/setup.sh"; then
 		printf 'sbctl key discovery must not assume /target.\n' >&2
 		return 1
