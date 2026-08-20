@@ -108,6 +108,7 @@ tui-test.generated_config_contract() {
 		return 1
 	fi
 	rg -q 'secure_boot_enrollment=existing' "$repository_root/setup.sh"
+	rg -q 'if \[\[ -n \$sbctl_import_keyroot \]\]' "$repository_root/setup.sh"
 	rg -q 'sbctl_import_keyroot' "$repository_root/setup.sh"
 	rg -q 'secure_boot_enrollment == existing' "$repository_root/secure-boot/scripts/sbctl-setup"
 	rg -q 'import_existing_keys' "$repository_root/secure-boot/scripts/sbctl-setup"

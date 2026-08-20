@@ -186,8 +186,10 @@ setup.generate_configuration() {
 	else
 		setup.stage_existing_sbctl_keys "$target_disk"
 		sbctl_import_keyroot=$SETUP_SBCTL_STAGED_ROOT
-		secure_boot_enrollment=existing
-		log.info "Secure Boot enrollment is already complete; skip sbctl/MOK selection"
+		if [[ -n $sbctl_import_keyroot ]]; then
+			secure_boot_enrollment=existing
+			log.info "Secure Boot enrollment is already complete; skip sbctl/MOK selection"
+		fi
 	fi
 	if [[ $install_mode == new_setup ]] && cross-disk-migration.initialized_target "$target_disk"; then
 		migration_mode=cross_disk
@@ -313,7 +315,7 @@ setup.generate_configuration() {
 	if [[ $install_mode == in_place && $secure_boot_mode != setup ]]; then
 		log.warn "Firmware is not in Setup Mode; sbctl can create and use signing keys, but direct firmware enrollment cannot be completed now."
 	fi
-	if [[ $install_mode == in_place ]]; then
+	if [[ $install_mode == in_place || -z $sbctl_import_keyroot ]]; then
 		secure_boot_enrollment="$(tui.select_one "Select the Secure Boot enrollment method" "$secure_boot_enrollment" \
 			'sbctl|Direct firmware enrollment with sbctl' \
 			'mok|Shim and Machine Owner Key enrollment')" || log.die "Invalid Secure Boot enrollment method."
