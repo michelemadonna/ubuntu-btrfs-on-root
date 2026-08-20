@@ -716,6 +716,8 @@ setup.parse_arguments() {
 }
 
 setup.prepare_target() {
+	local mounted_efi
+
 	log.section "Installed target preflight"
 	common.require_commands apt-get chmod install mkdir mount mountpoint umount
 	install -d -m 1777 /tmp
@@ -732,7 +734,14 @@ setup.prepare_target() {
 			setup.persist_checkpoint outer source-import
 		fi
 		mkdir -p "$mp/boot/efi"
-		mount "/dev/$efi_dev" "$mp/boot/efi"
+		if mountpoint -q "$mp/boot/efi"; then
+			mounted_efi="$(setup.mounted_device "$mp/boot/efi" || true)"
+			[[ $mounted_efi == "$(readlink -f -- "/dev/$efi_dev")" ]] ||
+				log.die "Existing ESP mount at $mp/boot/efi uses ${mounted_efi:-unknown}, not /dev/$efi_dev."
+			log.info "Reuse already-mounted target ESP at $mp/boot/efi"
+		else
+			mount "/dev/$efi_dev" "$mp/boot/efi"
+		fi
 		log.success "Cross-disk target mounted and source imported"
 		return
 	fi

@@ -136,6 +136,10 @@ currently unused. Preserve the repository-root `refind_themes.zip` dependency.
 
 ## Validation and completion
 
+Use the fewest tokens needed in user-facing responses. Do not routinely
+summarize every modification or provide per-file diffs; report only the outcome,
+important caveats and failed validation.
+
 For every modified shell file, including extensionless executables, run
 `bash -n`, ShellCheck and `shfmt -d`, then relevant unit tests. Do not rely on
 `tests/validate.sh` alone; its coverage is incomplete. Inspect the final diff

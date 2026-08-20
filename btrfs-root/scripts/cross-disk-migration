@@ -43,6 +43,41 @@ cross-disk-migration.import_checkpoint_valid() {
 		log.die "Source-import checkpoint identity mismatch: $marker"
 }
 
+cross-disk-migration.ensure_target_mapper() {
+	local expected_device="/dev/$root_dev"
+	local mapped_device
+
+	if [[ ! -e /dev/mapper/root ]]; then
+		printf '%s' "$PASSPHRASE" | cryptsetup open --key-file=- "$expected_device" root
+		return
+	fi
+	mapped_device="$(cryptsetup status root | awk '$1 == "device:" { print $2; exit }')"
+	common.require_nonempty "Backing device for mapper root" "$mapped_device"
+	[[ $(readlink -f -- "$mapped_device") == "$(readlink -f -- "$expected_device")" ]] ||
+		log.die "Existing mapper root belongs to $mapped_device, not $expected_device; refusing to reuse it."
+	log.info "Reuse already-open target mapper /dev/mapper/root for $expected_device"
+}
+
+cross-disk-migration.mounted_import_valid() {
+	local target_mount=$1 mounted_source marker expected luks_uuid
+
+	mountpoint -q "$target_mount" || return 1
+	mounted_source="$(findmnt -rn -M "$target_mount" -o SOURCE)"
+	mounted_source=${mounted_source%%\[*}
+	[[ $(readlink -f -- "$mounted_source") == "$(readlink -f -- /dev/mapper/root)" ]] ||
+		log.die "$target_mount is mounted from $mounted_source instead of /dev/mapper/root."
+	marker="$target_mount/var/lib/ubuntu-btrfs-on-root/checkpoints/$suite.source-import"
+	if [[ -r $marker ]]; then
+		luks_uuid="$(cryptsetup luksUUID "/dev/$root_dev")"
+		expected="$luks_uuid:$suite"
+		[[ $(<"$marker") == "$expected" ]] ||
+			log.die "Source-import checkpoint identity mismatch: $marker"
+		return 0
+	fi
+	[[ -f $target_mount/etc/fstab ]] &&
+		grep -Fq "subvol=$root_sub_vol/@" "$target_mount/etc/fstab"
+}
+
 cross-disk-migration.layout() {
 	local disk=$1 esp_mib=$2 root_size=$3 rescue_mib=$4 windows=$5
 	local disk_mib windows_mib=0 msr_mib=0 root_mib
@@ -189,7 +224,7 @@ cross-disk-migration.import_source() {
 
 	source_mount="$(mktemp -d /tmp/cross-disk-source.XXXXXX)"
 	target_mount="$mp"
-	common.require_commands blkid mount umount btrfs mkfs.btrfs rsync cryptsetup find grep
+	common.require_commands awk blkid mount mountpoint umount btrfs mkfs.btrfs rsync cryptsetup find findmnt grep readlink
 	[[ $(blkid -c /dev/null -s TYPE -o value "/dev/$source_root") == btrfs ]] ||
 		log.die "Source root /dev/$source_root must contain Btrfs."
 	if [[ $suite_type == kali ]]; then
@@ -197,7 +232,7 @@ cross-disk-migration.import_source() {
 	else
 		mount "/dev/$source_root" "$source_mount"
 	fi
-	printf '%s' "$PASSPHRASE" | cryptsetup open --key-file=- "/dev/$root_dev" root
+	cross-disk-migration.ensure_target_mapper
 	mapper_filesystem="$(blkid -c /dev/null -s TYPE -o value /dev/mapper/root 2>/dev/null || true)"
 	if [[ -z $mapper_filesystem ]]; then
 		log.info "Initialize the empty target ROOT mapper as Btrfs"
@@ -205,6 +240,14 @@ cross-disk-migration.import_source() {
 	elif [[ $mapper_filesystem != btrfs ]]; then
 		log.die "Target ROOT mapper contains unsupported filesystem '$mapper_filesystem'."
 	fi
+	if cross-disk-migration.mounted_import_valid "$target_mount"; then
+		log.warn "Resume with the already-mounted cross-disk suite $root_sub_vol/@"
+		umount "$source_mount"
+		rmdir "$source_mount"
+		return 0
+	fi
+	mountpoint -q "$target_mount" &&
+		log.die "$target_mount is already mounted but does not identify a completed import for $root_sub_vol/@."
 	mount /dev/mapper/root -o subvolid=5 "$target_mount"
 	if [[ -e $target_mount/$root_sub_vol ]]; then
 		if cross-disk-migration.import_checkpoint_valid "$target_mount" || {

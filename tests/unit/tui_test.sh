@@ -163,6 +163,10 @@ tui-test.generated_config_contract() {
 		return 1
 	fi
 	rg -q 'Resume a previously imported cross-disk suite' "$repository_root/btrfs-root/scripts/cross-disk-migration"
+	rg -q 'cross-disk-migration\.ensure_target_mapper' "$repository_root/btrfs-root/scripts/cross-disk-migration"
+	rg -q 'Reuse already-open target mapper' "$repository_root/btrfs-root/scripts/cross-disk-migration"
+	rg -q 'Existing mapper root belongs to .* refusing to reuse it' "$repository_root/btrfs-root/scripts/cross-disk-migration"
+	rg -q 'cross-disk-migration\.mounted_import_valid' "$repository_root/btrfs-root/scripts/cross-disk-migration"
 	rg -q 'luks-setup\.configure_existing' "$repository_root/btrfs-root/scripts/btrfs-root-setup"
 	rg -q 'Both migration modes converge here' "$repository_root/btrfs-root/scripts/btrfs-root-setup"
 	if rg -q 'luks-setup\.write_crypttab' "$repository_root/btrfs-root/scripts/btrfs-root-setup"; then
