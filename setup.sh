@@ -78,6 +78,18 @@ setup.detect_secure_boot_mode() {
 	fi
 }
 
+setup.cleanup_sbctl_key_scan() {
+	local scan_mount=$1
+
+	if mountpoint -q "$scan_mount"; then
+		umount "$scan_mount" || log.warn "Unable to unmount temporary sbctl scan mount $scan_mount"
+	fi
+	if [[ -e /dev/mapper/sbctl-key-scan ]]; then
+		cryptsetup close sbctl-key-scan || log.warn "Unable to close temporary mapper sbctl-key-scan"
+	fi
+	rmdir "$scan_mount" 2>/dev/null || true
+}
+
 setup.stage_existing_sbctl_keys() {
 	local target_disk=$1
 	local root_device='' partition partition_type partition_label mapper_filesystem
@@ -105,23 +117,31 @@ setup.stage_existing_sbctl_keys() {
 	password="$(tui.password "ROOT LUKS password for key discovery" password)"
 	SETUP_TARGET_LUKS_PASSWORD=$password
 	scan_mount="$(mktemp -d /tmp/sbctl-key-scan.XXXXXX)"
+	if [[ -e /dev/mapper/sbctl-key-scan ]]; then
+		log.warn "Close stale temporary mapper sbctl-key-scan from a previous interrupted scan"
+		cryptsetup close sbctl-key-scan || log.die "Unable to close stale mapper sbctl-key-scan."
+	fi
 	if ! printf '%s' "$password" | cryptsetup open --key-file=- "$root_device" sbctl-key-scan; then
 		if printf '%s\n' "$password" | cryptsetup open --key-file=- "$root_device" sbctl-key-scan; then
 			SETUP_TARGET_LUKS_PASSWORD=$password$'\n'
 			log.warn "Unlocked ROOT using the legacy newline-terminated passphrase format"
 		else
 			log.warn "Unable to unlock ROOT for sbctl key discovery; continue migration without imported keys"
-			rmdir "$scan_mount"
+			setup.cleanup_sbctl_key_scan "$scan_mount"
 			return 0
 		fi
 	fi
-	trap 'umount "$scan_mount" 2>/dev/null || true; cryptsetup close sbctl-key-scan 2>/dev/null || true; rmdir "$scan_mount" 2>/dev/null || true' RETURN
 	mapper_filesystem="$(blkid -c /dev/null -s TYPE -o value /dev/mapper/sbctl-key-scan 2>/dev/null || true)"
 	if [[ $mapper_filesystem != btrfs ]]; then
 		log.info "ROOT contains no Btrfs filesystem to inspect; continue with new-system migration"
+		setup.cleanup_sbctl_key_scan "$scan_mount"
 		return 0
 	fi
-	mount -o subvolid=5 /dev/mapper/sbctl-key-scan "$scan_mount"
+	if ! mount -o ro,subvolid=5 /dev/mapper/sbctl-key-scan "$scan_mount"; then
+		log.warn "Unable to mount target Btrfs for sbctl key discovery; continue without imported keys"
+		setup.cleanup_sbctl_key_scan "$scan_mount"
+		return 0
+	fi
 	log.info "Btrfs top-level content from LUKS ROOT on $target_disk"
 	btrfs subvolume list "$scan_mount" || true
 	find "$scan_mount" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort
@@ -133,16 +153,25 @@ setup.stage_existing_sbctl_keys() {
 		key_items+=("$selected|${selected#"$scan_mount"}")
 	done < <(find "$scan_mount" -type d -print)
 	if ((${#key_items[@]} == 0)); then
-		log.info "No sbctl key hierarchy found below the target Btrfs suite subvolumes"
+		log.info "No complete sbctl key hierarchy found anywhere in the target Btrfs filesystem"
+		setup.cleanup_sbctl_key_scan "$scan_mount"
 		return 0
 	fi
-	selected="$(tui.select_one "Select the existing sbctl key hierarchy to import" "${key_paths[0]}" "${key_items[@]}")" ||
+	if ! selected="$(tui.select_one "Select the existing sbctl key hierarchy to import" "${key_paths[0]}" "${key_items[@]}")"; then
+		setup.cleanup_sbctl_key_scan "$scan_mount"
 		log.die "Invalid sbctl key hierarchy selection."
-	install -d -m 0700 "$staged_root"
-	cp -a -- "$selected/." "$staged_root/"
-	find "$staged_root" -type f -print -quit | grep -q . || log.die "Existing sbctl key directory is empty."
+	fi
+	if ! install -d -m 0700 "$staged_root" || ! cp -a -- "$selected/." "$staged_root/"; then
+		setup.cleanup_sbctl_key_scan "$scan_mount"
+		log.die "Unable to stage the selected sbctl key hierarchy."
+	fi
+	if ! find "$staged_root" -type f -print -quit | grep -q .; then
+		setup.cleanup_sbctl_key_scan "$scan_mount"
+		log.die "Existing sbctl key directory is empty."
+	fi
 	SETUP_SBCTL_STAGED_ROOT=$staged_root
 	log.success "Staged selected sbctl keys from ${selected#"$scan_mount"} in $staged_root"
+	setup.cleanup_sbctl_key_scan "$scan_mount"
 }
 
 setup.show_target_inventory() {
