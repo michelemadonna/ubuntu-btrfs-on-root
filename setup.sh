@@ -157,6 +157,38 @@ setup.generate_configuration() {
 	[[ $suite =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Suite must be a safe lowercase identifier."
 	[[ $suite_type =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Distribution icon identifier is invalid."
 
+	root_dev=${root_path#/dev/}
+	efi_dev=${efi_path#/dev/}
+	boot_dev=${boot_path#/dev/}
+	rescue_dev=${rescue_path#/dev/}
+
+	log.section "Encryption and boot security"
+	secure_boot_mode="$(setup.detect_secure_boot_mode)"
+	log.info "Current Secure Boot firmware state: $secure_boot_mode"
+	if [[ $secure_boot_mode != setup ]]; then
+		log.warn "Firmware is not in Setup Mode; sbctl can create and use signing keys, but direct firmware enrollment cannot be completed now."
+	fi
+	secure_boot_enrollment="$(tui.select_one "Select the Secure Boot enrollment method" "$secure_boot_enrollment" \
+		'sbctl|Direct firmware enrollment with sbctl' \
+		'mok|Shim and Machine Owner Key enrollment')" || log.die "Invalid Secure Boot enrollment method."
+	if [[ $secure_boot_enrollment == mok ]]; then
+		mok_pin="$(tui.password "MOK enrollment PIN" 123456)"
+		[[ -n $mok_pin ]] || log.die "MOK PIN cannot be empty."
+	fi
+	if [[ $secure_boot_enrollment == sbctl && $secure_boot_mode != setup ]]; then
+		log.warn "sbctl was selected while firmware is not in Setup Mode; configuration will continue without automatic firmware enrollment."
+	fi
+	iter_time="$(tui.input "Argon2id time target in milliseconds" "$iter_time")"
+	PASSPHRASE="$(tui.password "Initial LUKS passphrase" "$PASSPHRASE")"
+	[[ $iter_time =~ ^[1-9][0-9]*$ ]] || log.die "Argon2id time target must be a positive integer."
+	[[ -n $PASSPHRASE ]] || log.die "LUKS passphrase cannot be empty."
+
+	log.section "Optional features"
+	pre_download="$(tui.toggle "Pre-download target packages" "$pre_download")" || log.die "Invalid pre-download toggle."
+	enlarge="$(tui.toggle "Extend the root partition to available space" "$enlarge")" || log.die "Invalid enlargement toggle."
+	swap_size="$(tui.input "Btrfs swapfile size" "$swap_size")"
+	[[ $swap_size =~ ^[1-9][0-9]*[KMGTP]$ ]] || log.die "Swap size must use a value such as 4G."
+
 	if [[ $suite_type == kali ]]; then
 		install_rescue=no
 		log.info "Kali Linux does not support rescue-system creation during installation"
@@ -187,38 +219,6 @@ setup.generate_configuration() {
 		rescue_path="$(tui.select_one "Select the oversized partition reserved for rescue" "/dev/$rescue_dev" "${rescue_items[@]}")" ||
 			log.die "Invalid rescue partition selection."
 	fi
-	swap_size="$(tui.input "Btrfs swapfile size" "$swap_size")"
-	[[ $swap_size =~ ^[1-9][0-9]*[KMGTP]$ ]] || log.die "Swap size must use a value such as 4G."
-
-	root_dev=${root_path#/dev/}
-	efi_dev=${efi_path#/dev/}
-	boot_dev=${boot_path#/dev/}
-	rescue_dev=${rescue_path#/dev/}
-
-	log.section "Encryption and boot security"
-	secure_boot_mode="$(setup.detect_secure_boot_mode)"
-	log.info "Current Secure Boot firmware state: $secure_boot_mode"
-	if [[ $secure_boot_mode != setup ]]; then
-		log.warn "Firmware is not in Setup Mode; sbctl can create and use signing keys, but direct firmware enrollment cannot be completed now."
-	fi
-	secure_boot_enrollment="$(tui.select_one "Select the Secure Boot enrollment method" "$secure_boot_enrollment" \
-		'sbctl|Direct firmware enrollment with sbctl' \
-		'mok|Shim and Machine Owner Key enrollment')" || log.die "Invalid Secure Boot enrollment method."
-	if [[ $secure_boot_enrollment == mok ]]; then
-		mok_pin="$(tui.password "MOK enrollment PIN" 123456)"
-		[[ -n $mok_pin ]] || log.die "MOK PIN cannot be empty."
-	fi
-	if [[ $secure_boot_enrollment == sbctl && $secure_boot_mode != setup ]]; then
-		log.warn "sbctl was selected while firmware is not in Setup Mode; configuration will continue without automatic firmware enrollment."
-	fi
-	iter_time="$(tui.input "Argon2id time target in milliseconds" "$iter_time")"
-	PASSPHRASE="$(tui.password "Initial LUKS passphrase" "$PASSPHRASE")"
-	[[ $iter_time =~ ^[1-9][0-9]*$ ]] || log.die "Argon2id time target must be a positive integer."
-	[[ -n $PASSPHRASE ]] || log.die "LUKS passphrase cannot be empty."
-
-	log.section "Optional features"
-	pre_download="$(tui.toggle "Pre-download target packages" "$pre_download")" || log.die "Invalid pre-download toggle."
-	enlarge="$(tui.toggle "Extend the root partition to available space" "$enlarge")" || log.die "Invalid enlargement toggle."
 
 	log.section "TPM integration"
 	enable_tpm="$(tui.toggle "Install TPM integration" "$enable_tpm")" || log.die "Invalid TPM toggle."
