@@ -45,6 +45,16 @@ secure-boot-test.test_refind_loader_path() {
 		"$(refind-setup.repository_signed_loader_path mok)"
 }
 
+secure-boot-test.test_fallback_directory_creation() {
+	local test_root
+
+	test_root="$(mktemp -d "${TMPDIR:-/tmp}/refind-fallback-test.XXXXXX")"
+	REFIND_FALLBACK_EFI="$test_root/EFI/BOOT"
+	refind-setup.prepare_fallback_directory >/dev/null
+	[[ -d $REFIND_FALLBACK_EFI ]] || secure-boot-test.fail "UEFI fallback directory was not created"
+	rm -rf -- "$test_root"
+}
+
 secure-boot-test.test_remove_grubefi_directories() {
 	local test_root
 
@@ -120,6 +130,7 @@ secure-boot-test.test_sbctl_enrollment_contract() {
 
 secure-boot-test.test_trust_path
 secure-boot-test.test_refind_loader_path
+secure-boot-test.test_fallback_directory_creation
 secure-boot-test.test_remove_grubefi_directories
 secure-boot-test.test_fwupd_trust_mode
 secure-boot-test.test_summary_has_no_secret

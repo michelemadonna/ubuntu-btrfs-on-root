@@ -19,6 +19,7 @@ export PATH="/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin:$PATH"
 ESP="${ESP:-/boot/efi}"
 
 REFIND_EFI="$ESP/EFI/refind"
+REFIND_FALLBACK_EFI="$ESP/EFI/BOOT"
 
 SHIM_DIR="${SHIM_DIR:-/usr/local/lib/secureboot/shim}"
 DB_CERT="${DB_CERT:-/var/lib/sbctl/keys/db/db.pem}"
@@ -57,6 +58,13 @@ refind-setup.read_efi_uint8() {
 refind-setup.cleanup() {
 	[[ -z "${TMPROOT:-}" ]] ||
 		rm -rf "$TMPROOT"
+}
+
+refind-setup.prepare_fallback_directory() {
+	log.info "Ensure the UEFI fallback loader directory exists: $REFIND_FALLBACK_EFI"
+	install -d -m 0755 "$REFIND_FALLBACK_EFI"
+	[[ -d $REFIND_FALLBACK_EFI ]] ||
+		log.die "Unable to create UEFI fallback loader directory: $REFIND_FALLBACK_EFI"
 }
 
 refind-setup.remove_grubefi_directories() {
@@ -256,6 +264,7 @@ refind-setup.install_direct() {
 	log.info "Install rEFInd directly on the ESP"
 
 	refind-install --yes
+	refind-setup.prepare_fallback_directory
 
 	cat >>"$REFIND_EFI/refind.conf" <<-'EOF'
 		#scanfor external,optical,manual
@@ -268,7 +277,7 @@ refind-setup.install_direct() {
 		include themes/refind-theme-regular/theme.conf
 	EOF
 
-	cp "$REFIND_EFI/refind_x64.efi" "$REFIND_EFI/../BOOT/BOOTX64.EFI"
+	cp "$REFIND_EFI/refind_x64.efi" "$REFIND_FALLBACK_EFI/BOOTX64.EFI"
 }
 
 # ============================================================
@@ -305,6 +314,7 @@ refind-setup.install_with_shim() {
 	refind-install \
 		--shim "$work/shimx64.efi" \
 		--keepname --yes
+	refind-setup.prepare_fallback_directory
 
 	cat >>"$REFIND_EFI/refind.conf" <<-'EOF'
 		#scanfor external,optical,manual
@@ -316,9 +326,9 @@ refind-setup.install_with_shim() {
 		use_graphics_for osx,linux,windows
 		include themes/refind-theme-regular/theme.conf
 	EOF
-	cp "$REFIND_EFI/shimx64.efi" "$REFIND_EFI/../BOOT/BOOTX64.EFI"
-	cp "$REFIND_EFI/mmx64.efi" "$REFIND_EFI/../BOOT/mmx64.efi"
-	cp "$REFIND_EFI/grubx64.efi" "$REFIND_EFI/../BOOT/grubx64.efi"
+	cp "$REFIND_EFI/shimx64.efi" "$REFIND_FALLBACK_EFI/BOOTX64.EFI"
+	cp "$REFIND_EFI/mmx64.efi" "$REFIND_FALLBACK_EFI/mmx64.efi"
+	cp "$REFIND_EFI/grubx64.efi" "$REFIND_FALLBACK_EFI/grubx64.efi"
 	rm -rf "$work"
 }
 
@@ -388,7 +398,7 @@ refind-setup.sign_refind() {
 
 	refind-setup.sign_efi "$refind"
 	if [[ "$secure_boot_enrollment" == sbctl ]]; then
-		refind-setup.sign_efi "$REFIND_EFI/../BOOT/BOOTX64.EFI"
+		refind-setup.sign_efi "$REFIND_FALLBACK_EFI/BOOTX64.EFI"
 	fi
 
 	if [[ -d "$REFIND_EFI/drivers_x64" ]]; then
