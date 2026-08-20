@@ -69,7 +69,15 @@ install-rescue-live.confirm_destruction() {
 	local disk=$1
 	local rescue_size_mib=$2
 	local persistence_mib=$3
-	local confirmation
+	local confirmation filesystem_label
+
+	filesystem_label="$(blkid -c /dev/null -s LABEL -o value "$TARGET_DEV" 2>/dev/null || true)"
+	case $filesystem_label in
+	RESCUE | UBUNTU_LIVE)
+		log.info "Target $TARGET_DEV is identified by filesystem label $filesystem_label; exact-device confirmation is not required"
+		return 0
+		;;
+	esac
 
 	cat <<-EOF
 

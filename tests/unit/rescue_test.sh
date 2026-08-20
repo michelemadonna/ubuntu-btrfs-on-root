@@ -52,6 +52,8 @@ rescue-test.setup_integration() {
 	rg -q -- '--install-rescue-live' "$repository_root/setup.sh"
 	rg -q 'setup_action=install-rescue-live' "$repository_root/setup.sh"
 	rg -q 'RESCUE_SOURCE_DIR:-/cdrom' "$repository_root/setup.sh"
+	rg -q 'RESCUE | UBUNTU_LIVE' "$repository_root/rescue/script/install-rescue-live"
+	rg -q 'exact-device confirmation is not required' "$repository_root/rescue/script/install-rescue-live"
 }
 
 rescue-test.partition_backed_persistence_contract() {
