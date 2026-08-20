@@ -204,24 +204,27 @@ setup.generate_configuration() {
 	secure_boot_enrollment="$(tui.select_one "Select the Secure Boot enrollment method" "$secure_boot_enrollment" \
 		'sbctl|Direct firmware enrollment with sbctl' \
 		'mok|Shim and Machine Owner Key enrollment')" || log.die "Invalid Secure Boot enrollment method."
+	if [[ $secure_boot_enrollment == mok ]]; then
+		mok_pin="$(tui.password "MOK enrollment PIN" 123456)"
+		[[ -n $mok_pin ]] || log.die "MOK PIN cannot be empty."
+	fi
 	if [[ $secure_boot_enrollment == sbctl && $secure_boot_mode != setup ]]; then
 		log.warn "sbctl was selected while firmware is not in Setup Mode; configuration will continue without automatic firmware enrollment."
 	fi
 	iter_time="$(tui.input "Argon2id time target in milliseconds" "$iter_time")"
 	PASSPHRASE="$(tui.password "Initial LUKS passphrase" "$PASSPHRASE")"
-	if [[ $secure_boot_enrollment == mok ]]; then
-		mok_pin="$(tui.password "MOK enrollment PIN" 123456)"
-		[[ -n $mok_pin ]] || log.die "MOK PIN cannot be empty."
-	fi
 	[[ $iter_time =~ ^[1-9][0-9]*$ ]] || log.die "Argon2id time target must be a positive integer."
 	[[ -n $PASSPHRASE ]] || log.die "LUKS passphrase cannot be empty."
 
 	log.section "Optional features"
 	pre_download="$(tui.toggle "Pre-download target packages" "$pre_download")" || log.die "Invalid pre-download toggle."
-	enable_tpm="$(tui.toggle "Install TPM integration" "$enable_tpm")" || log.die "Invalid TPM toggle."
-	snapshot_menu="$(tui.toggle "Install the early-boot snapshot selector" "$snapshot_menu")" || log.die "Invalid snapshot-menu toggle."
 	enlarge="$(tui.toggle "Extend the root partition to available space" "$enlarge")" || log.die "Invalid enlargement toggle."
 
+	log.section "TPM integration"
+	enable_tpm="$(tui.toggle "Install TPM integration" "$enable_tpm")" || log.die "Invalid TPM toggle."
+
+	log.section "Snapshot menu"
+	snapshot_menu="$(tui.toggle "Install the early-boot snapshot selector" "$snapshot_menu")" || log.die "Invalid snapshot-menu toggle."
 	if [[ $snapshot_menu == yes ]]; then
 		snapshot_menu_pin="$(tui.toggle "Protect snapshot selection with a PIN" "$snapshot_menu_pin")" ||
 			log.die "Invalid snapshot PIN selection."

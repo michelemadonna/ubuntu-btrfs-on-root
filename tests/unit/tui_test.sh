@@ -96,6 +96,8 @@ tui-test.generated_config_contract() {
 	rg -q 'log\.section "Distribution configuration"' "$repository_root/setup.sh"
 	rg -q 'log\.section "Encryption and boot security"' "$repository_root/setup.sh"
 	rg -q 'log\.section "Optional features"' "$repository_root/setup.sh"
+	rg -q 'log\.section "TPM integration"' "$repository_root/setup.sh"
+	rg -q 'log\.section "Snapshot menu"' "$repository_root/setup.sh"
 	rg -q 'Proceed with the installation using these values' "$repository_root/setup.sh"
 }
 
