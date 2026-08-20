@@ -181,7 +181,7 @@ fwupd-setup.disable_shim_for_mode() {
 	local enrollment_method=$1
 
 	case $enrollment_method in
-	sbctl) printf 'true\n' ;;
+	sbctl | existing) printf 'true\n' ;;
 	mok) printf 'false\n' ;;
 	*) return 1 ;;
 	esac
@@ -282,7 +282,7 @@ fwupd-setup.print_summary() {
 	local disable_shim
 	local trust_path
 
-	if [[ "$secure_boot_enrollment" == sbctl ]]; then
+	if [[ "$secure_boot_enrollment" == sbctl || "$secure_boot_enrollment" == existing ]]; then
 		disable_shim=true
 		trust_path="UEFI db -> fwupd.efi"
 	else
