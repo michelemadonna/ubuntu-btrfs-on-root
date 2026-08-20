@@ -134,10 +134,16 @@ setup.detect_secure_boot_mode() {
 
 setup.cleanup_sbctl_key_scan() {
 	local scan_mount=$1
+	local stale_mount
 
 	if mountpoint -q "$scan_mount"; then
 		umount "$scan_mount" || log.warn "Unable to unmount temporary sbctl scan mount $scan_mount"
 	fi
+	while IFS= read -r stale_mount; do
+		[[ -n $stale_mount && $stale_mount != "$scan_mount" ]] || continue
+		umount "$stale_mount" ||
+			log.warn "Unable to unmount stale sbctl scan mount $stale_mount"
+	done < <(findmnt -rn -S /dev/mapper/sbctl-key-scan -o TARGET 2>/dev/null || true)
 	if [[ -e /dev/mapper/sbctl-key-scan ]]; then
 		cryptsetup close sbctl-key-scan || log.warn "Unable to close temporary mapper sbctl-key-scan"
 	fi
@@ -152,7 +158,7 @@ setup.stage_existing_sbctl_keys() {
 	SETUP_SBCTL_STAGED_ROOT=''
 	SETUP_TARGET_LUKS_PASSWORD=''
 
-	common.require_commands blkid btrfs cp cryptsetup find install lsblk mount sort umount
+	common.require_commands blkid btrfs cp cryptsetup find findmnt install lsblk mount sort umount
 	while read -r partition partition_type; do
 		[[ $partition_type == part ]] || continue
 		cryptsetup isLuks "$partition" >/dev/null 2>&1 || continue
