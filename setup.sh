@@ -339,14 +339,13 @@ setup.generate_configuration() {
 	swap_size="$(tui.input "Btrfs swapfile size" "$swap_size")"
 	[[ $swap_size =~ ^[1-9][0-9]*[KMGTP]$ ]] || log.die "Swap size must use a value such as 4G."
 
-	log.section "LUKS and Argon2id"
-	iter_time="$(tui.input "Argon2id time target in milliseconds" "$iter_time")"
 	if [[ $migration_mode != cross_disk ]]; then
+		log.section "LUKS and Argon2id"
+		iter_time="$(tui.input "Argon2id time target in milliseconds" "$iter_time")"
 		PASSPHRASE="$(tui.password "Initial LUKS passphrase" "$PASSPHRASE")"
-	else
-		log.info "Reuse the password already entered to unlock target ROOT"
+		[[ $iter_time =~ ^[1-9][0-9]*$ ]] || log.die "Argon2id time target must be a positive integer."
+		log.section_end
 	fi
-	[[ $iter_time =~ ^[1-9][0-9]*$ ]] || log.die "Argon2id time target must be a positive integer."
 	[[ -n $PASSPHRASE ]] || log.die "LUKS passphrase cannot be empty."
 
 	log.section "Distribution configuration"
@@ -398,7 +397,7 @@ setup.generate_configuration() {
 	if [[ $suite_type == kali ]]; then
 		install_rescue=no
 		log.info "Kali Linux does not support rescue-system creation during installation"
-	elif [[ $migration_mode == cross_disk ]]; then
+	elif [[ $install_mode == new_setup ]]; then
 		rescue_path="$(cross-disk-migration.require_unique_label "$target_disk" RESCUE)"
 		rescue_dev=${rescue_path#/dev/}
 		rescue_filesystem_label="$(blkid -c /dev/null -s LABEL -o value "$rescue_path" 2>/dev/null || true)"
@@ -417,7 +416,7 @@ setup.generate_configuration() {
 		install_rescue="$(tui.toggle "Create the persistent rescue system" "$install_rescue")" ||
 			log.die "Invalid rescue-system toggle."
 	fi
-	if [[ $install_rescue == yes && -n $boot_path && $migration_mode != cross_disk ]]; then
+	if [[ $install_rescue == yes && -n $boot_path && $install_mode == in_place ]]; then
 		minimum_rescue_mib="$(setup.minimum_rescue_size_mib /cdrom)"
 		boot_size_mib="$(setup.device_size_mib "$boot_path")"
 		if ((boot_size_mib >= minimum_rescue_mib)); then
@@ -431,6 +430,8 @@ setup.generate_configuration() {
 
 	if [[ $install_rescue == no ]]; then
 		rescue_path=""
+	elif [[ $install_mode == new_setup ]]; then
+		log.info "Use the target RESCUE partition without requesting a rescue device"
 	elif [[ $reuse_boot_as_rescue == yes ]]; then
 		rescue_path=$boot_path
 	else

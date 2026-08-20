@@ -105,7 +105,10 @@ tui-test.generated_config_contract() {
 	rg -q 'ROOT LUKS password for key discovery' "$repository_root/setup.sh"
 	rg -q 'cryptsetup open --key-file=-' "$repository_root/setup.sh"
 	rg -q 'SETUP_TARGET_LUKS_PASSWORD=\$password' "$repository_root/setup.sh"
-	rg -q 'Reuse the password already entered to unlock target ROOT' "$repository_root/setup.sh"
+	if rg -q 'Reuse the password already entered to unlock target ROOT' "$repository_root/setup.sh"; then
+		printf 'Cross-disk migration must not show the LUKS and Argon2id prompt block.\n' >&2
+		return 1
+	fi
 	if rg -q 'Target ROOT LUKS passphrase' "$repository_root/setup.sh"; then
 		printf 'Target ROOT password must not be requested twice.\n' >&2
 		return 1
@@ -121,6 +124,7 @@ tui-test.generated_config_contract() {
 	rg -q 'Target rescue partition is already labelled UBUNTU_LIVE' "$repository_root/setup.sh"
 	rg -q 'Target rescue partition is labelled RESCUE' "$repository_root/setup.sh"
 	rg -q 'migration_mode != cross_disk' "$repository_root/setup.sh"
+	rg -q 'Use the target RESCUE partition without requesting a rescue device' "$repository_root/setup.sh"
 	rg -q 'subvolid=5 /dev/mapper/sbctl-key-scan' "$repository_root/setup.sh"
 	rg -q 'find "\$scan_mount" -type d -print' "$repository_root/setup.sh"
 	if rg -q 'source_root=/target/var/lib/sbctl/keys' "$repository_root/setup.sh"; then
