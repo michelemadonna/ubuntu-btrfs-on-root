@@ -153,7 +153,7 @@ setup.cleanup_sbctl_key_scan() {
 setup.stage_existing_sbctl_keys() {
 	local target_disk=$1
 	local root_device='' scan_device=/dev/mapper/root key_search_root partition partition_type partition_label mapper_filesystem
-	local scan_mount staged_root=/tmp/ubuntu-btrfs-sbctl-keys password selected
+	local scan_mount staged_root="$repository_root/.sbctl-key-import" password selected
 	local -a key_paths=() key_items=()
 	SETUP_SBCTL_STAGED_ROOT=''
 	SETUP_TARGET_LUKS_PASSWORD=''
@@ -236,8 +236,8 @@ setup.stage_existing_sbctl_keys() {
 		setup.cleanup_sbctl_key_scan "$scan_mount"
 		log.die "Existing sbctl key directory is empty."
 	fi
-	SETUP_SBCTL_STAGED_ROOT=$staged_root
-	log.success "Staged selected sbctl keys from ${selected#"$scan_mount"} in $staged_root"
+	SETUP_SBCTL_STAGED_ROOT="/root/$repository_name/.sbctl-key-import"
+	log.success "Staged selected sbctl keys from ${selected#"$scan_mount"} for chroot import"
 	setup.cleanup_sbctl_key_scan "$scan_mount"
 }
 
