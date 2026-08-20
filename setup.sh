@@ -205,7 +205,9 @@ setup.stage_existing_sbctl_keys() {
 		[[ -f $selected/db/db.key && -f $selected/db/db.pem ]] || continue
 		key_paths+=("$selected")
 		key_items+=("$selected|${selected#"$scan_mount"}")
-	done < <(find "$scan_mount" -type d -print)
+	done < <(
+		find "$scan_mount" -type d -name .snapshots -prune -o -type d -print
+	)
 	if ((${#key_items[@]} == 0)); then
 		log.info "No complete sbctl key hierarchy found anywhere in the target Btrfs filesystem"
 		setup.cleanup_sbctl_key_scan "$scan_mount"
