@@ -154,7 +154,7 @@ cross-disk-migration.partition_new_target() {
 		mkfs.ntfs -f -L WINDOWS "$windows_dev"
 		mkfs.ntfs -f -L WINRE "$winre_dev"
 	fi
-	printf '%s\n' "$passphrase" | cryptsetup luksFormat --type luks2 --pbkdf argon2id --iter-time "$iter_time" --label ROOT "$root_dev" -
+	printf '%s' "$passphrase" | cryptsetup luksFormat --type luks2 --pbkdf argon2id --iter-time "$iter_time" --label ROOT --key-file=- "$root_dev"
 	log.summary_item "Target ROOT" "$root_dev (LUKS2 label ROOT)"
 	log.success "Target disk initialized; run setup.sh again to migrate the source."
 	log.section_end
@@ -171,7 +171,7 @@ cross-disk-migration.import_source() {
 		log.die "Source root /dev/$source_root must contain Btrfs."
 	mount "/dev/$source_root" "$source_mount"
 	trap 'umount "$source_mount" 2>/dev/null || true; rmdir "$source_mount" 2>/dev/null || true' RETURN
-	printf '%s\n' "$PASSPHRASE" | cryptsetup open "/dev/$root_dev" root
+	printf '%s' "$PASSPHRASE" | cryptsetup open --key-file=- "/dev/$root_dev" root
 	mount /dev/mapper/root -o subvolid=5 "$target_mount"
 	[[ ! -e "$target_mount/$root_sub_vol" ]] ||
 		log.die "Target already contains the suite container $root_sub_vol."

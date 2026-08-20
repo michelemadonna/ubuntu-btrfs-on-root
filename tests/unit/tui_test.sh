@@ -101,6 +101,7 @@ tui-test.generated_config_contract() {
 	rg -q "'new_setup|New Setup or Migrate From another Disk'" "$repository_root/setup.sh"
 	rg -q 'setup\.stage_existing_sbctl_keys' "$repository_root/setup.sh"
 	rg -q 'ROOT LUKS password for key discovery' "$repository_root/setup.sh"
+	rg -q 'cryptsetup open --key-file=-' "$repository_root/setup.sh"
 	rg -q 'SETUP_TARGET_LUKS_PASSWORD=\$password' "$repository_root/setup.sh"
 	rg -q 'Reuse the password already entered to unlock target ROOT' "$repository_root/setup.sh"
 	rg -q 'continue migration without imported keys' "$repository_root/setup.sh"

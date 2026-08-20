@@ -105,10 +105,15 @@ setup.stage_existing_sbctl_keys() {
 	password="$(tui.password "ROOT LUKS password for key discovery" password)"
 	SETUP_TARGET_LUKS_PASSWORD=$password
 	scan_mount="$(mktemp -d /tmp/sbctl-key-scan.XXXXXX)"
-	if ! printf '%s\n' "$password" | cryptsetup open "$root_device" sbctl-key-scan; then
-		log.warn "Unable to unlock ROOT for sbctl key discovery; continue migration without imported keys"
-		rmdir "$scan_mount"
-		return 0
+	if ! printf '%s' "$password" | cryptsetup open --key-file=- "$root_device" sbctl-key-scan; then
+		if printf '%s\n' "$password" | cryptsetup open --key-file=- "$root_device" sbctl-key-scan; then
+			SETUP_TARGET_LUKS_PASSWORD=$password$'\n'
+			log.warn "Unlocked ROOT using the legacy newline-terminated passphrase format"
+		else
+			log.warn "Unable to unlock ROOT for sbctl key discovery; continue migration without imported keys"
+			rmdir "$scan_mount"
+			return 0
+		fi
 	fi
 	trap 'umount "$scan_mount" 2>/dev/null || true; cryptsetup close sbctl-key-scan 2>/dev/null || true; rmdir "$scan_mount" 2>/dev/null || true' RETURN
 	mount -o subvolid=5 /dev/mapper/sbctl-key-scan "$scan_mount"
