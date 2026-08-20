@@ -155,20 +155,18 @@ cross-disk-migration.partition_new_target() {
 		mkfs.ntfs -f -L WINRE "$winre_dev"
 	fi
 	printf '%s' "$passphrase" | cryptsetup luksFormat --type luks2 --pbkdf argon2id --iter-time "$iter_time" --label ROOT --key-file=- "$root_dev"
-	if [[ -e /dev/mapper/root-initialize ]]; then
-		cryptsetup close root-initialize || log.die "Unable to close stale mapper root-initialize."
-	fi
-	printf '%s' "$passphrase" | cryptsetup open --key-file=- "$root_dev" root-initialize ||
+	[[ ! -e /dev/mapper/root ]] || log.die "Mapper /dev/mapper/root is already open; close it before target initialization."
+	printf '%s' "$passphrase" | cryptsetup open --key-file=- "$root_dev" root ||
 		log.die "Unable to reopen the new ROOT LUKS container."
-	if ! mkfs.btrfs -L ROOT /dev/mapper/root-initialize; then
-		cryptsetup close root-initialize || true
+	if ! mkfs.btrfs /dev/mapper/root; then
+		cryptsetup close root || true
 		log.die "Unable to create Btrfs inside the new ROOT LUKS container."
 	fi
-	[[ $(blkid -c /dev/null -s TYPE -o value /dev/mapper/root-initialize) == btrfs ]] || {
-		cryptsetup close root-initialize || true
+	[[ $(blkid -c /dev/null -s TYPE -o value /dev/mapper/root) == btrfs ]] || {
+		cryptsetup close root || true
 		log.die "Btrfs validation failed inside the new ROOT LUKS container."
 	}
-	cryptsetup close root-initialize || log.die "Unable to close mapper root-initialize after Btrfs creation."
+	cryptsetup close root || log.die "Unable to close mapper root after Btrfs creation."
 	log.summary_item "Target ROOT" "$root_dev (LUKS2 label ROOT, Btrfs filesystem)"
 	log.success "Target disk initialized; run setup.sh again to migrate the source."
 	log.section_end
@@ -189,7 +187,7 @@ cross-disk-migration.import_source() {
 	mapper_filesystem="$(blkid -c /dev/null -s TYPE -o value /dev/mapper/root 2>/dev/null || true)"
 	if [[ -z $mapper_filesystem ]]; then
 		log.info "Initialize the empty target ROOT mapper as Btrfs"
-		mkfs.btrfs -L ROOT /dev/mapper/root
+		mkfs.btrfs /dev/mapper/root
 	elif [[ $mapper_filesystem != btrfs ]]; then
 		log.die "Target ROOT mapper contains unsupported filesystem '$mapper_filesystem'."
 	fi

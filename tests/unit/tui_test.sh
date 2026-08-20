@@ -112,7 +112,11 @@ tui-test.generated_config_contract() {
 	fi
 	rg -q 'continue migration without imported keys' "$repository_root/setup.sh"
 	rg -q 'ROOT contains no Btrfs filesystem to inspect' "$repository_root/setup.sh"
-	rg -q 'mkfs\.btrfs -L ROOT /dev/mapper/root' "$repository_root/btrfs-root/scripts/cross-disk-migration"
+	rg -q 'mkfs\.btrfs /dev/mapper/root' "$repository_root/btrfs-root/scripts/cross-disk-migration"
+	if rg -q 'mkfs\.btrfs .*-[Ll] ROOT' "$repository_root/btrfs-root/scripts/cross-disk-migration"; then
+		printf 'The Btrfs filesystem inside ROOT must not reuse the LUKS label.\n' >&2
+		return 1
+	fi
 	rg -q 'require_unique_label "\$target_disk" RESCUE' "$repository_root/setup.sh"
 	rg -q 'Target rescue partition is already labelled UBUNTU_LIVE' "$repository_root/setup.sh"
 	rg -q 'Target rescue partition is labelled RESCUE' "$repository_root/setup.sh"
@@ -142,7 +146,11 @@ tui-test.generated_config_contract() {
 	rg -q 'PARTLABEL' "$repository_root/btrfs-root/scripts/cross-disk-migration"
 	rg -q 'sgdisk --zap-all' "$repository_root/btrfs-root/scripts/cross-disk-migration"
 	rg -q 'luksFormat.*--label ROOT' "$repository_root/btrfs-root/scripts/cross-disk-migration"
-	rg -q 'mkfs\.btrfs -L ROOT /dev/mapper/root-initialize' "$repository_root/btrfs-root/scripts/cross-disk-migration"
+	rg -q 'mkfs\.btrfs -L ROOT /dev/mapper/root' "$repository_root/btrfs-root/scripts/cross-disk-migration"
+	if rg -q 'root-initialize' "$repository_root/btrfs-root/scripts/cross-disk-migration"; then
+		printf 'ROOT initialization must use the canonical mapper root.\n' >&2
+		return 1
+	fi
 	rg -q 'Proceed with the installation using these values' "$repository_root/setup.sh"
 }
 
