@@ -371,6 +371,7 @@ if [ "$window_ticks" -gt 0 ] &&
 		sleep 0.1
 		tick=$((tick + 1))
 	done
+	snapshot-key-listener-stop.show_message ""
 fi
 
 #

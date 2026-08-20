@@ -5,6 +5,8 @@
 set -Eeuo pipefail
 umask 077
 
+readonly LUKS_FILESYSTEM_LABEL=ROOT
+
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
 
@@ -66,6 +68,19 @@ luks-setup.write_crypttab() {
 	luks-setup.build_crypttab_entry "$luks_uuid" >"$crypttab_file"
 }
 
+luks-setup.configure_label() {
+	local luks_device=$1
+	local applied_label
+
+	log.info "Set LUKS label $LUKS_FILESYSTEM_LABEL on $luks_device"
+	cryptsetup config "$luks_device" --label "$LUKS_FILESYSTEM_LABEL" ||
+		log.die "Unable to set LUKS label on $luks_device."
+	applied_label="$(blkid -c /dev/null -s LABEL -o value "$luks_device")"
+	[[ $applied_label == "$LUKS_FILESYSTEM_LABEL" ]] ||
+		log.die "LUKS label validation failed: expected $LUKS_FILESYSTEM_LABEL, found '$applied_label'."
+	log.success "LUKS label validated as $LUKS_FILESYSTEM_LABEL on $luks_device"
+}
+
 luks-setup.run() {
 	local source_device="/dev/$root_dev"
 	local mapper_device="/dev/mapper/root"
@@ -92,6 +107,7 @@ luks-setup.run() {
 			--iter-time "$iter_time" \
 			--reduce-device-size "$keyslot_size" \
 			"$source_device"
+	luks-setup.configure_label "$source_device"
 
 	if [[ $enlarge == yes ]]; then
 		log.info "Extend partition $partition_number on /dev/$disk_name to all available space"
