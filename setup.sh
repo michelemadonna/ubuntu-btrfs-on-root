@@ -207,7 +207,7 @@ setup.generate_configuration() {
 		create_rescue="$(tui.toggle "Create RESCUE partition" "$create_rescue")" || log.die "Invalid rescue toggle."
 		reserve_windows="$(tui.toggle "Reserve space for Windows" "$reserve_windows")" || log.die "Invalid Windows toggle."
 		log.section "New target layout"
-		cross-disk-migration.layout "$target_disk" "$esp_mib" "$root_size" "${create_rescue}: 10 GiB" "$reserve_windows"
+		cross-disk-migration.layout "$target_disk" "$esp_mib" "$root_size" "$([[ $create_rescue == yes ]] && printf 10240 || printf 0)" "$reserve_windows"
 		confirmation="$(tui.toggle "Destroy the selected target and create this layout" no)" || log.die "Invalid confirmation."
 		[[ $confirmation == yes ]] || log.die "Target initialization cancelled."
 		new_passphrase="$(tui.password "ROOT LUKS passphrase" password)"
