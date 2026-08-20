@@ -183,6 +183,17 @@ sbctl-setup.create_keys() {
 		log.die "sbctl did not create the expected key hierarchy."
 }
 
+sbctl-setup.import_existing_keys() {
+	local source_root=${SBCTL_IMPORT_KEYROOT:-}
+
+	[[ -n $source_root && -d $source_root ]] || log.die "Existing Secure Boot keys were not staged."
+	common.require_commands cp install
+	install -d -m 0700 "$SBCTL_KEYROOT"
+	cp -a -- "$source_root/." "$SBCTL_KEYROOT/"
+	sbctl-setup.keys_exist || log.die "The staged sbctl key hierarchy is incomplete."
+	log.success "Imported the existing sbctl key hierarchy into $SBCTL_KEYROOT"
+}
+
 # ============================================================
 # Enrollment
 # ============================================================
@@ -414,8 +425,12 @@ sbctl-setup.run() {
 
 	sbctl-setup.install_dependencies
 	common.require_commands awk basename chattr find grep lsattr sbctl
-	sbctl-setup.create_keys
-	sbctl-setup.enroll_if_setup_mode
+	if [[ ${secure_boot_enrollment:-} == existing ]]; then
+		sbctl-setup.import_existing_keys
+	else
+		sbctl-setup.create_keys
+		sbctl-setup.enroll_if_setup_mode
+	fi
 	sbctl-setup.migrate_configuration
 	sbctl status || true
 }

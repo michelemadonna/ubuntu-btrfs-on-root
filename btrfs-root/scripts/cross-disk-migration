@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# Cross-disk target discovery, initialization and source import.
+# shellcheck disable=SC2153,SC2154
+
+set -Eeuo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="${repository_root:-$(cd -- "$script_dir/../.." && pwd)}"
+
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/lib/common.sh"
+
+cross-disk-migration.partition_by_label() {
+	local disk=$1 label=$2
+	lsblk -nrpo PATH,PARTLABEL "$disk" | awk -v label="$label" '$2 == label { print $1 }'
+}
+
+cross-disk-migration.initialized_target() {
+	local disk=$1 esp root esp_count root_count
+	esp="$(cross-disk-migration.partition_by_label "$disk" ESP)"
+	root="$(cross-disk-migration.partition_by_label "$disk" ROOT)"
+	esp_count="$(awk 'NF { count++ } END { print count + 0 }' <<<"$esp")"
+	root_count="$(awk 'NF { count++ } END { print count + 0 }' <<<"$root")"
+	((esp_count == 1 && root_count == 1))
+}
+
+cross-disk-migration.require_unique_label() {
+	local disk=$1 label=$2 result
+	result="$(cross-disk-migration.partition_by_label "$disk" "$label")"
+	[[ -n $result && $(awk 'NF { count++ } END { print count + 0 }' <<<"$result") -eq 1 ]] ||
+		log.die "Disk $disk must contain exactly one partition labelled $label."
+	printf '%s\n' "$result"
+}
+
+cross-disk-migration.layout() {
+	local disk=$1 esp_mib=$2 root_size=$3 rescue=$4 windows=$5
+	cat <<-EOF
+		Target disk: $disk
+		ESP:         ${esp_mib} MiB
+		Rescue:      $rescue
+		Windows:     $windows
+		ROOT:        $root_size
+		Warning: all existing data and partition metadata on $disk will be destroyed.
+	EOF
+}
+
+cross-disk-migration.partition_new_target() {
+	local disk=$1 esp_mib=$2 root_size=$3 rescue=$4 windows=$5 iter_time=$6 passphrase=$7
+	local disk_mib total_mib
+	local esp_dev rescue_dev windows_dev winre_dev root_dev
+	local windows_mib=0 root_mib
+
+	common.require_commands awk blockdev cryptsetup mkfs.fat partprobe sgdisk
+	if [[ $windows == yes ]]; then
+		common.require_commands mkfs.ntfs
+	fi
+	disk_mib=$(($(blockdev --getsize64 "$disk") / 1024 / 1024))
+	[[ $esp_mib =~ ^[1-9][0-9]*$ ]] || log.die "ESP size must be a positive integer in MiB."
+	[[ $rescue =~ ^[0-9]+$ ]] || log.die "Rescue size must be an integer in MiB."
+	[[ $root_size == all || $root_size =~ ^[1-9][0-9]*$ ]] || log.die "ROOT size must be 'all' or a positive GiB value."
+	((esp_mib >= 256)) || log.die "ESP must be at least 256 MiB."
+	((disk_mib > esp_mib + 10240)) || log.die "Target disk is too small for the requested layout."
+	if [[ $windows == yes ]]; then
+		windows_mib=65536
+	fi
+	if [[ $root_size == all ]]; then
+		root_mib=$((disk_mib - esp_mib - rescue - 16 - windows_mib - 1024))
+	else
+		root_mib=$((root_size * 1024))
+	fi
+	((root_mib >= 10240)) || log.die "ROOT must have at least 10 GiB after reserved partitions."
+
+	total_mib=$((esp_mib + rescue + 16 + windows_mib + 1024 + root_mib))
+	((total_mib <= disk_mib)) || log.die "Requested target layout exceeds disk capacity."
+
+	log.section "Create target GPT layout"
+	sgdisk --zap-all "$disk"
+	sgdisk -n "1:0:+${esp_mib}M" -t 1:ef00 -c 1:ESP "$disk"
+	local next=2
+	if ((rescue > 0)); then
+		sgdisk -n "${next}:0:+${rescue}M" -t "${next}:0700" -c "${next}:RESCUE" "$disk"
+		next=$((next + 1))
+	fi
+	if [[ $windows == yes ]]; then
+		sgdisk -n "${next}:0:+16M" -t "${next}:0C01" -c "${next}:MSR" "$disk"
+		next=$((next + 1))
+		sgdisk -n "${next}:0:+${windows_mib}M" -t "${next}:0700" -c "${next}:WINDOWS" "$disk"
+		windows_dev="${disk}${next}"
+		next=$((next + 1))
+		sgdisk -n "${next}:0:+1024M" -t "${next}:2700" -c "${next}:WINRE" "$disk"
+		winre_dev="${disk}${next}"
+		next=$((next + 1))
+	fi
+	sgdisk -n "${next}:0:+${root_mib}M" -t "${next}:8300" -c "${next}:ROOT" "$disk"
+	partprobe "$disk"
+	esp_dev="$(cross-disk-migration.require_unique_label "$disk" ESP)"
+	rescue_dev=""
+	if ((rescue > 0)); then
+		rescue_dev="$(cross-disk-migration.require_unique_label "$disk" RESCUE)"
+	fi
+	root_dev="$(cross-disk-migration.require_unique_label "$disk" ROOT)"
+
+	mkfs.fat -F32 -n ESP "$esp_dev"
+	if [[ -n $rescue_dev ]]; then
+		mkfs.fat -F32 -n UBUNTU_LIVE "$rescue_dev"
+	fi
+	if [[ $windows == yes ]]; then
+		mkfs.ntfs -f -L WINDOWS "$windows_dev"
+		mkfs.ntfs -f -L WINRE "$winre_dev"
+	fi
+	printf '%s\n' "$passphrase" | cryptsetup luksFormat --type luks2 --pbkdf argon2id --iter-time "$iter_time" --label ROOT "$root_dev" -
+	log.summary_item "Target ROOT" "$root_dev (LUKS2 label ROOT)"
+	log.success "Target disk initialized; run setup.sh again to migrate the source."
+	log.section_end
+}
+
+cross-disk-migration.import_source() {
+	local source_root=$1 source_boot=${2:-}
+	local source_mount target_mount source_boot_mount destination
+
+	source_mount="$(mktemp -d /tmp/cross-disk-source.XXXXXX)"
+	target_mount="$mp"
+	common.require_commands mount umount btrfs rsync cryptsetup find
+	[[ $(blkid -c /dev/null -s TYPE -o value "/dev/$source_root") == btrfs ]] ||
+		log.die "Source root /dev/$source_root must contain Btrfs."
+	mount "/dev/$source_root" "$source_mount"
+	trap 'umount "$source_mount" 2>/dev/null || true; rmdir "$source_mount" 2>/dev/null || true' RETURN
+	printf '%s\n' "$PASSPHRASE" | cryptsetup open "/dev/$root_dev" root
+	mount /dev/mapper/root -o subvolid=5 "$target_mount"
+	[[ ! -e "$target_mount/$root_sub_vol" ]] ||
+		log.die "Target already contains the suite container $root_sub_vol."
+	btrfs subvolume create "$target_mount/$root_sub_vol"
+	btrfs subvolume create "$target_mount/$root_sub_vol/@"
+	for name in @home @cache @log @tmp @libvirt @docker @swap; do
+		btrfs subvolume create "$target_mount/$root_sub_vol/$name"
+	done
+	local -a rsync_args=(-aHAXx --numeric-ids)
+	rsync_args+=("$source_mount/." "$target_mount/$root_sub_vol/@/")
+	rsync "${rsync_args[@]}"
+	for name in home var/cache var/log; do
+		destination="$target_mount/$root_sub_vol/@$([[ $name == home ]] && printf home || [[ $name == var/cache ]] && printf cache || printf log)"
+		mkdir -p "$destination"
+		rsync -aHAXx --numeric-ids "$target_mount/$root_sub_vol/@/$name/." "$destination/"
+		find "$target_mount/$root_sub_vol/@/$name" -mindepth 1 -maxdepth 1 -exec rm -Rf -- {} +
+	done
+	btrfs filesystem mkswapfile --size "$swap_size" "$target_mount/$root_sub_vol/@swap/swapfile"
+	if [[ -n $source_boot ]]; then
+		source_boot_mount="$(mktemp -d /tmp/cross-disk-boot.XXXXXX)"
+		mount "/dev/$source_boot" "$source_boot_mount"
+		mkdir -p "$target_mount/$root_sub_vol/@/boot"
+		rsync -aHAXx --numeric-ids "$source_boot_mount/." "$target_mount/$root_sub_vol/@/boot/"
+		umount "$source_boot_mount"
+		rmdir "$source_boot_mount"
+	fi
+	umount "$source_mount"
+	rmdir "$source_mount"
+	umount "$target_mount"
+	mount /dev/mapper/root -o "subvol=$root_sub_vol/@" "$target_mount"
+	log.success "Source root imported into $root_sub_vol/@"
+}

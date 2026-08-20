@@ -175,6 +175,15 @@ btrfs-root-setup.run() {
 
 	log.section "Btrfs root storage setup"
 	log.info "Configuration and required commands validated for /dev/$root_dev"
+	if [[ ${migration_mode:-in_place} == cross_disk ]]; then
+		log.info "Cross-disk mode: preserve imported subvolumes and skip in-place encryption"
+		btrfs-root-setup.validate_mounted_device "$mp/boot/efi" "/dev/$efi_dev" "EFI System Partition"
+		umount "$mp/boot/efi"
+		fstab-setup.run
+		btrfs-root-setup.print_summary
+		btrfs-root-setup.validate_result
+		return
+	fi
 	log.info "The storage phase will create subvolumes, encrypt the partition in place, and write target mount configuration"
 	btrfs-root-setup.prepare_existing_mounts
 	btrfs-root-setup.configure_esp_label

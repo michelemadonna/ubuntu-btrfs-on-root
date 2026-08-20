@@ -17,6 +17,17 @@ existing production installation. Ubuntu setup starts in the same live session
 immediately after Ubiquity finishes. Kali setup must start from a Kali Live
 session after the fresh Kali installation has been created.
 
+The wizard supports two installation modes. `In Place Migration` preserves the
+original workflow and converts the selected installed system on its existing
+disk. `New Setup or Migrate From another Disk` always asks for a target disk,
+shows its current partitions and, when available, displays the Btrfs top-level
+content before continuing.
+
+In the second mode, a target without `ESP` and `ROOT` is initialized with the
+requested GPT layout and LUKS2 `ROOT`; setup then stops and must be run again
+to perform the migration. An initialized target is detected from its `ESP` and
+`ROOT` labels. Existing target suite subvolumes are never overwritten.
+
 > [!WARNING]
 > Setup reformats the rescue partition, restructures the Btrfs filesystem,
 > encrypts the root partition in place and may enroll Secure Boot keys. A wrong
@@ -56,8 +67,8 @@ not part of the installed system's FDE boundary.
 Do not ask Ubiquity to encrypt `/dev/sda3`: the setup performs an in-place LUKS2
 conversion after creating the final Btrfs layout.
 
-Complete the Ubiquity installation, but do not reboot. Stay in the same live
-session. The scripts expect:
+For the in-place mode, complete the Ubiquity installation, but do not reboot.
+Stay in the same live session. The scripts expect:
 
 - the installed system mounted at `/target`;
 - its ESP mounted at `/target/boot/efi`;
@@ -98,9 +109,12 @@ is sourced as shell code and contains secret-bearing values, so review it
 carefully and never commit it.
 
 If `setup.conf` does not exist, running `sudo ./setup.sh` starts an interactive
-terminal wizard. Every prompt shows the corresponding supported default built
+terminal wizard. The first prompt selects the installation mode and the target
+disk is always selected explicitly. Every prompt shows the corresponding supported default built
 into `setup.sh`; the wizard does not depend on `setup.conf.example` being
-present. Inputs are grouped into storage, distribution, encryption
+present. After target selection, the wizard lists every target partition and
+shows the Btrfs top-level subvolumes/content when a Btrfs root is available.
+Inputs are grouped into storage, distribution, encryption
 and boot security, and optional-feature sections. The wizard first lists block
 devices, then lists only the partitions belonging to the selected device for
 root selection. When `/target`, `/target/boot/efi` and an exact separate
@@ -120,9 +134,15 @@ values and permissions. After showing the complete non-secret configuration
 summary, setup asks whether installation should proceed. Answering `no` leaves
 the generated configuration in place but performs no installation operation.
 
-At startup the wizard warns that this conversion is intended only for an Ubuntu
-system just installed from the live environment. It is not a migration tool for
-an existing production installation.
+In mode 2, when the selected target contains a LUKS partition labelled `ROOT`,
+the wizard temporarily unlocks it, mounts Btrfs with `subvolid=5`, recursively
+searches every directory for complete sbctl key hierarchies and asks which one
+to import. The keys are staged under `/tmp/ubuntu-btrfs-sbctl-keys`; Secure Boot
+enrollment and MOK selection are not requested again. rEFInd is installed in
+the new system without being written to the ESP.
+
+At startup the wizard warns that in-place conversion is intended only for an
+Ubuntu system just installed from the live environment.
 
 The wizard deliberately does not ask for `mp`, `keyslot_size` or
 `btrfs_options`; it writes their current supported values directly:
@@ -156,6 +176,9 @@ Important current options are:
 | `snapshot_menu` | `yes` | install the dracut snapshot selector |
 | `snapshot_menu_pin` | `yes` | require its PIN for snapshot selection |
 | `enable_tpm` | `yes` | install TPM integration; it does not enroll a token |
+| `install_mode` | `in_place` | `in_place` or `new_setup` |
+| `migration_mode` | `in_place` | storage path: in-place or initialized-target import |
+| `SBCTL_IMPORT_KEYROOT` | empty | temporary existing sbctl key hierarchy staged for mode 2 |
 
 `PASSPHRASE`, `snapshot_menu_pin_value` and a configured `mok_pin` must not be logged or
 committed with real values.

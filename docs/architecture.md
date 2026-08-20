@@ -7,7 +7,8 @@ for verification.
 ## System boundary
 
 The project converts a fresh Ubuntu Ubiquity installation from its live session
-or a fresh Kali installation selected by the wizard. The default device layout
+or a fresh Kali installation selected by the wizard. It also supports copying
+a Btrfs root from a different source disk onto an initialized target. The default device layout
 is:
 
 | Device | Initial role | Result |
@@ -21,6 +22,11 @@ Device names are configurable. Ubuntu discovery expects the installed root at
 `/target/boot`. Kali setup can mount those configured filesystems itself.
 `/cdrom` supplies the Ubuntu live rescue source; rescue creation is disabled by
 the Kali installation flow.
+
+The cross-disk wizard identifies an initialized target by exactly one GPT
+partition label `ESP` and one label `ROOT`. A new target can instead be
+partitioned, formatted and initialized as LUKS2; the operation ends after the
+destructive initialization and requires a second setup run for migration.
 
 Installed persistent data and swap live inside LUKS2. The ESP and optional
 rescue environment are outside that encryption boundary. A migrated old boot

@@ -93,12 +93,38 @@ tui-test.generated_config_contract() {
 	rg -q "'ubuntu|Ubuntu' 'kali|Kali Linux'" "$repository_root/setup.sh"
 	rg -q 'suite_type == kali' "$repository_root/setup.sh"
 	rg -q 'log\.section "Storage configuration"' "$repository_root/setup.sh"
+	rg -q 'Select the installation mode' "$repository_root/setup.sh"
+	rg -q 'setup\.show_target_inventory' "$repository_root/setup.sh"
+	rg -q 'Target disk inventory' "$repository_root/setup.sh"
+	rg -q 'Btrfs top-level content' "$repository_root/setup.sh"
+	rg -q "'in_place|In Place Migration'" "$repository_root/setup.sh"
+	rg -q "'new_setup|New Setup or Migrate From another Disk'" "$repository_root/setup.sh"
+	rg -q 'setup\.stage_existing_sbctl_keys' "$repository_root/setup.sh"
+	rg -q 'ROOT LUKS password for key discovery' "$repository_root/setup.sh"
+	rg -q 'subvolid=5 /dev/mapper/sbctl-key-scan' "$repository_root/setup.sh"
+	rg -q 'find "\$scan_mount" -type d -print' "$repository_root/setup.sh"
+	if rg -q 'source_root=/target/var/lib/sbctl/keys' "$repository_root/setup.sh"; then
+		printf 'sbctl key discovery must not assume /target.\n' >&2
+		return 1
+	fi
+	rg -q 'secure_boot_enrollment=existing' "$repository_root/setup.sh"
+	rg -q 'sbctl_import_keyroot' "$repository_root/setup.sh"
+	rg -q 'secure_boot_enrollment == existing' "$repository_root/secure-boot/scripts/sbctl-setup"
+	rg -q 'import_existing_keys' "$repository_root/secure-boot/scripts/sbctl-setup"
+	rg -q 'Skip rEFInd installation in the ESP' "$repository_root/secure-boot/scripts/secure-boot-setup"
 	rg -q 'log\.section "Distribution configuration"' "$repository_root/setup.sh"
 	rg -q 'log\.section "Encryption and boot security"' "$repository_root/setup.sh"
 	rg -q 'log\.section "LUKS and Argon2id"' "$repository_root/setup.sh"
 	rg -q 'log\.section "Optional features"' "$repository_root/setup.sh"
 	rg -q 'log\.section "TPM integration"' "$repository_root/setup.sh"
 	rg -q 'log\.section "Snapshot menu"' "$repository_root/setup.sh"
+	rg -q 'cross-disk-migration\.initialized_target' "$repository_root/setup.sh"
+	rg -q 'cross-disk-migration\.partition_new_target' "$repository_root/setup.sh"
+	rg -q 'cross-disk-migration\.import_source' "$repository_root/setup.sh"
+	rg -q 'migration_mode' "$repository_root/setup.sh"
+	rg -q 'PARTLABEL' "$repository_root/btrfs-root/scripts/cross-disk-migration"
+	rg -q 'sgdisk --zap-all' "$repository_root/btrfs-root/scripts/cross-disk-migration"
+	rg -q 'luksFormat.*--label ROOT' "$repository_root/btrfs-root/scripts/cross-disk-migration"
 	rg -q 'Proceed with the installation using these values' "$repository_root/setup.sh"
 }
 

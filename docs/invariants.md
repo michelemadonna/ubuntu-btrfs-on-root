@@ -10,6 +10,10 @@ producer and consumer before altering one.
   paths require manual partitioning and UEFI x86-64.
 - Destructive targets must be explicit, distinct where required, real block
   devices and validated for expected type/source before mutation.
+- Cross-disk targets are recognized only by exactly one GPT `ESP` and `ROOT`
+  partition label; source and target disks must be distinct.
+- Cross-disk import creates only the selected suite container and never deletes
+  or overwrites pre-existing target suite containers.
 - Root starts as unencrypted Btrfs mounted at `mp`; the ESP is FAT and receives
   label `ESP` without reformatting.
 - Kali mode may start with no filesystems mounted; setup mounts the configured
@@ -20,6 +24,10 @@ producer and consumer before altering one.
   `/target/cdrom`; successful completion leaves target mounts and mapper `root`
   open.
 - Secrets and private keys never enter logs, summaries, tests or commits.
+- The installation mode is selected before storage configuration. In
+  `new_setup` mode, existing sbctl keys may be staged from the currently
+  mounted root, Secure Boot enrollment is never requested or repeated, and
+  rEFInd is not written to the ESP.
 
 ## Btrfs, boot and LUKS
 
@@ -64,7 +72,8 @@ producer and consumer before altering one.
 
 - Never disable verification as a workaround or replace an existing private
   signing hierarchy automatically.
-- `secure_boot_enrollment` is the user's `sbctl`/`mok` choice;
+- `secure_boot_enrollment` is the user's `sbctl`/`mok` choice in in-place mode;
+  migration mode uses `existing` and never repeats firmware enrollment;
   `secure_boot_mode` is only the detected `setup`/`enabled`/`disabled`/`unknown`
   state. No automatic fallback is allowed.
 - Default direct enrollment is exactly `sbctl enroll-keys --microsoft` and can

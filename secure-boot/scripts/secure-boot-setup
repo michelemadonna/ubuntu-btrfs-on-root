@@ -74,6 +74,7 @@ secure-boot-setup.trust_path() {
 	case $enrollment_method in
 	sbctl) printf 'direct-sbctl\n' ;;
 	mok) printf 'shim-mok\n' ;;
+	existing) printf 'existing-sbctl\n' ;;
 	*) return 1 ;;
 	esac
 }
@@ -151,6 +152,12 @@ secure-boot-setup.validate_result() {
 	log.section "Post-summary validation"
 	common.require_readable_file "$SBCTL_KEYROOT/db/db.pem" "Secure Boot db certificate"
 	common.require_readable_file "$SBCTL_KEYROOT/db/db.key" "Secure Boot db private key"
+	if [[ $secure_boot_enrollment == existing ]]; then
+		log.info "Existing Secure Boot mode: no ESP loader or enrollment validation is required"
+		log.success "Validated imported Secure Boot key hierarchy"
+		log.section_end
+		return
+	fi
 	if [[ $secure_boot_enrollment == mok ]]; then
 		loader="$ESP/EFI/refind/grubx64.efi"
 		common.require_readable_file "$ESP/EFI/refind/shimx64.efi" "Shim loader"
@@ -180,7 +187,7 @@ secure-boot-setup.run() {
 	x86_64 | amd64) ;;
 	*) log.die "Only x86-64 UEFI is currently supported." ;;
 	esac
-	[[ ${secure_boot_enrollment:-} == sbctl || ${secure_boot_enrollment:-} == mok ]] ||
+	[[ ${secure_boot_enrollment:-} == sbctl || ${secure_boot_enrollment:-} == mok || ${secure_boot_enrollment:-} == existing ]] ||
 		log.die "secure_boot_enrollment must be sbctl or mok."
 
 	log.section "Secure Boot preflight"
@@ -190,7 +197,7 @@ secure-boot-setup.run() {
 	apt-get install -y ca-certificates findutils coreutils
 	secure-boot-setup.detect_firmware_state
 	log.info "Detected SetupMode=$SETUP_MODE and SecureBoot=$SECURE_BOOT"
-	log.info "User-selected trust path: $(secure-boot-setup.trust_path "$secure_boot_enrollment")"
+	log.info "Configured trust path: $(secure-boot-setup.trust_path "$secure_boot_enrollment")"
 	if [[ $secure_boot_enrollment == sbctl && $SETUP_MODE != 1 ]]; then
 		log.warn "Firmware is not in Setup Mode; sbctl enrollment cannot be completed. Continue with key creation and signing only."
 	fi
@@ -200,12 +207,18 @@ secure-boot-setup.run() {
 	if [[ $secure_boot_enrollment == mok ]]; then
 		secure-boot-setup.run_phase \
 			"Shim and MOK preparation" "$script_dir/shim-setup"
+	elif [[ $secure_boot_enrollment == existing ]]; then
+		log.info "Skip Shim/MOK preparation because Secure Boot enrollment already exists"
 	else
 		log.info "Skip Shim/MOK preparation because the user selected sbctl enrollment"
 	fi
-	secure-boot-setup.copy_public_certificates
-	secure-boot-setup.run_phase \
-		"rEFInd installation and signing" "$script_dir/refind-setup"
+	if [[ $secure_boot_enrollment == existing ]]; then
+		log.info "Skip rEFInd installation in the ESP for existing Secure Boot migration"
+	else
+		secure-boot-setup.copy_public_certificates
+		secure-boot-setup.run_phase \
+			"rEFInd installation and signing" "$script_dir/refind-setup"
+	fi
 	secure-boot-setup.run_phase \
 		"fwupd configuration and signing" "$script_dir/fwupd-setup"
 	secure-boot-setup.print_summary

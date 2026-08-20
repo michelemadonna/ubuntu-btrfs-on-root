@@ -7,7 +7,14 @@ safety requirements are in `invariants.md`.
 
 Run `setup.sh` as root after the fresh installation. For Ubuntu, remain in the
 Ubiquity live session; for Kali, the wizard mounts the configured root, ESP and
-optional separate `/boot`. If `setup.conf` is absent, the wizard:
+optional separate `/boot`. If `setup.conf` is absent, the wizard first selects
+`In Place Migration` or `New Setup or Migrate From another Disk`. In mode 2 it
+selects a target disk first; if it contains a LUKS `ROOT` partition, the wizard
+opens it temporarily, mounts Btrfs top-level, scans every directory for a
+complete sbctl key hierarchy, and does not prompt for Secure
+Boot enrollment or write rEFInd into the ESP.
+
+The wizard then:
 
 1. detects exact sources mounted at `/target`, `/target/boot/efi` and optional
    `/target/boot`;
@@ -17,6 +24,13 @@ optional separate `/boot`. If `setup.conf` is absent, the wizard:
 4. records suite, encryption, explicit Secure Boot path and optional features;
 5. writes mode-0600 shell-quoted configuration, validates it, shows a
    non-secret summary and asks for final confirmation.
+
+Before the normal source-disk prompts, the wizard selects a target disk. An
+`ESP` plus `ROOT` GPT label selects cross-disk import: the target LUKS volume is
+opened, a new `@$suite` tree is populated from the selected Btrfs source, and
+existing target suite trees are preserved. A target without both labels enters
+the destructive partitioning flow and stops after GPT, filesystems and LUKS2
+initialization; the next execution performs the import.
 
 An exact separate `/target/boot` mount may be absent. `/target/cdrom` is
 unmounted only when it is a mount point; its absence is non-fatal.

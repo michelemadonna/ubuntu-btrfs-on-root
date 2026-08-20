@@ -16,6 +16,8 @@ setup_action=install
 source "$repository_root/lib/common.sh"
 # shellcheck source=lib/tui.sh
 source "$repository_root/lib/tui.sh"
+# shellcheck source=btrfs-root/scripts/cross-disk-migration
+source "$repository_root/btrfs-root/scripts/cross-disk-migration"
 
 setup.write_config_value() {
 	local file=$1 name=$2 value=$3
@@ -76,12 +78,87 @@ setup.detect_secure_boot_mode() {
 	fi
 }
 
+setup.stage_existing_sbctl_keys() {
+	local target_disk=$1
+	local root_device='' partition partition_type partition_label
+	local scan_mount staged_root=/tmp/ubuntu-btrfs-sbctl-keys password selected
+	local -a key_paths=() key_items=()
+	SETUP_SBCTL_STAGED_ROOT=''
+
+	common.require_commands blkid btrfs cp cryptsetup find install lsblk mount sort umount
+	while read -r partition partition_type; do
+		[[ $partition_type == part ]] || continue
+		cryptsetup isLuks "$partition" >/dev/null 2>&1 || continue
+		partition_label="$(blkid -c /dev/null -s LABEL -o value "$partition" 2>/dev/null || true)"
+		if [[ $partition_label == ROOT ]]; then
+			if [[ -n $root_device ]]; then
+				log.die "Disk $target_disk contains more than one LUKS partition labelled ROOT."
+			fi
+			root_device=$partition
+		fi
+	done < <(lsblk -nrpo PATH,TYPE "$target_disk")
+	if [[ -z $root_device ]]; then
+		log.info "No LUKS partition labelled ROOT found on $target_disk"
+		return 0
+	fi
+	password="$(tui.password "ROOT LUKS password for key discovery" password)"
+	scan_mount="$(mktemp -d /tmp/sbctl-key-scan.XXXXXX)"
+	printf '%s\n' "$password" | cryptsetup open "$root_device" sbctl-key-scan
+	trap 'umount "$scan_mount" 2>/dev/null || true; cryptsetup close sbctl-key-scan 2>/dev/null || true; rmdir "$scan_mount" 2>/dev/null || true' RETURN
+	mount -o subvolid=5 /dev/mapper/sbctl-key-scan "$scan_mount"
+	log.info "Btrfs top-level content from LUKS ROOT on $target_disk"
+	btrfs subvolume list "$scan_mount" || true
+	find "$scan_mount" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort
+	while IFS= read -r selected; do
+		[[ -f $selected/PK/PK.key && -f $selected/PK/PK.pem ]] || continue
+		[[ -f $selected/KEK/KEK.key && -f $selected/KEK/KEK.pem ]] || continue
+		[[ -f $selected/db/db.key && -f $selected/db/db.pem ]] || continue
+		key_paths+=("$selected")
+		key_items+=("$selected|${selected#"$scan_mount"}")
+	done < <(find "$scan_mount" -type d -print)
+	if ((${#key_items[@]} == 0)); then
+		log.info "No sbctl key hierarchy found below the target Btrfs suite subvolumes"
+		return 0
+	fi
+	selected="$(tui.select_one "Select the existing sbctl key hierarchy to import" "${key_paths[0]}" "${key_items[@]}")" ||
+		log.die "Invalid sbctl key hierarchy selection."
+	install -d -m 0700 "$staged_root"
+	cp -a -- "$selected/." "$staged_root/"
+	find "$staged_root" -type f -print -quit | grep -q . || log.die "Existing sbctl key directory is empty."
+	SETUP_SBCTL_STAGED_ROOT=$staged_root
+	log.success "Staged selected sbctl keys from ${selected#"$scan_mount"} in $staged_root"
+}
+
+setup.show_target_inventory() {
+	local target_disk=$1 partition partition_type filesystem_type scan_mount
+
+	log.section "Target disk inventory"
+	common.require_commands blkid btrfs find lsblk mount sort umount
+	log.info "Partitions currently present on $target_disk"
+	lsblk -o NAME,PATH,SIZE,FSTYPE,LABEL,PARTLABEL,MOUNTPOINTS "$target_disk"
+	while read -r partition partition_type; do
+		[[ $partition_type == part ]] || continue
+		filesystem_type="$(blkid -c /dev/null -s TYPE -o value "$partition" 2>/dev/null || true)"
+		[[ $filesystem_type == btrfs ]] || continue
+		scan_mount="$(mktemp -d /tmp/btrfs-root-inventory.XXXXXX)"
+		if mount -o ro,subvolid=5 "$partition" "$scan_mount"; then
+			log.info "Btrfs top-level content from $partition"
+			btrfs subvolume list "$scan_mount" || true
+			find "$scan_mount" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort
+			umount "$scan_mount"
+		fi
+		rmdir "$scan_mount"
+	done < <(lsblk -nrpo PATH,TYPE "$target_disk")
+	log.section_end
+}
+
 setup.generate_configuration() {
 	local config_file=$1
-	local disk default_disk root_path efi_path boot_path rescue_path name type size detail confirmation config_mode config_name
+	local disk target_disk default_disk root_path efi_path boot_path rescue_path name type size detail confirmation config_mode config_name
 	local detected_root_path detected_efi_path detected_boot_path boot_default reuse_boot_as_rescue=no install_rescue=yes
 	local minimum_rescue_mib boot_size_mib
 	local root_dev=sda3 efi_dev=sda2 boot_dev='' rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu
+	local source_root_dev='' source_boot_dev='' target_root_dev='' target_efi_dev='' migration_mode=in_place install_mode=in_place sbctl_import_keyroot=''
 	local PASSPHRASE=password mok_pin='' secure_boot_enrollment=sbctl secure_boot_mode EXPERIMENTAL_SBCTL_APPEND=false
 	local pre_download=yes enable_tpm=yes snapshot_menu=yes enlarge=no snapshot_menu_pin=yes snapshot_menu_pin_value=123456
 	local mp=/mnt/root keyslot_size=32m btrfs_options='defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1'
@@ -93,8 +170,51 @@ setup.generate_configuration() {
 	log.warn "This procedure is intended only for a freshly installed Ubuntu system created from the live environment."
 	log.warn "It is not suitable for converting an existing production system."
 	log.info "The wizard is using the built-in supported defaults."
-
+	install_mode="$(tui.select_one "Select the installation mode" "$install_mode" \
+		'in_place|In Place Migration' \
+		'new_setup|New Setup or Migrate From another Disk')" || log.die "Invalid installation mode selection."
 	log.section "Storage configuration"
+	while read -r name type size detail; do
+		[[ $type == disk ]] || continue
+		disk_items+=("$name|$name $size ${detail:-unknown model}")
+	done < <(lsblk -dnpo NAME,TYPE,SIZE,MODEL)
+	((${#disk_items[@]} > 0)) || log.die "No installation disks were discovered."
+	target_disk="$(tui.select_one "Select the target disk" "${disk_items[0]%%|*}" "${disk_items[@]}")" || log.die "Invalid target disk selection."
+	setup.show_target_inventory "$target_disk"
+	if [[ $install_mode == in_place ]]; then
+		migration_mode=in_place
+	else
+		setup.stage_existing_sbctl_keys "$target_disk"
+		sbctl_import_keyroot=$SETUP_SBCTL_STAGED_ROOT
+		secure_boot_enrollment=existing
+		log.info "Secure Boot enrollment is already complete; skip sbctl/MOK selection"
+	fi
+	if [[ $install_mode == new_setup ]] && cross-disk-migration.initialized_target "$target_disk"; then
+		migration_mode=cross_disk
+		efi_path="$(cross-disk-migration.require_unique_label "$target_disk" ESP)"
+		root_path="$(cross-disk-migration.require_unique_label "$target_disk" ROOT)"
+		target_efi_dev=${efi_path#/dev/}
+		target_root_dev=${root_path#/dev/}
+		PASSPHRASE="$(tui.password "Target ROOT LUKS passphrase" "$PASSPHRASE")"
+		[[ -n $PASSPHRASE ]] || log.die "Target ROOT LUKS passphrase cannot be empty."
+		log.info "Detected initialized target $target_disk with ESP and ROOT labels"
+	elif [[ $install_mode == new_setup ]]; then
+		local esp_mib=1024 root_size=all create_rescue=yes reserve_windows=no new_passphrase
+		esp_mib="$(tui.input "ESP size in MiB" "$esp_mib")"
+		root_size="$(tui.input "ROOT size in GiB (or all)" "$root_size")"
+		create_rescue="$(tui.toggle "Create RESCUE partition" "$create_rescue")" || log.die "Invalid rescue toggle."
+		reserve_windows="$(tui.toggle "Reserve space for Windows" "$reserve_windows")" || log.die "Invalid Windows toggle."
+		log.section "New target layout"
+		cross-disk-migration.layout "$target_disk" "$esp_mib" "$root_size" "${create_rescue}: 10 GiB" "$reserve_windows"
+		confirmation="$(tui.toggle "Destroy the selected target and create this layout" no)" || log.die "Invalid confirmation."
+		[[ $confirmation == yes ]] || log.die "Target initialization cancelled."
+		new_passphrase="$(tui.password "ROOT LUKS passphrase" password)"
+		iter_time="$(tui.input "Argon2id time target in milliseconds" "$iter_time")"
+		cross-disk-migration.partition_new_target "$target_disk" "$esp_mib" "$root_size" "$([[ $create_rescue == yes ]] && printf 10240 || printf 0)" "$reserve_windows" "$iter_time" "$new_passphrase"
+		log.warn "Re-run setup.sh to detect the initialized target and migrate the source."
+		exit 0
+	fi
+	disk_items=()
 	detected_root_path="$(setup.mounted_device /target || true)"
 	detected_efi_path="$(setup.mounted_device /target/boot/efi || true)"
 	detected_boot_path="$(setup.mounted_device /target/boot || true)"
@@ -119,10 +239,19 @@ setup.generate_configuration() {
 		disk_items+=("$name|$name $size ${detail:-unknown model}")
 	done < <(lsblk -dnpo NAME,TYPE,SIZE,MODEL)
 	((${#disk_items[@]} > 0)) || log.die "No installation disks were discovered."
-	default_disk="$(lsblk -ndo PKNAME "/dev/$root_dev" 2>/dev/null || true)"
+	if [[ $install_mode == in_place ]]; then
+		default_disk=${target_disk#/dev/}
+	else
+		default_disk="$(lsblk -ndo PKNAME "/dev/$root_dev" 2>/dev/null || true)"
+	fi
 	default_disk=${default_disk:+/dev/$default_disk}
-	disk="$(tui.select_one "Select the disk containing the installed Ubuntu system" "${default_disk:-/dev/sda}" "${disk_items[@]}")" ||
+	disk="$(tui.select_one "Select the source disk containing the installed system" "${default_disk:-/dev/sda}" "${disk_items[@]}")" ||
 		log.die "Invalid disk selection."
+	if [[ $install_mode == in_place ]]; then
+		[[ $disk == "$target_disk" ]] || log.die "In Place Migration requires source and target to be the same disk."
+	else
+		[[ $disk != "$target_disk" ]] || log.die "Source and target disks must be different."
+	fi
 
 	while read -r name type size detail; do
 		[[ $type == part ]] || continue
@@ -131,6 +260,7 @@ setup.generate_configuration() {
 	((${#partition_items[@]} >= 3)) || log.die "Selected disk must expose at least three partitions."
 	root_path="$(tui.select_one "Select the Btrfs root partition" "/dev/$root_dev" "${partition_items[@]}")" ||
 		log.die "Invalid root partition selection."
+	source_root_dev=${root_path#/dev/}
 	for detail in "${partition_items[@]}"; do
 		[[ ${detail%%|*} == "$root_path" ]] || efi_items+=("$detail")
 	done
@@ -144,7 +274,8 @@ setup.generate_configuration() {
 	boot_path="$(tui.select_one "Select the optional separate /boot partition" "$boot_default" "${boot_items[@]}")" ||
 		log.die "Invalid boot partition selection."
 	[[ $boot_path != none ]] || boot_path=""
-	
+	source_boot_dev=${boot_path#/dev/}
+
 	swap_size="$(tui.input "Btrfs swapfile size" "$swap_size")"
 	[[ $swap_size =~ ^[1-9][0-9]*[KMGTP]$ ]] || log.die "Swap size must use a value such as 4G."
 
@@ -166,32 +297,40 @@ setup.generate_configuration() {
 	[[ $suite =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Suite must be a safe lowercase identifier."
 	[[ $suite_type =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Distribution icon identifier is invalid."
 
-	root_dev=${root_path#/dev/}
-	efi_dev=${efi_path#/dev/}
-	boot_dev=${boot_path#/dev/}
+	if [[ $migration_mode == cross_disk ]]; then
+		root_dev=$target_root_dev
+		efi_dev=$target_efi_dev
+		boot_dev=''
+	else
+		root_dev=${root_path#/dev/}
+		efi_dev=${efi_path#/dev/}
+		boot_dev=${boot_path#/dev/}
+	fi
 
 	log.section "Encryption and boot security"
 	secure_boot_mode="$(setup.detect_secure_boot_mode)"
 	log.info "Current Secure Boot firmware state: $secure_boot_mode"
-	if [[ $secure_boot_mode != setup ]]; then
+	if [[ $install_mode == in_place && $secure_boot_mode != setup ]]; then
 		log.warn "Firmware is not in Setup Mode; sbctl can create and use signing keys, but direct firmware enrollment cannot be completed now."
 	fi
-	secure_boot_enrollment="$(tui.select_one "Select the Secure Boot enrollment method" "$secure_boot_enrollment" \
-		'sbctl|Direct firmware enrollment with sbctl' \
-		'mok|Shim and Machine Owner Key enrollment')" || log.die "Invalid Secure Boot enrollment method."
-	if [[ $secure_boot_enrollment == mok ]]; then
-		mok_pin="$(tui.password "MOK enrollment PIN" 123456)"
-		[[ -n $mok_pin ]] || log.die "MOK PIN cannot be empty."
-	fi
-	if [[ $secure_boot_enrollment == sbctl && $secure_boot_mode != setup ]]; then
-		log.warn "sbctl was selected while firmware is not in Setup Mode; configuration will continue without automatic firmware enrollment."
+	if [[ $install_mode == in_place ]]; then
+		secure_boot_enrollment="$(tui.select_one "Select the Secure Boot enrollment method" "$secure_boot_enrollment" \
+			'sbctl|Direct firmware enrollment with sbctl' \
+			'mok|Shim and Machine Owner Key enrollment')" || log.die "Invalid Secure Boot enrollment method."
+		if [[ $secure_boot_enrollment == mok ]]; then
+			mok_pin="$(tui.password "MOK enrollment PIN" 123456)"
+			[[ -n $mok_pin ]] || log.die "MOK PIN cannot be empty."
+		fi
+		if [[ $secure_boot_enrollment == sbctl && $secure_boot_mode != setup ]]; then
+			log.warn "sbctl was selected while firmware is not in Setup Mode; configuration will continue without automatic firmware enrollment."
+		fi
+	else
+		log.info "Existing Secure Boot enrollment selected; no enrollment prompt or firmware enrollment will run"
 	fi
 
 	log.section "Optional features"
 	pre_download="$(tui.toggle "Pre-download target packages" "$pre_download")" || log.die "Invalid pre-download toggle."
 	enlarge="$(tui.toggle "Extend the root partition to available space" "$enlarge")" || log.die "Invalid enlargement toggle."
-	
-
 	if [[ $suite_type == kali ]]; then
 		install_rescue=no
 		log.info "Kali Linux does not support rescue-system creation during installation"
@@ -243,6 +382,11 @@ setup.generate_configuration() {
 	setup.write_config_value "$temporary_config" root_dev "$root_dev"
 	setup.write_config_value "$temporary_config" efi_dev "$efi_dev"
 	setup.write_config_value "$temporary_config" boot_dev "$boot_dev"
+	setup.write_config_value "$temporary_config" source_root_dev "$source_root_dev"
+	setup.write_config_value "$temporary_config" source_boot_dev "$source_boot_dev"
+	setup.write_config_value "$temporary_config" migration_mode "$migration_mode"
+	setup.write_config_value "$temporary_config" install_mode "$install_mode"
+	setup.write_config_value "$temporary_config" SBCTL_IMPORT_KEYROOT "$sbctl_import_keyroot"
 	setup.write_config_value "$temporary_config" mp "$mp"
 	setup.write_config_value "$temporary_config" rescue_dev "$rescue_dev"
 	setup.write_config_value "$temporary_config" install_rescue "$install_rescue"
@@ -299,7 +443,7 @@ setup.generate_configuration() {
 	config_mode=$(stat -c '%a' "$config_file")
 	[[ $config_mode == 600 ]] || log.die "Generated configuration permissions are $config_mode; expected 600."
 	for config_name in root_dev efi_dev boot_dev mp rescue_dev install_rescue keyslot_size iter_time enlarge swap_size btrfs_options suite suite_type secure_boot_mode secure_boot_enrollment EXPERIMENTAL_SBCTL_APPEND \
-		PASSPHRASE pre_download root_sub_vol enable_tpm snapshot_menu snapshot_menu_pin snapshot_menu_pin_value mok_pin; do
+		PASSPHRASE pre_download root_sub_vol source_root_dev source_boot_dev migration_mode install_mode SBCTL_IMPORT_KEYROOT enable_tpm snapshot_menu snapshot_menu_pin snapshot_menu_pin_value mok_pin; do
 		grep -q "^export ${config_name}=" "$config_file" ||
 			log.die "Generated configuration is missing required value: $config_name"
 	done
@@ -330,6 +474,13 @@ setup.load_configuration() {
 	common.require_nonempty "root_sub_vol" "${root_sub_vol:-}"
 	common.require_nonempty "suite" "${suite:-}"
 	common.require_nonempty "suite_type" "${suite_type:-}"
+	install_mode=${install_mode:-in_place}
+	[[ $install_mode == in_place || $install_mode == new_setup ]] || log.die "install_mode is invalid."
+	migration_mode=${migration_mode:-in_place}
+	[[ $migration_mode == in_place || $migration_mode == cross_disk ]] || log.die "migration_mode is invalid."
+	if [[ $migration_mode == cross_disk ]]; then
+		common.require_nonempty "source_root_dev" "${source_root_dev:-}"
+	fi
 	[[ $suite_type == ubuntu || $suite_type == kali ]] || log.die "suite_type must be ubuntu or kali."
 	if [[ $suite == kali && $suite_type != kali ]]; then
 		log.die "suite=kali requires suite_type=kali."
@@ -339,7 +490,7 @@ setup.load_configuration() {
 	common.require_nonempty "secure_boot_enrollment" "${secure_boot_enrollment:-}"
 	[[ $secure_boot_mode == setup || $secure_boot_mode == enabled || $secure_boot_mode == disabled || $secure_boot_mode == unknown ]] ||
 		log.die "secure_boot_mode must be setup, enabled, disabled, or unknown."
-	[[ $secure_boot_enrollment == sbctl || $secure_boot_enrollment == mok ]] ||
+	[[ $secure_boot_enrollment == sbctl || $secure_boot_enrollment == mok || $secure_boot_enrollment == existing ]] ||
 		log.die "secure_boot_enrollment must be sbctl or mok."
 	install_rescue=${install_rescue:-yes}
 	[[ $install_rescue == yes || $install_rescue == no ]] || log.die "install_rescue must be yes or no."
@@ -424,6 +575,14 @@ setup.prepare_target() {
 		apt-get install -y btrfs-progs rsync
 	fi
 	mkdir -p -- "$mp"
+	if [[ $migration_mode == cross_disk ]]; then
+		log.info "Cross-disk mode: import the selected Btrfs source into the initialized target"
+		cross-disk-migration.import_source "$source_root_dev" "$source_boot_dev"
+		mkdir -p "$mp/boot/efi"
+		mount "/dev/$efi_dev" "$mp/boot/efi"
+		log.success "Cross-disk target mounted and source imported"
+		return
+	fi
 	if [[ $suite_type == kali ]]; then
 		log.info "Kali mode: mount the configured filesystems for conversion"
 		mountpoint -q "$mp" || mount "/dev/$root_dev" "$mp"
@@ -539,6 +698,11 @@ setup.inner_installation() {
 
 	log.info "Install target initramfs integration for the configured LUKS root"
 	apt-get install -y btrfs-progs cryptsetup-initramfs
+	if [[ $secure_boot_enrollment == existing ]]; then
+		log.info "Install rEFInd in the new system without installing it into the ESP"
+		printf '%s\n' 'refind refind/install_to_esp boolean false' | debconf-set-selections
+		apt-get install -y --no-install-recommends refind
+	fi
 
 	# The Btrfs/LUKS storage phase has already completed outside the chroot.
 	# Security-sensitive phase coordinators execute as isolated entry points.
