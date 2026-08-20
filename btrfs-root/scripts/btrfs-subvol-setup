@@ -52,7 +52,7 @@ btrfs-subvol-setup.copy_separate_boot() {
 	[[ -n ${boot_dev:-} ]] || return 0
 	log.info "Copy separate /boot content from /dev/$boot_dev into $destination_boot"
 	mkdir -p "$destination_boot"
-	rsync -aHAXx --numeric-ids "$source_boot/." "$destination_boot/"
+	rsync -aHAXx --numeric-ids --info=progress2 "$source_boot/." "$destination_boot/"
 	[[ -n $(find "$destination_boot" -mindepth 1 -print -quit) ]] ||
 		log.die "Separate boot partition /dev/$boot_dev contained no files to migrate."
 	sync
@@ -71,7 +71,7 @@ btrfs-subvol-setup.move_directory_contents() {
 	fi
 
 	log.info "Copy directory contents from $source_directory to $destination_directory"
-	rsync -aHAXx --numeric-ids "$source_directory/." "$destination_directory/"
+	rsync -aHAXx --numeric-ids --info=progress2 "$source_directory/." "$destination_directory/"
 	find "$source_directory" -mindepth 1 -maxdepth 1 -exec rm -Rf -- {} +
 }
 
@@ -98,19 +98,19 @@ btrfs-subvol-setup.copy_kali_tree() {
 	local destination_root=$2
 
 	log.info "Copy Kali root subvolume into $destination_root/@"
-	rsync -aHAXx --numeric-ids "$source_root/@/." "$destination_root/@/"
+	rsync -aHAXx --numeric-ids --info=progress2 "$source_root/@/." "$destination_root/@/"
 	log.info "Copy Kali @root into $destination_root/@/root"
 	mkdir -p "$destination_root/@/root"
-	rsync -aHAXx --numeric-ids "$source_root/@root/." "$destination_root/@/root/"
+	rsync -aHAXx --numeric-ids --info=progress2 "$source_root/@root/." "$destination_root/@/root/"
 	log.info "Copy Kali @usr@local into $destination_root/@/usr/local"
 	mkdir -p "$destination_root/@/usr/local"
-	rsync -aHAXx --numeric-ids "$source_root/@usr@local/." "$destination_root/@/usr/local/"
+	rsync -aHAXx --numeric-ids --info=progress2 "$source_root/@usr@local/." "$destination_root/@/usr/local/"
 	log.info "Copy Kali home into $destination_root/@home"
-	rsync -aHAXx --numeric-ids "$source_root/@home/." "$destination_root/@home/"
+	rsync -aHAXx --numeric-ids --info=progress2 "$source_root/@home/." "$destination_root/@home/"
 	log.info "Copy Kali cache into $destination_root/@cache"
-	rsync -aHAXx --numeric-ids "$source_root/@/var/cache/." "$destination_root/@cache/"
+	rsync -aHAXx --numeric-ids --info=progress2 "$source_root/@/var/cache/." "$destination_root/@cache/"
 	log.info "Copy Kali log into $destination_root/@log"
-	rsync -aHAXx --numeric-ids "$source_root/@var@log/." "$destination_root/@log/"
+	rsync -aHAXx --numeric-ids --info=progress2 "$source_root/@var@log/." "$destination_root/@log/"
 }
 
 btrfs-subvol-setup.remove_kali_sources() {
@@ -150,7 +150,7 @@ btrfs-subvol-setup.run_kali() {
 	if [[ -n $boot_backup ]]; then
 		log.info "Copy backed-up separate /boot into $destination_root/@/boot"
 		mkdir -p "$destination_root/@/boot"
-		rsync -aHAXx --numeric-ids "$boot_backup/." "$destination_root/@/boot/"
+		rsync -aHAXx --numeric-ids --info=progress2 "$boot_backup/." "$destination_root/@/boot/"
 	fi
 	btrfs filesystem mkswapfile --size "$swap_size" "$destination_root/@swap/swapfile"
 	[[ -n $(find "$destination_root/@" -mindepth 1 -print -quit) ]] ||

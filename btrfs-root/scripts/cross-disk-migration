@@ -273,22 +273,22 @@ cross-disk-migration.import_source() {
 			[[ -d $source_mount/$name ]] || log.die "Kali source subvolume is missing: $name"
 		done
 		log.info "Copy Kali root subvolume into $root_sub_vol/@"
-		rsync -aHAXx --numeric-ids "$source_mount/@/." "$target_mount/$root_sub_vol/@/"
+		rsync -aHAXx --numeric-ids --info=progress2 "$source_mount/@/." "$target_mount/$root_sub_vol/@/"
 		mkdir -p "$target_mount/$root_sub_vol/@/root" "$target_mount/$root_sub_vol/@/usr/local"
-		rsync -aHAXx --numeric-ids "$source_mount/@root/." "$target_mount/$root_sub_vol/@/root/"
-		rsync -aHAXx --numeric-ids "$source_mount/@usr@local/." "$target_mount/$root_sub_vol/@/usr/local/"
-		rsync -aHAXx --numeric-ids "$source_mount/@home/." "$target_mount/$root_sub_vol/@home/"
+		rsync -aHAXx --numeric-ids --info=progress2 "$source_mount/@root/." "$target_mount/$root_sub_vol/@/root/"
+		rsync -aHAXx --numeric-ids --info=progress2 "$source_mount/@usr@local/." "$target_mount/$root_sub_vol/@/usr/local/"
+		rsync -aHAXx --numeric-ids --info=progress2 "$source_mount/@home/." "$target_mount/$root_sub_vol/@home/"
 		if [[ -d $source_mount/@/var/cache ]]; then
-			rsync -aHAXx --numeric-ids "$source_mount/@/var/cache/." "$target_mount/$root_sub_vol/@cache/"
+			rsync -aHAXx --numeric-ids --info=progress2 "$source_mount/@/var/cache/." "$target_mount/$root_sub_vol/@cache/"
 		fi
-		rsync -aHAXx --numeric-ids "$source_mount/@var@log/." "$target_mount/$root_sub_vol/@log/"
+		rsync -aHAXx --numeric-ids --info=progress2 "$source_mount/@var@log/." "$target_mount/$root_sub_vol/@log/"
 	else
 		log.info "Copy Ubuntu root filesystem into $root_sub_vol/@"
-		rsync -aHAXx --numeric-ids "$source_mount/." "$target_mount/$root_sub_vol/@/"
+		rsync -aHAXx --numeric-ids --info=progress2 "$source_mount/." "$target_mount/$root_sub_vol/@/"
 		for name in home var/cache var/log; do
 			destination="$target_mount/$root_sub_vol/@$([[ $name == home ]] && printf home || [[ $name == var/cache ]] && printf cache || printf log)"
 			mkdir -p "$destination"
-			rsync -aHAXx --numeric-ids "$target_mount/$root_sub_vol/@/$name/." "$destination/"
+			rsync -aHAXx --numeric-ids --info=progress2 "$target_mount/$root_sub_vol/@/$name/." "$destination/"
 			find "$target_mount/$root_sub_vol/@/$name" -mindepth 1 -maxdepth 1 -exec rm -Rf -- {} +
 		done
 	fi
@@ -299,7 +299,7 @@ cross-disk-migration.import_source() {
 		source_boot_mount="$(mktemp -d /tmp/cross-disk-boot.XXXXXX)"
 		mount "/dev/$source_boot" "$source_boot_mount"
 		mkdir -p "$target_mount/$root_sub_vol/@/boot"
-		rsync -aHAXx --numeric-ids "$source_boot_mount/." "$target_mount/$root_sub_vol/@/boot/"
+		rsync -aHAXx --numeric-ids --info=progress2 "$source_boot_mount/." "$target_mount/$root_sub_vol/@/boot/"
 		umount "$source_boot_mount"
 		rmdir "$source_boot_mount"
 	fi

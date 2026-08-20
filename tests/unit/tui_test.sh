@@ -94,6 +94,7 @@ tui-test.generated_config_contract() {
 	rg -q 'not suitable for converting an existing production system' "$repository_root/setup.sh"
 	rg -q "'ubuntu|Ubuntu' 'kali|Kali Linux'" "$repository_root/setup.sh"
 	rg -q 'suite_type == kali' "$repository_root/setup.sh"
+	rg -q 'secure_boot_enrollment == existing && \$suite_type != kali' "$repository_root/setup.sh"
 	rg -q 'log\.section "Storage configuration"' "$repository_root/setup.sh"
 	rg -q 'Select the installation mode' "$repository_root/setup.sh"
 	rg -q 'setup\.show_target_inventory' "$repository_root/setup.sh"

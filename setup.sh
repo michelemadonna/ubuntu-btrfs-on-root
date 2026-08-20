@@ -901,7 +901,7 @@ setup.install_target_packages() {
 
 	log.info "Install target initramfs integration for the configured LUKS root"
 	apt-get install -y btrfs-progs cryptsetup-initramfs
-	if [[ $secure_boot_enrollment == existing ]]; then
+	if [[ $secure_boot_enrollment == existing && $suite_type != kali ]]; then
 		log.info "Install rEFInd in the new system without installing it into the ESP"
 		printf '%s\n' 'refind refind/install_to_esp boolean false' | debconf-set-selections
 		apt-get install -y --no-install-recommends refind
