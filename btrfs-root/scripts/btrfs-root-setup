@@ -103,7 +103,7 @@ btrfs-root-setup.print_summary() {
 	log.summary_item "EFI partition" "/dev/$efi_dev (label $ESP_FILESYSTEM_LABEL)"
 	log.summary_item "Separate boot" "$boot_status"
 	[[ -n ${boot_dev:-} ]] && log.summary_item "Boot migration" "/dev/$boot_dev -> $root_sub_vol/@/boot"
-	log.summary_item "LUKS format" "LUKS2 with Argon2id"
+	log.summary_item "LUKS format" "LUKS2 with Argon2id (label $LUKS_FILESYSTEM_LABEL)"
 	log.summary_item "Argon2id time target" "${iter_time} ms"
 	log.summary_item "LUKS mapper" "/dev/mapper/root"
 	log.summary_item "Keyslot reservation" "$keyslot_size"
@@ -122,9 +122,13 @@ btrfs-root-setup.validate_result() {
 	local path
 	local subvolume_listing
 	local efi_label
+	local luks_label
 
 	log.section "Post-summary validation"
 	cryptsetup isLuks "/dev/$root_dev" || log.die "Root partition is not a valid LUKS container after setup."
+	luks_label="$(blkid -c /dev/null -s LABEL -o value "/dev/$root_dev")"
+	[[ $luks_label == "$LUKS_FILESYSTEM_LABEL" ]] ||
+		log.die "LUKS label is not $LUKS_FILESYSTEM_LABEL after setup."
 	efi_label="$(blkid -c /dev/null -s LABEL -o value "/dev/$efi_dev")"
 	[[ $efi_label == "$ESP_FILESYSTEM_LABEL" ]] || log.die "EFI filesystem label is not $ESP_FILESYSTEM_LABEL after setup."
 	[[ -b /dev/mapper/root ]] || log.die "LUKS mapper /dev/mapper/root is unavailable after setup."

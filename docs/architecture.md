@@ -14,7 +14,7 @@ is:
 | --- | --- | --- |
 | `/dev/sda1` | optional rescue reserve | FAT live system plus ext4 `writable` when enabled |
 | `/dev/sda2` | FAT32 ESP at `/boot/efi` | label `ESP`; rEFInd, UKIs, fwupd and public certificates |
-| `/dev/sda3` | unencrypted Btrfs `/` | in-place LUKS2 container exposed as `/dev/mapper/root` |
+| `/dev/sda3` | unencrypted Btrfs `/` | in-place LUKS2 container labelled `ROOT`, exposed as `/dev/mapper/root` |
 
 Device names are configurable. Ubuntu discovery expects the installed root at
 `/target`, the ESP at `/target/boot/efi` and an optional separate boot at
