@@ -158,6 +158,10 @@ tui-test.generated_config_contract() {
 		printf 'ROOT initialization must use the canonical mapper root.\n' >&2
 		return 1
 	fi
+	if rg -q "trap .*source_mount.* RETURN" "$repository_root/btrfs-root/scripts/cross-disk-migration"; then
+		printf 'Cross-disk source cleanup must not leave a RETURN trap behind.\n' >&2
+		return 1
+	fi
 	rg -q 'Proceed with the installation using these values' "$repository_root/setup.sh"
 }
 

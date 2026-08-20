@@ -182,7 +182,6 @@ cross-disk-migration.import_source() {
 	[[ $(blkid -c /dev/null -s TYPE -o value "/dev/$source_root") == btrfs ]] ||
 		log.die "Source root /dev/$source_root must contain Btrfs."
 	mount "/dev/$source_root" "$source_mount"
-	trap 'umount "$source_mount" 2>/dev/null || true; rmdir "$source_mount" 2>/dev/null || true' RETURN
 	printf '%s' "$PASSPHRASE" | cryptsetup open --key-file=- "/dev/$root_dev" root
 	mapper_filesystem="$(blkid -c /dev/null -s TYPE -o value /dev/mapper/root 2>/dev/null || true)"
 	if [[ -z $mapper_filesystem ]]; then
