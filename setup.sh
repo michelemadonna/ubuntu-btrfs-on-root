@@ -84,6 +84,7 @@ setup.stage_existing_sbctl_keys() {
 	local scan_mount staged_root=/tmp/ubuntu-btrfs-sbctl-keys password selected
 	local -a key_paths=() key_items=()
 	SETUP_SBCTL_STAGED_ROOT=''
+	SETUP_TARGET_LUKS_PASSWORD=''
 
 	common.require_commands blkid btrfs cp cryptsetup find install lsblk mount sort umount
 	while read -r partition partition_type; do
@@ -102,6 +103,7 @@ setup.stage_existing_sbctl_keys() {
 		return 0
 	fi
 	password="$(tui.password "ROOT LUKS password for key discovery" password)"
+	SETUP_TARGET_LUKS_PASSWORD=$password
 	scan_mount="$(mktemp -d /tmp/sbctl-key-scan.XXXXXX)"
 	if ! printf '%s\n' "$password" | cryptsetup open "$root_device" sbctl-key-scan; then
 		log.warn "Unable to unlock ROOT for sbctl key discovery; continue migration without imported keys"
@@ -190,6 +192,9 @@ setup.generate_configuration() {
 	else
 		setup.stage_existing_sbctl_keys "$target_disk"
 		sbctl_import_keyroot=$SETUP_SBCTL_STAGED_ROOT
+		if [[ -n $SETUP_TARGET_LUKS_PASSWORD ]]; then
+			PASSPHRASE=$SETUP_TARGET_LUKS_PASSWORD
+		fi
 		if [[ -n $sbctl_import_keyroot ]]; then
 			secure_boot_enrollment=existing
 			log.info "Secure Boot enrollment is already complete; skip sbctl/MOK selection"
@@ -287,7 +292,11 @@ setup.generate_configuration() {
 
 	log.section "LUKS and Argon2id"
 	iter_time="$(tui.input "Argon2id time target in milliseconds" "$iter_time")"
-	PASSPHRASE="$(tui.password "Initial LUKS passphrase" "$PASSPHRASE")"
+	if [[ $migration_mode != cross_disk ]]; then
+		PASSPHRASE="$(tui.password "Initial LUKS passphrase" "$PASSPHRASE")"
+	else
+		log.info "Reuse the password already entered to unlock target ROOT"
+	fi
 	[[ $iter_time =~ ^[1-9][0-9]*$ ]] || log.die "Argon2id time target must be a positive integer."
 	[[ -n $PASSPHRASE ]] || log.die "LUKS passphrase cannot be empty."
 
