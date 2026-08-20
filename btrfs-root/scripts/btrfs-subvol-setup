@@ -52,7 +52,7 @@ btrfs-subvol-setup.copy_separate_boot() {
 	[[ -n ${boot_dev:-} ]] || return 0
 	log.info "Copy separate /boot content from /dev/$boot_dev into $destination_boot"
 	mkdir -p "$destination_boot"
-	cp -a -- "$source_boot/." "$destination_boot/"
+	rsync -aHAXx --numeric-ids "$source_boot/." "$destination_boot/"
 	[[ -n $(find "$destination_boot" -mindepth 1 -print -quit) ]] ||
 		log.die "Separate boot partition /dev/$boot_dev contained no files to migrate."
 	sync
@@ -61,22 +61,19 @@ btrfs-subvol-setup.copy_separate_boot() {
 	umount "$source_boot"
 }
 
-btrfs-subvol-setup.move_directory_contents() (
+btrfs-subvol-setup.move_directory_contents() {
 	local source_directory=$1
 	local destination_directory=$2
-	local -a entries=()
 
-	shopt -s dotglob nullglob
-	entries=("$source_directory"/*)
-
-	if ((${#entries[@]} == 0)); then
+	if [[ -z $(find "$source_directory" -mindepth 1 -print -quit) ]]; then
 		log.info "No existing files to move from $source_directory"
 		return
 	fi
 
-	log.info "Move ${#entries[@]} entries from $source_directory to $destination_directory"
-	mv -- "${entries[@]}" "$destination_directory"
-)
+	log.info "Copy directory contents from $source_directory to $destination_directory"
+	rsync -aHAXx --numeric-ids "$source_directory/." "$destination_directory/"
+	find "$source_directory" -mindepth 1 -maxdepth 1 -exec rm -Rf -- {} +
+}
 
 btrfs-subvol-setup.create_data_subvolume() {
 	local name=$1
