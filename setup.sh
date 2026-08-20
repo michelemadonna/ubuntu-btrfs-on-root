@@ -895,9 +895,28 @@ setup.install_target_packages() {
 	fi
 }
 
+setup.prepare_inner_dbus() {
+	local pid=''
+
+	install -d -m 0755 /run/dbus
+	if [[ -r /run/dbus/pid ]]; then
+		read -r pid </run/dbus/pid || true
+	fi
+	if [[ $pid =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null && [[ -S /run/dbus/system_bus_socket ]]; then
+		log.info "Reuse running target D-Bus daemon with PID $pid"
+		return 0
+	fi
+	if [[ -e /run/dbus/pid || -e /run/dbus/system_bus_socket ]]; then
+		log.info "Remove stale target D-Bus runtime files"
+		rm -f -- /run/dbus/pid /run/dbus/system_bus_socket
+	fi
+	dbus-daemon --system --fork
+	[[ -S /run/dbus/system_bus_socket ]] || log.die "Target D-Bus system socket was not created."
+}
+
 setup.inner_installation() {
 	cd "$repository_root"
-	dbus-daemon --system --fork
+	setup.prepare_inner_dbus
 	apt-get update
 	setup.run_checkpointed "$INNER_MODE" efi-suite-cleanup setup.cleanup_suite_efi
 	setup.run_checkpointed "$INNER_MODE" target-packages setup.install_target_packages
