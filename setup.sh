@@ -236,7 +236,7 @@ setup.stage_existing_sbctl_keys() {
 		setup.cleanup_sbctl_key_scan "$scan_mount"
 		log.die "Existing sbctl key directory is empty."
 	fi
-	SETUP_SBCTL_STAGED_ROOT="/root/$repository_name/.sbctl-key-import"
+	SETUP_SBCTL_STAGED_ROOT=/root/.sbctl-key-import
 	log.success "Staged selected sbctl keys from ${selected#"$scan_mount"} for chroot import"
 	setup.cleanup_sbctl_key_scan "$scan_mount"
 }
@@ -861,8 +861,13 @@ setup.prepare_chroot() {
 
 setup.run_inner_installation() {
 	local inner_repository="/root/$repository_name"
+	local target_keyroot="$mp/root/.sbctl-key-import"
 
 	cp -Rf "$repository_root" "$mp/root/"
+	if [[ -d $repository_root/.sbctl-key-import ]]; then
+		install -d -m 0700 "$target_keyroot"
+		cp -a -- "$repository_root/.sbctl-key-import/." "$target_keyroot/"
+	fi
 	chmod a+x "$mp$inner_repository/$script_name"
 	log.info "Run installation phases in the target chroot"
 	unshare --mount --fork chroot "$mp" "$inner_repository/$script_name" "$INNER_MODE"
