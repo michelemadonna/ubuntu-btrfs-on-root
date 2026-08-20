@@ -380,7 +380,7 @@ setup.generate_configuration() {
 		[[ $type == part ]] || continue
 		partition_items+=("$name|$name $size ${detail:-unknown filesystem}")
 	done < <(lsblk -nrpo NAME,TYPE,SIZE,FSTYPE "$disk")
-	((${#partition_items[@]} >= 3)) || log.die "Selected disk must expose at least three partitions."
+	((${#partition_items[@]} >= 2)) || log.die "Selected disk must expose at least ESP and ROOT partitions."
 	root_path="$(tui.select_one "Select the Btrfs root partition" "/dev/$root_dev" "${partition_items[@]}")" ||
 		log.die "Invalid root partition selection."
 	source_root_dev=${root_path#/dev/}
