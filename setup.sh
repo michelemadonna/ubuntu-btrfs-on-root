@@ -152,7 +152,7 @@ setup.cleanup_sbctl_key_scan() {
 
 setup.stage_existing_sbctl_keys() {
 	local target_disk=$1
-	local root_device='' partition partition_type partition_label mapper_filesystem
+	local root_device='' scan_device=/dev/mapper/root partition partition_type partition_label mapper_filesystem
 	local scan_mount staged_root=/tmp/ubuntu-btrfs-sbctl-keys password selected
 	local -a key_paths=() key_items=()
 	SETUP_SBCTL_STAGED_ROOT=''
@@ -174,30 +174,29 @@ setup.stage_existing_sbctl_keys() {
 		log.info "No LUKS partition labelled ROOT found on $target_disk"
 		return 0
 	fi
-	password="$(tui.password "ROOT LUKS password for key discovery" password)"
-	SETUP_TARGET_LUKS_PASSWORD=$password
 	scan_mount="$(mktemp -d /tmp/sbctl-key-scan.XXXXXX)"
-	if [[ -e /dev/mapper/sbctl-key-scan ]]; then
-		log.warn "Close stale temporary mapper sbctl-key-scan from a previous interrupted scan"
-		cryptsetup close sbctl-key-scan || log.die "Unable to close stale mapper sbctl-key-scan."
-	fi
-	if ! printf '%s' "$password" | cryptsetup open --key-file=- "$root_device" sbctl-key-scan; then
-		if printf '%s\n' "$password" | cryptsetup open --key-file=- "$root_device" sbctl-key-scan; then
-			SETUP_TARGET_LUKS_PASSWORD=$password$'\n'
-			log.warn "Unlocked ROOT using the legacy newline-terminated passphrase format"
-		else
-			log.warn "Unable to unlock ROOT for sbctl key discovery; continue migration without imported keys"
-			setup.cleanup_sbctl_key_scan "$scan_mount"
-			return 0
+	if [[ ! -e $scan_device ]]; then
+		password="$(tui.password "ROOT LUKS password for key discovery" password)"
+		SETUP_TARGET_LUKS_PASSWORD=$password
+		scan_device=/dev/mapper/sbctl-key-scan
+		if ! printf '%s' "$password" | cryptsetup open --key-file=- "$root_device" sbctl-key-scan; then
+			if printf '%s\n' "$password" | cryptsetup open --key-file=- "$root_device" sbctl-key-scan; then
+				SETUP_TARGET_LUKS_PASSWORD=$password$'\n'
+				log.warn "Unlocked ROOT using the legacy newline-terminated passphrase format"
+			else
+				log.warn "Unable to unlock ROOT for sbctl key discovery; continue migration without imported keys"
+				setup.cleanup_sbctl_key_scan "$scan_mount"
+				return 0
+			fi
 		fi
 	fi
-	mapper_filesystem="$(blkid -c /dev/null -s TYPE -o value /dev/mapper/sbctl-key-scan 2>/dev/null || true)"
+	mapper_filesystem="$(blkid -c /dev/null -s TYPE -o value "$scan_device" 2>/dev/null || true)"
 	if [[ $mapper_filesystem != btrfs ]]; then
 		log.info "ROOT contains no Btrfs filesystem to inspect; continue with new-system migration"
 		setup.cleanup_sbctl_key_scan "$scan_mount"
 		return 0
 	fi
-	if ! mount -o ro,subvolid=5 /dev/mapper/sbctl-key-scan "$scan_mount"; then
+	if ! mount -o ro,subvolid=5 "$scan_device" "$scan_mount"; then
 		log.warn "Unable to mount target Btrfs for sbctl key discovery; continue without imported keys"
 		setup.cleanup_sbctl_key_scan "$scan_mount"
 		return 0
