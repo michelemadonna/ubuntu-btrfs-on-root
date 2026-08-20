@@ -152,7 +152,7 @@ setup.cleanup_sbctl_key_scan() {
 
 setup.stage_existing_sbctl_keys() {
 	local target_disk=$1
-	local root_device='' scan_device=/dev/mapper/root partition partition_type partition_label mapper_filesystem
+	local root_device='' scan_device=/dev/mapper/root key_search_root partition partition_type partition_label mapper_filesystem
 	local scan_mount staged_root=/tmp/ubuntu-btrfs-sbctl-keys password selected
 	local -a key_paths=() key_items=()
 	SETUP_SBCTL_STAGED_ROOT=''
@@ -204,15 +204,19 @@ setup.stage_existing_sbctl_keys() {
 	log.info "Btrfs top-level content from LUKS ROOT on $target_disk"
 	btrfs subvolume list "$scan_mount" || true
 	find "$scan_mount" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort
+	key_search_root="$scan_mount/var/lib/sbctl/keys"
+	[[ -d $key_search_root ]] || {
+		log.info "No sbctl key directory found at /var/lib/sbctl/keys"
+		setup.cleanup_sbctl_key_scan "$scan_mount"
+		return 0
+	}
 	while IFS= read -r selected; do
 		[[ -f $selected/PK/PK.key && -f $selected/PK/PK.pem ]] || continue
 		[[ -f $selected/KEK/KEK.key && -f $selected/KEK/KEK.pem ]] || continue
 		[[ -f $selected/db/db.key && -f $selected/db/db.pem ]] || continue
 		key_paths+=("$selected")
 		key_items+=("$selected|${selected#"$scan_mount"}")
-	done < <(
-		find "$scan_mount" -type d -name .snapshots -prune -o -type d -print
-	)
+	done < <(find "$key_search_root" -type d -print)
 	if ((${#key_items[@]} == 0)); then
 		log.info "No complete sbctl key hierarchy found anywhere in the target Btrfs filesystem"
 		setup.cleanup_sbctl_key_scan "$scan_mount"
