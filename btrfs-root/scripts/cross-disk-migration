@@ -73,7 +73,7 @@ cross-disk-migration.partition_new_target() {
 	local next
 	local -a partition_args=()
 
-	common.require_commands awk blockdev cryptsetup mkfs.fat partprobe sgdisk
+	common.require_commands awk blkid blockdev cryptsetup mkfs.btrfs mkfs.fat partprobe sgdisk
 	if [[ $windows == yes ]]; then
 		common.require_commands mkfs.ntfs
 	fi
@@ -155,7 +155,21 @@ cross-disk-migration.partition_new_target() {
 		mkfs.ntfs -f -L WINRE "$winre_dev"
 	fi
 	printf '%s' "$passphrase" | cryptsetup luksFormat --type luks2 --pbkdf argon2id --iter-time "$iter_time" --label ROOT --key-file=- "$root_dev"
-	log.summary_item "Target ROOT" "$root_dev (LUKS2 label ROOT)"
+	if [[ -e /dev/mapper/root-initialize ]]; then
+		cryptsetup close root-initialize || log.die "Unable to close stale mapper root-initialize."
+	fi
+	printf '%s' "$passphrase" | cryptsetup open --key-file=- "$root_dev" root-initialize ||
+		log.die "Unable to reopen the new ROOT LUKS container."
+	if ! mkfs.btrfs -L ROOT /dev/mapper/root-initialize; then
+		cryptsetup close root-initialize || true
+		log.die "Unable to create Btrfs inside the new ROOT LUKS container."
+	fi
+	[[ $(blkid -c /dev/null -s TYPE -o value /dev/mapper/root-initialize) == btrfs ]] || {
+		cryptsetup close root-initialize || true
+		log.die "Btrfs validation failed inside the new ROOT LUKS container."
+	}
+	cryptsetup close root-initialize || log.die "Unable to close mapper root-initialize after Btrfs creation."
+	log.summary_item "Target ROOT" "$root_dev (LUKS2 label ROOT, Btrfs filesystem)"
 	log.success "Target disk initialized; run setup.sh again to migrate the source."
 	log.section_end
 }

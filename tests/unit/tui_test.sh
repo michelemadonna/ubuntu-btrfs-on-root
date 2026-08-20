@@ -142,6 +142,7 @@ tui-test.generated_config_contract() {
 	rg -q 'PARTLABEL' "$repository_root/btrfs-root/scripts/cross-disk-migration"
 	rg -q 'sgdisk --zap-all' "$repository_root/btrfs-root/scripts/cross-disk-migration"
 	rg -q 'luksFormat.*--label ROOT' "$repository_root/btrfs-root/scripts/cross-disk-migration"
+	rg -q 'mkfs\.btrfs -L ROOT /dev/mapper/root-initialize' "$repository_root/btrfs-root/scripts/cross-disk-migration"
 	rg -q 'Proceed with the installation using these values' "$repository_root/setup.sh"
 }
 

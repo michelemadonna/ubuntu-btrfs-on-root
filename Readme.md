@@ -24,7 +24,7 @@ shows its current partitions and, when available, displays the Btrfs top-level
 content before continuing.
 
 In the second mode, a target without `ESP` and `ROOT` is initialized with the
-requested GPT layout and LUKS2 `ROOT`; setup then stops and must be run again
+requested GPT layout and a Btrfs filesystem inside LUKS2 `ROOT`; setup then stops and must be run again
 to perform the migration. An initialized target is detected from its `ESP` and
 `ROOT` labels. Existing target suite subvolumes are never overwritten.
 
