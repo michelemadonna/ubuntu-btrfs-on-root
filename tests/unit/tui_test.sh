@@ -132,6 +132,7 @@ tui-test.generated_config_contract() {
 	rg -q 'log\.summary_item "Target ROOT"' "$repository_root/setup.sh"
 	rg -q 'scan_device=/dev/mapper/root' "$repository_root/setup.sh"
 	rg -q 'mount -o ro,subvolid=5 "\$scan_device"' "$repository_root/setup.sh"
+	rg -q 'btrfs subvolume list "\$scan_mount" \| awk' "$repository_root/setup.sh"
 	rg -q 'findmnt -rn -S /dev/mapper/sbctl-key-scan -o TARGET' "$repository_root/setup.sh"
 	rg -q 'key_search_root="\$scan_mount/var/lib/sbctl/keys"' "$repository_root/setup.sh"
 	rg -q 'find "\$key_search_root" -type d -print' "$repository_root/setup.sh"

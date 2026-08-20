@@ -158,7 +158,7 @@ setup.stage_existing_sbctl_keys() {
 	SETUP_SBCTL_STAGED_ROOT=''
 	SETUP_TARGET_LUKS_PASSWORD=''
 
-	common.require_commands blkid btrfs cp cryptsetup find findmnt install lsblk mount sort umount
+	common.require_commands awk blkid btrfs cp cryptsetup find findmnt install lsblk mount sort umount
 	while read -r partition partition_type; do
 		[[ $partition_type == part ]] || continue
 		cryptsetup isLuks "$partition" >/dev/null 2>&1 || continue
@@ -202,7 +202,7 @@ setup.stage_existing_sbctl_keys() {
 		return 0
 	fi
 	log.info "Btrfs top-level content from LUKS ROOT on $target_disk"
-	btrfs subvolume list "$scan_mount" || true
+	btrfs subvolume list "$scan_mount" | awk 'index($0, "/.snapshots") == 0' || true
 	find "$scan_mount" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort
 	key_search_root="$scan_mount/var/lib/sbctl/keys"
 	[[ -d $key_search_root ]] || {
