@@ -11,9 +11,20 @@ source "$repository_root/lib/common.sh"
 snapper-setup.configure_profile() {
 	local profile=$1
 	local mountpoint=$2
+	local config_file="/etc/snapper/configs/$profile"
+	local snapshot_path="${mountpoint%/}/.snapshots"
 
-	log.info "Create Snapper profile '$profile' for $mountpoint"
-	snapper -c "$profile" create-config "$mountpoint"
+	if [[ -r $config_file ]]; then
+		log.info "Reuse existing Snapper profile '$profile' for $mountpoint"
+	else
+		if [[ -e $snapshot_path ]]; then
+			log.info "Remove migrated source snapshot directory $snapshot_path before creating profile '$profile'"
+			rm -Rf -- "$snapshot_path"
+			[[ ! -e $snapshot_path ]] || log.die "Unable to remove migrated snapshot directory: $snapshot_path"
+		fi
+		log.info "Create Snapper profile '$profile' for $mountpoint"
+		snapper -c "$profile" create-config "$mountpoint"
+	fi
 	log.info "Enable timeline snapshots, sudo access and ACL synchronization for '$profile'"
 	snapper -c "$profile" set-config \
 		'TIMELINE_CREATE=yes' \
@@ -23,7 +34,7 @@ snapper-setup.configure_profile() {
 
 snapper-setup.run() {
 	common.require_root
-	common.require_commands apt
+	common.require_commands apt rm
 	log.section "Snapper installation"
 	log.info "Install Snapper and filesystem change monitoring"
 	apt install -y snapper inotify-tools

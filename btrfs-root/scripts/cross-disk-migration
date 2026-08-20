@@ -292,6 +292,8 @@ cross-disk-migration.import_source() {
 			find "$target_mount/$root_sub_vol/@/$name" -mindepth 1 -maxdepth 1 -exec rm -Rf -- {} +
 		done
 	fi
+	log.info "Remove source snapshot directories before creating target Snapper profiles"
+	rm -Rf -- "$target_mount/$root_sub_vol/@/.snapshots" "$target_mount/$root_sub_vol/@home/.snapshots"
 	btrfs filesystem mkswapfile --size "$swap_size" "$target_mount/$root_sub_vol/@swap/swapfile"
 	if [[ -n $source_boot ]]; then
 		source_boot_mount="$(mktemp -d /tmp/cross-disk-boot.XXXXXX)"

@@ -59,6 +59,16 @@ snapshot-management-test.kernel_guard() {
 	dash -n "$hook"
 }
 
+snapshot-management-test.snapper_resume_contract() {
+	local setup="$repository_root/btrfs-snapshots-mng/scripts/snapper-setup"
+
+	rg -q 'Reuse existing Snapper profile' "$setup"
+	rg -q 'Remove migrated source snapshot directory' "$setup"
+	rg -q 'rm -Rf -- "\$snapshot_path"' "$setup"
+	rg -q 'Remove source snapshot directories before creating target Snapper profiles' \
+		"$repository_root/btrfs-root/scripts/cross-disk-migration"
+}
+
 snapshot-management-test.initramfs_logging() {
 	local hook="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/snapshot-menu-hook.sh"
 	local listener_stop="$repository_root/btrfs-snapshots-mng/dracut/92snapshot-menu/listener/snapshot-key-listener-stop"
@@ -105,6 +115,7 @@ snapshot-management-test.run() {
 	snapshot-management-test.base_config
 	snapshot-management-test.pin_config
 	snapshot-management-test.kernel_guard
+	snapshot-management-test.snapper_resume_contract
 	snapshot-management-test.initramfs_logging
 	snapshot-management-test.suite_labels
 	snapshot-management-test.function_key_mapping
