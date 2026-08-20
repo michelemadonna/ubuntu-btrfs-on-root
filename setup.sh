@@ -144,6 +144,15 @@ setup.generate_configuration() {
 	boot_path="$(tui.select_one "Select the optional separate /boot partition" "$boot_default" "${boot_items[@]}")" ||
 		log.die "Invalid boot partition selection."
 	[[ $boot_path != none ]] || boot_path=""
+	
+	swap_size="$(tui.input "Btrfs swapfile size" "$swap_size")"
+	[[ $swap_size =~ ^[1-9][0-9]*[KMGTP]$ ]] || log.die "Swap size must use a value such as 4G."
+
+	log.section "LUKS and Argon2id"
+	iter_time="$(tui.input "Argon2id time target in milliseconds" "$iter_time")"
+	PASSPHRASE="$(tui.password "Initial LUKS passphrase" "$PASSPHRASE")"
+	[[ $iter_time =~ ^[1-9][0-9]*$ ]] || log.die "Argon2id time target must be a positive integer."
+	[[ -n $PASSPHRASE ]] || log.die "LUKS passphrase cannot be empty."
 
 	log.section "Distribution configuration"
 	suite_type="$(tui.select_one "Select the distribution type used for the rEFInd icon" "$suite_type" 'ubuntu|Ubuntu' 'kali|Kali Linux')" ||
@@ -177,16 +186,11 @@ setup.generate_configuration() {
 	if [[ $secure_boot_enrollment == sbctl && $secure_boot_mode != setup ]]; then
 		log.warn "sbctl was selected while firmware is not in Setup Mode; configuration will continue without automatic firmware enrollment."
 	fi
-	iter_time="$(tui.input "Argon2id time target in milliseconds" "$iter_time")"
-	PASSPHRASE="$(tui.password "Initial LUKS passphrase" "$PASSPHRASE")"
-	[[ $iter_time =~ ^[1-9][0-9]*$ ]] || log.die "Argon2id time target must be a positive integer."
-	[[ -n $PASSPHRASE ]] || log.die "LUKS passphrase cannot be empty."
 
 	log.section "Optional features"
 	pre_download="$(tui.toggle "Pre-download target packages" "$pre_download")" || log.die "Invalid pre-download toggle."
 	enlarge="$(tui.toggle "Extend the root partition to available space" "$enlarge")" || log.die "Invalid enlargement toggle."
-	swap_size="$(tui.input "Btrfs swapfile size" "$swap_size")"
-	[[ $swap_size =~ ^[1-9][0-9]*[KMGTP]$ ]] || log.die "Swap size must use a value such as 4G."
+	
 
 	if [[ $suite_type == kali ]]; then
 		install_rescue=no
