@@ -97,6 +97,8 @@ tui-test.generated_config_contract() {
 	rg -q 'log\.section "Storage configuration"' "$repository_root/setup.sh"
 	rg -q 'Select the installation mode' "$repository_root/setup.sh"
 	rg -q 'setup\.show_target_inventory' "$repository_root/setup.sh"
+	rg -q 'setup\.ensure_live_storage_tools' "$repository_root/setup.sh"
+	rg -q 'apt-get install -y btrfs-progs rsync' "$repository_root/setup.sh"
 	rg -q 'Target disk inventory' "$repository_root/setup.sh"
 	rg -q 'Btrfs top-level content' "$repository_root/setup.sh"
 	rg -q "'in_place|In Place Migration'" "$repository_root/setup.sh"

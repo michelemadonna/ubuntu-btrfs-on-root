@@ -715,6 +715,17 @@ setup.parse_arguments() {
 	esac
 }
 
+setup.ensure_live_storage_tools() {
+	if command -v btrfs >/dev/null 2>&1 && command -v rsync >/dev/null 2>&1; then
+		return 0
+	fi
+	common.require_commands apt-get
+	log.info "Install live-session storage tools required by discovery and migration"
+	apt-get update
+	apt-get install -y btrfs-progs rsync
+	common.require_commands btrfs rsync
+}
+
 setup.prepare_target() {
 	local mounted_efi
 
@@ -722,10 +733,7 @@ setup.prepare_target() {
 	common.require_commands apt-get chmod install mkdir mount mountpoint umount
 	install -d -m 1777 /tmp
 	chmod 1777 /tmp
-	if ! command -v btrfs >/dev/null 2>&1 || ! command -v rsync >/dev/null 2>&1; then
-		log.info "Install live-session storage tools required for Btrfs conversion"
-		apt-get install -y btrfs-progs rsync
-	fi
+	setup.ensure_live_storage_tools
 	mkdir -p -- "$mp"
 	if [[ $migration_mode == cross_disk ]]; then
 		log.info "Cross-disk mode: import the selected Btrfs source into the initialized target"
@@ -967,6 +975,7 @@ setup.main() {
 
 	if [[ ${1:-} != "$INNER_MODE" ]]; then
 		setup.parse_arguments "$@"
+		setup.ensure_live_storage_tools
 	fi
 	setup.load_configuration
 	log.info "Script path: $script_path"
