@@ -24,6 +24,9 @@ producer and consumer before altering one.
   `/target/cdrom`; successful completion leaves target mounts and mapper `root`
   open.
 - Secrets and private keys never enter logs, summaries, tests or commits.
+- A resumability marker is persisted only after its operation succeeds. It is
+  bound to the target LUKS UUID and suite; preflight, discovery and mounts are
+  never skipped because of a marker.
 - The installation mode is selected before storage configuration. In
   `new_setup` mode, existing sbctl keys may be staged from the currently
   mounted root, Secure Boot enrollment is never requested or repeated, and

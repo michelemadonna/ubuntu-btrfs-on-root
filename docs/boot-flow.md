@@ -69,6 +69,11 @@ After chroot return, the outer phase creates rescue only when requested. It then
 restores temporary resolver/service-policy files. On success it deliberately
 leaves target mounts and `/dev/mapper/root` open.
 
+After successful source import, storage conversion, Secure Boot, snapshot
+management, UKI generation and rescue creation, setup atomically records a
+target-local checkpoint. A rerun reconstructs mounts and validates target
+identity, then resumes from the first phase without a matching checkpoint.
+
 ## Secure Boot branches
 
 The detected `secure_boot_mode` informs warnings only; it never changes the

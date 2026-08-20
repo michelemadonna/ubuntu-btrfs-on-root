@@ -24,6 +24,60 @@ setup.write_config_value() {
 	printf 'export %s=%q\n' "$name" "$value" >>"$file"
 }
 
+setup.checkpoint_dir() {
+	if [[ ${1:-} == "$INNER_MODE" ]]; then
+		printf '/var/lib/ubuntu-btrfs-on-root/checkpoints\n'
+	else
+		printf '%s/var/lib/ubuntu-btrfs-on-root/checkpoints\n' "$mp"
+	fi
+}
+
+setup.checkpoint_identity() {
+	local luks_uuid
+
+	luks_uuid="$(cryptsetup luksUUID "/dev/$root_dev")"
+	common.require_nonempty "Target LUKS UUID" "$luks_uuid"
+	printf '%s:%s\n' "$luks_uuid" "$suite"
+}
+
+setup.checkpoint_reached() {
+	local mode=$1 name=$2 directory marker identity
+
+	directory="$(setup.checkpoint_dir "$mode")"
+	marker="$directory/$suite.$name"
+	[[ -r $marker ]] || return 1
+	identity="$(setup.checkpoint_identity)"
+	[[ $(<"$marker") == "$identity" ]] ||
+		log.die "Checkpoint identity mismatch: $marker"
+}
+
+setup.persist_checkpoint() {
+	local mode=$1 name=$2 directory marker temporary identity
+
+	directory="$(setup.checkpoint_dir "$mode")"
+	marker="$directory/$suite.$name"
+	identity="$(setup.checkpoint_identity)"
+	install -d -m 0700 "$directory"
+	temporary="$(mktemp "$directory/.${suite}.${name}.XXXXXX")"
+	printf '%s\n' "$identity" >"$temporary"
+	chmod 0600 "$temporary"
+	mv -f -- "$temporary" "$marker"
+	sync -f "$directory" 2>/dev/null || sync
+	log.success "Installation checkpoint persisted: $name"
+}
+
+setup.run_checkpointed() {
+	local mode=$1 name=$2
+	shift 2
+
+	if setup.checkpoint_reached "$mode" "$name"; then
+		log.info "Resume installation: skip completed phase $name"
+		return 0
+	fi
+	"$@"
+	setup.persist_checkpoint "$mode" "$name"
+}
+
 setup.mounted_device() {
 	local mountpoint_path=$1
 	local source
@@ -670,6 +724,9 @@ setup.prepare_target() {
 	if [[ $migration_mode == cross_disk ]]; then
 		log.info "Cross-disk mode: import the selected Btrfs source into the initialized target"
 		cross-disk-migration.import_source "$source_root_dev" "$source_boot_dev"
+		if ! setup.checkpoint_reached outer source-import; then
+			setup.persist_checkpoint outer source-import
+		fi
 		mkdir -p "$mp/boot/efi"
 		mount "/dev/$efi_dev" "$mp/boot/efi"
 		log.success "Cross-disk target mounted and source imported"
@@ -798,9 +855,12 @@ setup.inner_installation() {
 
 	# The Btrfs/LUKS storage phase has already completed outside the chroot.
 	# Security-sensitive phase coordinators execute as isolated entry points.
-	"$repository_root/secure-boot/scripts/secure-boot-setup"
-	"$repository_root/btrfs-snapshots-mng/scripts/btrfs-snapshots-mng-setup"
-	"$repository_root/uki/scripts/install-uki"
+	setup.run_checkpointed "$INNER_MODE" secure-boot \
+		"$repository_root/secure-boot/scripts/secure-boot-setup"
+	setup.run_checkpointed "$INNER_MODE" snapshot-management \
+		"$repository_root/btrfs-snapshots-mng/scripts/btrfs-snapshots-mng-setup"
+	setup.run_checkpointed "$INNER_MODE" uki \
+		"$repository_root/uki/scripts/install-uki"
 }
 
 setup.restore_chroot_files() {
@@ -886,11 +946,19 @@ setup.main() {
 	trap setup.cleanup_on_exit EXIT
 
 	cd "$repository_root"
-	"$repository_root/btrfs-root/scripts/btrfs-root-setup"
+	if setup.checkpoint_reached outer storage; then
+		log.info "Resume installation: skip completed phase storage"
+		if mountpoint -q "$mp/boot/efi"; then
+			umount "$mp/boot/efi"
+		fi
+	else
+		"$repository_root/btrfs-root/scripts/btrfs-root-setup"
+		setup.persist_checkpoint outer storage
+	fi
 	setup.prepare_chroot
 	setup.run_inner_installation
 	if [[ $install_rescue == yes && $suite_type != kali ]]; then
-		setup.install_rescue_system
+		setup.run_checkpointed outer rescue setup.install_rescue_system
 	else
 		log.info "Persistent rescue-system creation was not requested"
 	fi

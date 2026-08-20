@@ -45,7 +45,7 @@ rescue-test.setup_integration() {
 	rg -q 'setup\.install_rescue_system' "$repository_root/setup.sh"
 	rg -q 'TARGET_DEV="/dev/\$rescue_dev"' "$repository_root/setup.sh"
 	rescue_line="$(rg -n 'setup\.install_rescue_system' "$repository_root/setup.sh" | tail -n1 | cut -d: -f1)"
-	storage_line="$(rg -n $'^\t"\$repository_root/btrfs-root/scripts/btrfs-root-setup"$' "$repository_root/setup.sh" | cut -d: -f1)"
+	storage_line="$(rg -n 'repository_root/btrfs-root/scripts/btrfs-root-setup' "$repository_root/setup.sh" | tail -n1 | cut -d: -f1)"
 	((rescue_line > storage_line))
 	rg -q 'if \[\[ \$install_rescue == yes && \$suite_type != kali \]\]' "$repository_root/setup.sh"
 	rg -q 'install_rescue="\$\(tui\.toggle "Create the persistent rescue system"' "$repository_root/setup.sh"

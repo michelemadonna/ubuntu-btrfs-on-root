@@ -87,6 +87,7 @@ btrfs-root-setup.configured_subvolume_paths() {
 btrfs-root-setup.print_summary() {
 	local enlargement_status="disabled"
 	local boot_status="none"
+	local source_boot_status="none"
 	local subvolume_paths
 
 	if [[ $enlarge == yes ]]; then
@@ -95,19 +96,31 @@ btrfs-root-setup.print_summary() {
 	if [[ -n ${boot_dev:-} ]]; then
 		boot_status="/dev/$boot_dev"
 	fi
+	if [[ -n ${source_boot_dev:-} ]]; then
+		source_boot_status="/dev/$source_boot_dev"
+	fi
 	subvolume_paths="$(btrfs-root-setup.configured_subvolume_paths | paste -sd, -)"
 
 	log.section "Btrfs root setup summary"
 	log.summary_item "Status" "completed successfully"
-	log.summary_item "Source partition" "/dev/$root_dev"
-	log.summary_item "EFI partition" "/dev/$efi_dev (label $ESP_FILESYSTEM_LABEL)"
-	log.summary_item "Separate boot" "$boot_status"
-	[[ -n ${boot_dev:-} ]] && log.summary_item "Boot migration" "/dev/$boot_dev -> $root_sub_vol/@/boot"
-	log.summary_item "LUKS format" "LUKS2 with Argon2id (label $LUKS_FILESYSTEM_LABEL)"
-	log.summary_item "Argon2id time target" "${iter_time} ms"
+	if [[ ${migration_mode:-in_place} == cross_disk ]]; then
+		log.summary_item "Source root" "/dev/$source_root_dev"
+		log.summary_item "Source separate boot" "$source_boot_status"
+		log.summary_item "Target ROOT" "/dev/$root_dev (LUKS2 label $LUKS_FILESYSTEM_LABEL)"
+		log.summary_item "Target ESP" "/dev/$efi_dev (label $ESP_FILESYSTEM_LABEL)"
+	else
+		log.summary_item "Source partition" "/dev/$root_dev"
+		log.summary_item "EFI partition" "/dev/$efi_dev (label $ESP_FILESYSTEM_LABEL)"
+		log.summary_item "Separate boot" "$boot_status"
+		[[ -n ${boot_dev:-} ]] && log.summary_item "Boot migration" "/dev/$boot_dev -> $root_sub_vol/@/boot"
+		log.summary_item "LUKS format" "LUKS2 with Argon2id (label $LUKS_FILESYSTEM_LABEL)"
+		log.summary_item "Argon2id time target" "${iter_time} ms"
+	fi
 	log.summary_item "LUKS mapper" "/dev/mapper/root"
-	log.summary_item "Keyslot reservation" "$keyslot_size"
-	log.summary_item "Partition enlargement" "$enlargement_status"
+	if [[ ${migration_mode:-in_place} != cross_disk ]]; then
+		log.summary_item "Keyslot reservation" "$keyslot_size"
+		log.summary_item "Partition enlargement" "$enlargement_status"
+	fi
 	log.summary_item "Btrfs mount point" "$mp"
 	log.summary_item "Normal root" "$root_sub_vol/@"
 	log.summary_item "Subvolumes" "$subvolume_paths"
@@ -179,6 +192,7 @@ btrfs-root-setup.run() {
 		log.info "Cross-disk mode: preserve imported subvolumes and skip in-place encryption"
 		btrfs-root-setup.validate_mounted_device "$mp/boot/efi" "/dev/$efi_dev" "EFI System Partition"
 		umount "$mp/boot/efi"
+		luks-setup.configure_existing
 		fstab-setup.run
 		btrfs-root-setup.print_summary
 		btrfs-root-setup.validate_result

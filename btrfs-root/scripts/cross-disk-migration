@@ -32,6 +32,17 @@ cross-disk-migration.require_unique_label() {
 	printf '%s\n' "$result"
 }
 
+cross-disk-migration.import_checkpoint_valid() {
+	local target_mount=$1 marker expected luks_uuid
+
+	marker="$target_mount/$root_sub_vol/@/var/lib/ubuntu-btrfs-on-root/checkpoints/$suite.source-import"
+	[[ -r $marker ]] || return 1
+	luks_uuid="$(cryptsetup luksUUID "/dev/$root_dev")"
+	expected="$luks_uuid:$suite"
+	[[ $(<"$marker") == "$expected" ]] ||
+		log.die "Source-import checkpoint identity mismatch: $marker"
+}
+
 cross-disk-migration.layout() {
 	local disk=$1 esp_mib=$2 root_size=$3 rescue_mib=$4 windows=$5
 	local disk_mib windows_mib=0 msr_mib=0 root_mib
@@ -178,10 +189,14 @@ cross-disk-migration.import_source() {
 
 	source_mount="$(mktemp -d /tmp/cross-disk-source.XXXXXX)"
 	target_mount="$mp"
-	common.require_commands blkid mount umount btrfs mkfs.btrfs rsync cryptsetup find
+	common.require_commands blkid mount umount btrfs mkfs.btrfs rsync cryptsetup find grep
 	[[ $(blkid -c /dev/null -s TYPE -o value "/dev/$source_root") == btrfs ]] ||
 		log.die "Source root /dev/$source_root must contain Btrfs."
-	mount "/dev/$source_root" "$source_mount"
+	if [[ $suite_type == kali ]]; then
+		mount -o subvolid=5 "/dev/$source_root" "$source_mount"
+	else
+		mount "/dev/$source_root" "$source_mount"
+	fi
 	printf '%s' "$PASSPHRASE" | cryptsetup open --key-file=- "/dev/$root_dev" root
 	mapper_filesystem="$(blkid -c /dev/null -s TYPE -o value /dev/mapper/root 2>/dev/null || true)"
 	if [[ -z $mapper_filesystem ]]; then
@@ -191,22 +206,49 @@ cross-disk-migration.import_source() {
 		log.die "Target ROOT mapper contains unsupported filesystem '$mapper_filesystem'."
 	fi
 	mount /dev/mapper/root -o subvolid=5 "$target_mount"
-	[[ ! -e "$target_mount/$root_sub_vol" ]] ||
+	if [[ -e $target_mount/$root_sub_vol ]]; then
+		if cross-disk-migration.import_checkpoint_valid "$target_mount" || {
+			[[ -f $target_mount/$root_sub_vol/@/etc/fstab ]] &&
+				grep -Fq "subvol=$root_sub_vol/@" "$target_mount/$root_sub_vol/@/etc/fstab"
+		}; then
+			log.warn "Resume a previously imported cross-disk suite $root_sub_vol without copying it again"
+			umount "$source_mount"
+			rmdir "$source_mount"
+			umount "$target_mount"
+			mount /dev/mapper/root -o "subvol=$root_sub_vol/@" "$target_mount"
+			return 0
+		fi
 		log.die "Target already contains the suite container $root_sub_vol."
+	fi
 	btrfs subvolume create "$target_mount/$root_sub_vol"
 	btrfs subvolume create "$target_mount/$root_sub_vol/@"
 	for name in @home @cache @log @tmp @libvirt @docker @swap; do
 		btrfs subvolume create "$target_mount/$root_sub_vol/$name"
 	done
-	local -a rsync_args=(-aHAXx --numeric-ids)
-	rsync_args+=("$source_mount/." "$target_mount/$root_sub_vol/@/")
-	rsync "${rsync_args[@]}"
-	for name in home var/cache var/log; do
-		destination="$target_mount/$root_sub_vol/@$([[ $name == home ]] && printf home || [[ $name == var/cache ]] && printf cache || printf log)"
-		mkdir -p "$destination"
-		rsync -aHAXx --numeric-ids "$target_mount/$root_sub_vol/@/$name/." "$destination/"
-		find "$target_mount/$root_sub_vol/@/$name" -mindepth 1 -maxdepth 1 -exec rm -Rf -- {} +
-	done
+	if [[ $suite_type == kali ]]; then
+		for name in @ @home @root @usr@local @var@log; do
+			[[ -d $source_mount/$name ]] || log.die "Kali source subvolume is missing: $name"
+		done
+		log.info "Copy Kali root subvolume into $root_sub_vol/@"
+		rsync -aHAXx --numeric-ids "$source_mount/@/." "$target_mount/$root_sub_vol/@/"
+		mkdir -p "$target_mount/$root_sub_vol/@/root" "$target_mount/$root_sub_vol/@/usr/local"
+		rsync -aHAXx --numeric-ids "$source_mount/@root/." "$target_mount/$root_sub_vol/@/root/"
+		rsync -aHAXx --numeric-ids "$source_mount/@usr@local/." "$target_mount/$root_sub_vol/@/usr/local/"
+		rsync -aHAXx --numeric-ids "$source_mount/@home/." "$target_mount/$root_sub_vol/@home/"
+		if [[ -d $source_mount/@/var/cache ]]; then
+			rsync -aHAXx --numeric-ids "$source_mount/@/var/cache/." "$target_mount/$root_sub_vol/@cache/"
+		fi
+		rsync -aHAXx --numeric-ids "$source_mount/@var@log/." "$target_mount/$root_sub_vol/@log/"
+	else
+		log.info "Copy Ubuntu root filesystem into $root_sub_vol/@"
+		rsync -aHAXx --numeric-ids "$source_mount/." "$target_mount/$root_sub_vol/@/"
+		for name in home var/cache var/log; do
+			destination="$target_mount/$root_sub_vol/@$([[ $name == home ]] && printf home || [[ $name == var/cache ]] && printf cache || printf log)"
+			mkdir -p "$destination"
+			rsync -aHAXx --numeric-ids "$target_mount/$root_sub_vol/@/$name/." "$destination/"
+			find "$target_mount/$root_sub_vol/@/$name" -mindepth 1 -maxdepth 1 -exec rm -Rf -- {} +
+		done
+	fi
 	btrfs filesystem mkswapfile --size "$swap_size" "$target_mount/$root_sub_vol/@swap/swapfile"
 	if [[ -n $source_boot ]]; then
 		source_boot_mount="$(mktemp -d /tmp/cross-disk-boot.XXXXXX)"

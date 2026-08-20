@@ -153,7 +153,7 @@ tui-test.generated_config_contract() {
 	rg -q 'PARTLABEL' "$repository_root/btrfs-root/scripts/cross-disk-migration"
 	rg -q 'sgdisk --zap-all' "$repository_root/btrfs-root/scripts/cross-disk-migration"
 	rg -q 'luksFormat.*--label ROOT' "$repository_root/btrfs-root/scripts/cross-disk-migration"
-	rg -q 'mkfs\.btrfs -L ROOT /dev/mapper/root' "$repository_root/btrfs-root/scripts/cross-disk-migration"
+	rg -q 'mkfs\.btrfs /dev/mapper/root' "$repository_root/btrfs-root/scripts/cross-disk-migration"
 	if rg -q 'root-initialize' "$repository_root/btrfs-root/scripts/cross-disk-migration"; then
 		printf 'ROOT initialization must use the canonical mapper root.\n' >&2
 		return 1
@@ -162,7 +162,21 @@ tui-test.generated_config_contract() {
 		printf 'Cross-disk source cleanup must not leave a RETURN trap behind.\n' >&2
 		return 1
 	fi
+	rg -q 'Resume a previously imported cross-disk suite' "$repository_root/btrfs-root/scripts/cross-disk-migration"
+	rg -q 'luks-setup\.configure_existing' "$repository_root/btrfs-root/scripts/btrfs-root-setup"
+	if rg -q 'luks-setup\.write_crypttab' "$repository_root/btrfs-root/scripts/btrfs-root-setup"; then
+		printf 'The storage coordinator must not own crypttab generation.\n' >&2
+		return 1
+	fi
 	rg -q 'Proceed with the installation using these values' "$repository_root/setup.sh"
+	rg -q '^setup\.persist_checkpoint()' "$repository_root/setup.sh"
+	rg -q 'mktemp "\$directory/\.\${suite}\.\${name}\.XXXXXX"' "$repository_root/setup.sh"
+	rg -q 'setup\.persist_checkpoint outer source-import' "$repository_root/setup.sh"
+	rg -q 'setup\.persist_checkpoint outer storage' "$repository_root/setup.sh"
+	rg -q 'setup\.run_checkpointed "\$INNER_MODE" secure-boot' "$repository_root/setup.sh"
+	rg -q 'setup\.run_checkpointed "\$INNER_MODE" snapshot-management' "$repository_root/setup.sh"
+	rg -q 'setup\.run_checkpointed "\$INNER_MODE" uki' "$repository_root/setup.sh"
+	rg -q 'setup\.run_checkpointed outer rescue' "$repository_root/setup.sh"
 }
 
 tui-test.input_and_password_defaults

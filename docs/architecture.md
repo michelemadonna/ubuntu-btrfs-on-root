@@ -40,6 +40,12 @@ inner phase installs Secure Boot, snapshots, UKIs and optional TPM support.
 Successful completion restores temporary resolver/service-policy files but
 leaves target mounts and `/dev/mapper/root` open.
 
+Completed non-idempotent phases are recorded atomically below
+`/var/lib/ubuntu-btrfs-on-root/checkpoints`. Marker names are suite-specific
+and contain the target LUKS UUID plus suite, so they cannot silently authorize
+skipping work on another target. Discovery, device validation and mount setup
+always run again; only completed mutation phases are skipped.
+
 Shared repository code is limited to:
 
 - `lib/log.sh`: colored, namespaced logging and summaries;

@@ -81,6 +81,22 @@ luks-setup.configure_label() {
 	log.success "LUKS label validated as $LUKS_FILESYSTEM_LABEL on $luks_device"
 }
 
+luks-setup.configure_existing() {
+	local luks_device="/dev/$root_dev"
+	local mapper_device=/dev/mapper/root
+	local applied_label
+
+	log.section "Existing LUKS2 root configuration"
+	cryptsetup isLuks "$luks_device" || log.die "Target ROOT is not a valid LUKS container: $luks_device"
+	[[ -b $mapper_device ]] || log.die "Expected LUKS mapper is unavailable: $mapper_device"
+	applied_label="$(blkid -c /dev/null -s LABEL -o value "$luks_device")"
+	[[ $applied_label == "$LUKS_FILESYSTEM_LABEL" ]] ||
+		log.die "Target LUKS label is '$applied_label'; expected $LUKS_FILESYSTEM_LABEL."
+	luks-setup.write_crypttab "$luks_device" "$mp/etc/crypttab"
+	log.success "Existing LUKS2 root mapping configured"
+	log.section_end
+}
+
 luks-setup.run() {
 	local source_device="/dev/$root_dev"
 	local mapper_device="/dev/mapper/root"
