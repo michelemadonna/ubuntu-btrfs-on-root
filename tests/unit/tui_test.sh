@@ -67,6 +67,8 @@ tui-test.generated_config_contract() {
 	rg -q 'setup\.mounted_device /target' "$repository_root/setup.sh"
 	rg -q 'setup\.mounted_device /target/boot/efi' "$repository_root/setup.sh"
 	rg -q 'setup\.mounted_device /target/boot' "$repository_root/setup.sh"
+	rg -q 'if \[\[ \$install_mode == in_place \]\]; then' "$repository_root/setup.sh"
+	rg -q 'source_boot_dev=\${boot_path#/dev/}' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" boot_dev "\$boot_dev"' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" secure_boot_mode "\$secure_boot_mode"' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" secure_boot_enrollment "\$secure_boot_enrollment"' "$repository_root/setup.sh"

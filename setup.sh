@@ -265,24 +265,26 @@ setup.generate_configuration() {
 		exit 0
 	fi
 	disk_items=()
-	detected_root_path="$(setup.mounted_device /target || true)"
-	detected_efi_path="$(setup.mounted_device /target/boot/efi || true)"
-	detected_boot_path="$(setup.mounted_device /target/boot || true)"
-	if [[ -n $detected_root_path ]]; then
-		root_dev=${detected_root_path#/dev/}
-		mp=/target
-		log.info "Detected installed root $detected_root_path mounted at /target"
-	fi
-	if [[ -n $detected_efi_path ]]; then
-		efi_dev=${detected_efi_path#/dev/}
-		log.info "Detected EFI System Partition $detected_efi_path mounted at /target/boot/efi"
-	fi
-	if [[ -n $detected_boot_path && $detected_boot_path != "$detected_root_path" ]]; then
-		boot_dev=${detected_boot_path#/dev/}
-		log.info "Detected separate boot partition $detected_boot_path mounted at /target/boot"
-	else
-		detected_boot_path=""
-		log.info "No separate /boot mount detected; boot_dev remains optional"
+	if [[ $install_mode == in_place ]]; then
+		detected_root_path="$(setup.mounted_device /target || true)"
+		detected_efi_path="$(setup.mounted_device /target/boot/efi || true)"
+		detected_boot_path="$(setup.mounted_device /target/boot || true)"
+		if [[ -n $detected_root_path ]]; then
+			root_dev=${detected_root_path#/dev/}
+			mp=/target
+			log.info "Detected installed root $detected_root_path mounted at /target"
+		fi
+		if [[ -n $detected_efi_path ]]; then
+			efi_dev=${detected_efi_path#/dev/}
+			log.info "Detected EFI System Partition $detected_efi_path mounted at /target/boot/efi"
+		fi
+		if [[ -n $detected_boot_path && $detected_boot_path != "$detected_root_path" ]]; then
+			boot_dev=${detected_boot_path#/dev/}
+			log.info "Detected separate boot partition $detected_boot_path mounted at /target/boot"
+		else
+			detected_boot_path=""
+			log.info "No separate /boot mount detected; boot_dev remains optional"
+		fi
 	fi
 	while read -r name type size detail; do
 		[[ $type == disk ]] || continue
@@ -311,16 +313,24 @@ setup.generate_configuration() {
 	root_path="$(tui.select_one "Select the Btrfs root partition" "/dev/$root_dev" "${partition_items[@]}")" ||
 		log.die "Invalid root partition selection."
 	source_root_dev=${root_path#/dev/}
-	for detail in "${partition_items[@]}"; do
-		[[ ${detail%%|*} == "$root_path" ]] || efi_items+=("$detail")
-	done
-	efi_path="$(tui.select_one "Select the EFI System Partition" "/dev/$efi_dev" "${efi_items[@]}")" ||
-		log.die "Invalid EFI partition selection."
+	if [[ $install_mode == in_place ]]; then
+		for detail in "${partition_items[@]}"; do
+			[[ ${detail%%|*} == "$root_path" ]] || efi_items+=("$detail")
+		done
+		efi_path="$(tui.select_one "Select the EFI System Partition" "/dev/$efi_dev" "${efi_items[@]}")" ||
+			log.die "Invalid EFI partition selection."
+	fi
 	boot_items+=("none|No separate /boot partition")
 	for detail in "${partition_items[@]}"; do
-		[[ ${detail%%|*} == "$root_path" || ${detail%%|*} == "$efi_path" ]] || boot_items+=("$detail")
+		[[ ${detail%%|*} == "$root_path" ]] && continue
+		[[ $install_mode == in_place && ${detail%%|*} == "$efi_path" ]] && continue
+		boot_items+=("$detail")
 	done
-	boot_default=${detected_boot_path:-none}
+	if [[ $install_mode == in_place ]]; then
+		boot_default=${detected_boot_path:-none}
+	else
+		boot_default=none
+	fi
 	boot_path="$(tui.select_one "Select the optional separate /boot partition" "$boot_default" "${boot_items[@]}")" ||
 		log.die "Invalid boot partition selection."
 	[[ $boot_path != none ]] || boot_path=""
