@@ -104,6 +104,10 @@ tui-test.generated_config_contract() {
 	rg -q 'cryptsetup open --key-file=-' "$repository_root/setup.sh"
 	rg -q 'SETUP_TARGET_LUKS_PASSWORD=\$password' "$repository_root/setup.sh"
 	rg -q 'Reuse the password already entered to unlock target ROOT' "$repository_root/setup.sh"
+	if rg -q 'Target ROOT LUKS passphrase' "$repository_root/setup.sh"; then
+		printf 'Target ROOT password must not be requested twice.\n' >&2
+		return 1
+	fi
 	rg -q 'continue migration without imported keys' "$repository_root/setup.sh"
 	rg -q 'ROOT contains no Btrfs filesystem to inspect' "$repository_root/setup.sh"
 	rg -q 'mkfs\.btrfs -L ROOT /dev/mapper/root' "$repository_root/btrfs-root/scripts/cross-disk-migration"

@@ -245,8 +245,8 @@ setup.generate_configuration() {
 		root_path="$(cross-disk-migration.require_unique_label "$target_disk" ROOT)"
 		target_efi_dev=${efi_path#/dev/}
 		target_root_dev=${root_path#/dev/}
-		PASSPHRASE="$(tui.password "Target ROOT LUKS passphrase" "$PASSPHRASE")"
-		[[ -n $PASSPHRASE ]] || log.die "Target ROOT LUKS passphrase cannot be empty."
+		[[ -n $SETUP_TARGET_LUKS_PASSWORD ]] ||
+			log.die "Target ROOT was not unlocked during the initial LUKS discovery."
 		log.info "Detected initialized target $target_disk with ESP and ROOT labels"
 	elif [[ $install_mode == new_setup ]]; then
 		local esp_mib=1024 root_size=all create_rescue=yes reserve_windows=no new_passphrase
