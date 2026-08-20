@@ -81,6 +81,12 @@ btrfs-subvol-setup.create_data_subvolume() {
 
 	log.info "Create Btrfs subvolume $path"
 	btrfs subvolume create "$path"
+	case $name in
+	@home | @cache | @log | @libvirt) chmod 0755 "$path" ;;
+	@docker) chmod 0711 "$path" ;;
+	@tmp) chmod 1777 "$path" ;;
+	@swap) chmod 0700 "$path" ;;
+	esac
 }
 
 btrfs-subvol-setup.validate_kali_sources() {

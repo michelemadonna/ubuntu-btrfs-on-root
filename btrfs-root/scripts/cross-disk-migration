@@ -267,6 +267,12 @@ cross-disk-migration.import_source() {
 	btrfs subvolume create "$target_mount/$root_sub_vol/@"
 	for name in @home @cache @log @tmp @libvirt @docker @swap; do
 		btrfs subvolume create "$target_mount/$root_sub_vol/$name"
+		case $name in
+		@home | @cache | @log | @libvirt) chmod 0755 "$target_mount/$root_sub_vol/$name" ;;
+		@docker) chmod 0711 "$target_mount/$root_sub_vol/$name" ;;
+		@tmp) chmod 1777 "$target_mount/$root_sub_vol/$name" ;;
+		@swap) chmod 0700 "$target_mount/$root_sub_vol/$name" ;;
+		esac
 	done
 	if [[ $suite_type == kali ]]; then
 		for name in @ @home @root @usr@local @var@log; do
