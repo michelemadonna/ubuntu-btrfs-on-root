@@ -312,8 +312,12 @@ setup.generate_configuration() {
 		cross-disk-migration.layout "$target_disk" "$esp_mib" "$root_size" "$([[ $create_rescue == yes ]] && printf 10240 || printf 0)" "$reserve_windows"
 		confirmation="$(tui.toggle "Destroy the selected target and create this layout" no)" || log.die "Invalid confirmation."
 		[[ $confirmation == yes ]] || log.die "Target initialization cancelled."
+		log.section "LUKS and Argon2id"
 		new_passphrase="$(tui.password "ROOT LUKS passphrase" password)"
 		iter_time="$(tui.input "Argon2id time target in milliseconds" "$iter_time")"
+		[[ -n $new_passphrase ]] || log.die "ROOT LUKS passphrase cannot be empty."
+		[[ $iter_time =~ ^[1-9][0-9]*$ ]] || log.die "Argon2id time target must be a positive integer."
+		log.section_end
 		cross-disk-migration.partition_new_target "$target_disk" "$esp_mib" "$root_size" "$([[ $create_rescue == yes ]] && printf 10240 || printf 0)" "$reserve_windows" "$iter_time" "$new_passphrase"
 		log.warn "Re-run setup.sh to detect the initialized target and migrate the source."
 		exit 0
