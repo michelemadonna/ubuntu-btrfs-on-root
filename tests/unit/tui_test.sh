@@ -164,6 +164,7 @@ tui-test.generated_config_contract() {
 	fi
 	rg -q 'Resume a previously imported cross-disk suite' "$repository_root/btrfs-root/scripts/cross-disk-migration"
 	rg -q 'luks-setup\.configure_existing' "$repository_root/btrfs-root/scripts/btrfs-root-setup"
+	rg -q 'Both migration modes converge here' "$repository_root/btrfs-root/scripts/btrfs-root-setup"
 	if rg -q 'luks-setup\.write_crypttab' "$repository_root/btrfs-root/scripts/btrfs-root-setup"; then
 		printf 'The storage coordinator must not own crypttab generation.\n' >&2
 		return 1

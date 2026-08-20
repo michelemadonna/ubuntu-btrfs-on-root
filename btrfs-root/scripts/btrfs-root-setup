@@ -189,20 +189,21 @@ btrfs-root-setup.run() {
 	log.section "Btrfs root storage setup"
 	log.info "Configuration and required commands validated for /dev/$root_dev"
 	if [[ ${migration_mode:-in_place} == cross_disk ]]; then
-		log.info "Cross-disk mode: preserve imported subvolumes and skip in-place encryption"
+		log.info "Cross-disk source is already imported and $root_sub_vol/@ is mounted at $mp"
+		log.info "Skip only subvolume creation and in-place encryption; continue with the standard storage finalization"
 		btrfs-root-setup.validate_mounted_device "$mp/boot/efi" "/dev/$efi_dev" "EFI System Partition"
 		umount "$mp/boot/efi"
 		luks-setup.configure_existing
-		fstab-setup.run
-		btrfs-root-setup.print_summary
-		btrfs-root-setup.validate_result
-		return
+	else
+		log.info "The storage phase will create subvolumes, encrypt the partition in place, and write target mount configuration"
+		btrfs-root-setup.prepare_existing_mounts
+		btrfs-root-setup.configure_esp_label
+		btrfs-subvol-setup.run
+		luks-setup.run
 	fi
-	log.info "The storage phase will create subvolumes, encrypt the partition in place, and write target mount configuration"
-	btrfs-root-setup.prepare_existing_mounts
-	btrfs-root-setup.configure_esp_label
-	btrfs-subvol-setup.run
-	luks-setup.run
+
+	# Both migration modes converge here with /dev/mapper/root open and the
+	# selected suite root mounted at $mp.
 	fstab-setup.run
 	btrfs-root-setup.print_summary
 	btrfs-root-setup.validate_result
