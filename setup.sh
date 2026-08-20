@@ -103,7 +103,11 @@ setup.stage_existing_sbctl_keys() {
 	fi
 	password="$(tui.password "ROOT LUKS password for key discovery" password)"
 	scan_mount="$(mktemp -d /tmp/sbctl-key-scan.XXXXXX)"
-	printf '%s\n' "$password" | cryptsetup open "$root_device" sbctl-key-scan
+	if ! printf '%s\n' "$password" | cryptsetup open "$root_device" sbctl-key-scan; then
+		log.warn "Unable to unlock ROOT for sbctl key discovery; continue migration without imported keys"
+		rmdir "$scan_mount"
+		return 0
+	fi
 	trap 'umount "$scan_mount" 2>/dev/null || true; cryptsetup close sbctl-key-scan 2>/dev/null || true; rmdir "$scan_mount" 2>/dev/null || true' RETURN
 	mount -o subvolid=5 /dev/mapper/sbctl-key-scan "$scan_mount"
 	log.info "Btrfs top-level content from LUKS ROOT on $target_disk"
@@ -155,7 +159,7 @@ setup.show_target_inventory() {
 setup.generate_configuration() {
 	local config_file=$1
 	local disk target_disk default_disk root_path efi_path boot_path rescue_path name type size detail confirmation config_mode config_name
-	local detected_root_path detected_efi_path detected_boot_path boot_default reuse_boot_as_rescue=no install_rescue=yes
+	local detected_root_path detected_efi_path detected_boot_path boot_default reuse_boot_as_rescue=no install_rescue=yes rescue_filesystem_label=''
 	local minimum_rescue_mib boot_size_mib
 	local root_dev=sda3 efi_dev=sda2 boot_dev='' rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu
 	local source_root_dev='' source_boot_dev='' target_root_dev='' target_efi_dev='' migration_mode=in_place install_mode=in_place sbctl_import_keyroot=''
@@ -336,11 +340,26 @@ setup.generate_configuration() {
 	if [[ $suite_type == kali ]]; then
 		install_rescue=no
 		log.info "Kali Linux does not support rescue-system creation during installation"
+	elif [[ $migration_mode == cross_disk ]]; then
+		rescue_path="$(cross-disk-migration.require_unique_label "$target_disk" RESCUE)"
+		rescue_dev=${rescue_path#/dev/}
+		rescue_filesystem_label="$(blkid -c /dev/null -s LABEL -o value "$rescue_path" 2>/dev/null || true)"
+		case $rescue_filesystem_label in
+		RESCUE)
+			install_rescue=yes
+			log.info "Target rescue partition is labelled RESCUE; install the Ubuntu live system"
+			;;
+		UBUNTU_LIVE)
+			install_rescue=no
+			log.info "Target rescue partition is already labelled UBUNTU_LIVE; skip rescue installation"
+			;;
+		*) log.die "Target rescue partition $rescue_path has unsupported filesystem label '${rescue_filesystem_label:-none}'." ;;
+		esac
 	else
 		install_rescue="$(tui.toggle "Create the persistent rescue system" "$install_rescue")" ||
 			log.die "Invalid rescue-system toggle."
 	fi
-	if [[ $install_rescue == yes && -n $boot_path ]]; then
+	if [[ $install_rescue == yes && -n $boot_path && $migration_mode != cross_disk ]]; then
 		minimum_rescue_mib="$(setup.minimum_rescue_size_mib /cdrom)"
 		boot_size_mib="$(setup.device_size_mib "$boot_path")"
 		if ((boot_size_mib >= minimum_rescue_mib)); then

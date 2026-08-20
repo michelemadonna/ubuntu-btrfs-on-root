@@ -101,6 +101,11 @@ tui-test.generated_config_contract() {
 	rg -q "'new_setup|New Setup or Migrate From another Disk'" "$repository_root/setup.sh"
 	rg -q 'setup\.stage_existing_sbctl_keys' "$repository_root/setup.sh"
 	rg -q 'ROOT LUKS password for key discovery' "$repository_root/setup.sh"
+	rg -q 'continue migration without imported keys' "$repository_root/setup.sh"
+	rg -q 'require_unique_label "\$target_disk" RESCUE' "$repository_root/setup.sh"
+	rg -q 'Target rescue partition is already labelled UBUNTU_LIVE' "$repository_root/setup.sh"
+	rg -q 'Target rescue partition is labelled RESCUE' "$repository_root/setup.sh"
+	rg -q 'migration_mode != cross_disk' "$repository_root/setup.sh"
 	rg -q 'subvolid=5 /dev/mapper/sbctl-key-scan' "$repository_root/setup.sh"
 	rg -q 'find "\$scan_mount" -type d -print' "$repository_root/setup.sh"
 	if rg -q 'source_root=/target/var/lib/sbctl/keys' "$repository_root/setup.sh"; then

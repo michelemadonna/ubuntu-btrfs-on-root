@@ -148,7 +148,7 @@ cross-disk-migration.partition_new_target() {
 
 	mkfs.fat -F32 -n ESP "$esp_dev"
 	if [[ -n $rescue_dev ]]; then
-		mkfs.fat -F32 -n UBUNTU_LIVE "$rescue_dev"
+		mkfs.fat -F32 -n RESCUE "$rescue_dev"
 	fi
 	if [[ $windows == yes ]]; then
 		mkfs.ntfs -f -L WINDOWS "$windows_dev"

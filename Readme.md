@@ -137,9 +137,17 @@ the generated configuration in place but performs no installation operation.
 In mode 2, when the selected target contains a LUKS partition labelled `ROOT`,
 the wizard temporarily unlocks it, mounts Btrfs with `subvolid=5`, recursively
 searches every directory for complete sbctl key hierarchies and asks which one
-to import. The keys are staged under `/tmp/ubuntu-btrfs-sbctl-keys`; Secure Boot
-enrollment and MOK selection are not requested again. rEFInd is installed in
-the new system without being written to the ESP.
+to import. The keys are staged under `/tmp/ubuntu-btrfs-sbctl-keys`. If no usable
+keys are found, setup continues with the normal Secure Boot choice and creates
+new sbctl keys or prepares MOK as selected; imported keys are not enrolled
+again. rEFInd is installed in the new system and written to the ESP when no
+existing installed boot path is available.
+
+For an initialized target, Ubuntu rescue uses the partition with GPT label
+`RESCUE` automatically. A filesystem label of `RESCUE` means that the live
+system still has to be installed; `UBUNTU_LIVE` means it is already installed,
+so setup skips both the prompt and the installation. The wizard does not
+request another rescue partition; Kali never requests rescue creation.
 
 At startup the wizard warns that in-place conversion is intended only for an
 Ubuntu system just installed from the live environment.
