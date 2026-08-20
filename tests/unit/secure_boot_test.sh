@@ -128,6 +128,18 @@ secure-boot-test.test_sbctl_enrollment_contract() {
 	rg -Fq '/usr/sbin/sbctl' "$script" || secure-boot-test.fail "sbctl is not installed in /usr/sbin"
 }
 
+secure-boot-test.test_phase_checkpoint_contract() {
+	local script="$repository_root/secure-boot/scripts/secure-boot-setup"
+
+	rg -q 'run_phase.*|secure-boot-setup\.run_phase' "$script"
+	rg -q 'persist_checkpoint "\$checkpoint_name"' "$script"
+	rg -q 'key-management' "$script"
+	rg -q 'shim-mok' "$script"
+	rg -q 'public-certificates' "$script"
+	rg -q '"rEFInd installation and signing"' "$script"
+	rg -q '"fwupd configuration and signing"' "$script"
+}
+
 secure-boot-test.test_trust_path
 secure-boot-test.test_refind_loader_path
 secure-boot-test.test_fallback_directory_creation
@@ -136,4 +148,5 @@ secure-boot-test.test_fwupd_trust_mode
 secure-boot-test.test_summary_has_no_secret
 secure-boot-test.test_public_certificate_copy
 secure-boot-test.test_sbctl_enrollment_contract
+secure-boot-test.test_phase_checkpoint_contract
 printf 'Secure Boot helper tests passed.\n'

@@ -179,6 +179,8 @@ tui-test.generated_config_contract() {
 	rg -q 'setup\.persist_checkpoint outer source-import' "$repository_root/setup.sh"
 	rg -q 'setup\.persist_checkpoint outer storage' "$repository_root/setup.sh"
 	rg -q 'setup\.run_checkpointed "\$INNER_MODE" secure-boot' "$repository_root/setup.sh"
+	rg -q 'setup\.run_checkpointed "\$INNER_MODE" efi-suite-cleanup' "$repository_root/setup.sh"
+	rg -q 'setup\.run_checkpointed "\$INNER_MODE" target-packages' "$repository_root/setup.sh"
 	rg -q 'setup\.run_checkpointed "\$INNER_MODE" snapshot-management' "$repository_root/setup.sh"
 	rg -q 'setup\.run_checkpointed "\$INNER_MODE" uki' "$repository_root/setup.sh"
 	rg -q 'setup\.run_checkpointed outer rescue' "$repository_root/setup.sh"

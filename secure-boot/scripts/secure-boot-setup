@@ -25,6 +25,34 @@ export SHIM_DIR="${SHIM_DIR:-/usr/local/lib/secureboot/shim}"
 export DEBIAN_SNAPSHOT="${DEBIAN_SNAPSHOT:-20260812}"
 export DEBIAN_SUITE="${DEBIAN_SUITE:-unstable}"
 
+secure-boot-setup.checkpoint_path() {
+	printf '/var/lib/ubuntu-btrfs-on-root/checkpoints/%s.secure-boot-%s\n' "$suite" "$1"
+}
+
+secure-boot-setup.checkpoint_identity() {
+	printf '%s:%s\n' "$(cryptsetup luksUUID "/dev/$root_dev")" "$suite"
+}
+
+secure-boot-setup.phase_completed() {
+	local name=$1 marker
+	marker="$(secure-boot-setup.checkpoint_path "$name")"
+	[[ -r $marker ]] || return 1
+	[[ $(<"$marker") == "$(secure-boot-setup.checkpoint_identity)" ]] ||
+		log.die "Secure Boot checkpoint identity mismatch: $marker"
+}
+
+secure-boot-setup.persist_checkpoint() {
+	local name=$1 marker directory temporary
+	marker="$(secure-boot-setup.checkpoint_path "$name")"
+	directory=${marker%/*}
+	install -d -m 0700 "$directory"
+	temporary="$(mktemp "$directory/.secure-boot-${name}.XXXXXX")"
+	secure-boot-setup.checkpoint_identity >"$temporary"
+	chmod 0600 "$temporary"
+	mv -f -- "$temporary" "$marker"
+	log.success "Secure Boot checkpoint persisted: $name"
+}
+
 secure-boot-setup.read_efi_uint8() {
 	local name=$1
 	local file
@@ -114,11 +142,53 @@ secure-boot-setup.copy_public_certificates() {
 secure-boot-setup.run_phase() {
 	local phase_name=$1
 	local phase_script=$2
+	local checkpoint_name=$3
+
+	if secure-boot-setup.phase_completed "$checkpoint_name"; then
+		log.info "Resume Secure Boot setup: skip completed phase $phase_name"
+		return 0
+	fi
 
 	log.section "$phase_name"
 	log.info "Execute $phase_script"
 	"$phase_script"
+	secure-boot-setup.persist_checkpoint "$checkpoint_name"
 	log.success "$phase_name completed"
+}
+
+secure-boot-setup.run_certificate_copy() {
+	if secure-boot-setup.phase_completed public-certificates; then
+		log.info "Resume Secure Boot setup: skip completed public-certificate copy"
+		return 0
+	fi
+	secure-boot-setup.copy_public_certificates
+	secure-boot-setup.persist_checkpoint public-certificates
+}
+
+secure-boot-setup.adopt_prerequisites_before_refind() {
+	local certificate
+
+	[[ -d $ESP/EFI/refind ]] || return 0
+	if ! secure-boot-setup.phase_completed key-management &&
+		[[ -s $SBCTL_KEYROOT/PK/PK.key && -s $SBCTL_KEYROOT/PK/PK.pem &&
+			-s $SBCTL_KEYROOT/KEK/KEK.key && -s $SBCTL_KEYROOT/KEK/KEK.pem &&
+			-s $SBCTL_KEYROOT/db/db.key && -s $SBCTL_KEYROOT/db/db.pem ]]; then
+		log.warn "Recover completed key-management state from the interrupted rEFInd phase"
+		secure-boot-setup.persist_checkpoint key-management
+	fi
+	if [[ $secure_boot_enrollment == mok ]] &&
+		! secure-boot-setup.phase_completed shim-mok &&
+		[[ -s $SHIM_DIR/shimx64.efi && -s $SHIM_DIR/mmx64.efi ]]; then
+		log.warn "Recover completed Shim/MOK state from the interrupted rEFInd phase"
+		secure-boot-setup.persist_checkpoint shim-mok
+	fi
+	if ! secure-boot-setup.phase_completed public-certificates; then
+		for certificate in PK.pem KEK.pem db.pem; do
+			[[ -s $ESP/EFI/keys/$certificate ]] || return 0
+		done
+		log.warn "Recover completed public-certificate state from the interrupted rEFInd phase"
+		secure-boot-setup.persist_checkpoint public-certificates
+	fi
 }
 
 secure-boot-setup.print_summary() {
@@ -180,7 +250,7 @@ secure-boot-setup.validate_result() {
 
 secure-boot-setup.run() {
 	common.require_root
-	common.require_commands apt-get basename cmp find grep install od tr uname
+	common.require_commands apt-get basename chmod cmp cryptsetup find grep install mktemp mv od tr uname
 	[[ -d /sys/firmware/efi ]] ||
 		log.die "System was not booted in UEFI mode."
 	case $(uname -m) in
@@ -201,12 +271,13 @@ secure-boot-setup.run() {
 	if [[ $secure_boot_enrollment == sbctl && $SETUP_MODE != 1 ]]; then
 		log.warn "Firmware is not in Setup Mode; sbctl enrollment cannot be completed. Continue with key creation and signing only."
 	fi
+	secure-boot-setup.adopt_prerequisites_before_refind
 
 	secure-boot-setup.run_phase \
-		"Secure Boot key management" "$script_dir/sbctl-setup"
+		"Secure Boot key management" "$script_dir/sbctl-setup" key-management
 	if [[ $secure_boot_enrollment == mok ]]; then
 		secure-boot-setup.run_phase \
-			"Shim and MOK preparation" "$script_dir/shim-setup"
+			"Shim and MOK preparation" "$script_dir/shim-setup" shim-mok
 	elif [[ $secure_boot_enrollment == existing ]]; then
 		log.info "Skip Shim/MOK preparation because Secure Boot enrollment already exists"
 	else
@@ -215,12 +286,12 @@ secure-boot-setup.run() {
 	if [[ $secure_boot_enrollment == existing ]]; then
 		log.info "Skip rEFInd installation in the ESP for existing Secure Boot migration"
 	else
-		secure-boot-setup.copy_public_certificates
+		secure-boot-setup.run_certificate_copy
 		secure-boot-setup.run_phase \
-			"rEFInd installation and signing" "$script_dir/refind-setup"
+			"rEFInd installation and signing" "$script_dir/refind-setup" refind
 	fi
 	secure-boot-setup.run_phase \
-		"fwupd configuration and signing" "$script_dir/fwupd-setup"
+		"fwupd configuration and signing" "$script_dir/fwupd-setup" fwupd
 	secure-boot-setup.print_summary
 	secure-boot-setup.validate_result
 }

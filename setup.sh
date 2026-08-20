@@ -787,21 +787,42 @@ setup.install_rescue_system() {
 }
 
 setup.prepare_chroot() {
+	local mounted_source mounted_subvolume
+
 	log.info "Prepare $mp for chroot"
-	mount --rbind /dev "$mp/dev"
+	mountpoint -q "$mp/dev" || mount --rbind /dev "$mp/dev"
 	mount --make-rslave "$mp/dev"
-	mount -t proc proc "$mp/proc"
-	mount -t devpts pts "$mp/dev/pts"
-	mount --rbind /sys "$mp/sys"
+	mountpoint -q "$mp/proc" || mount -t proc proc "$mp/proc"
+	mountpoint -q "$mp/dev/pts" || mount -t devpts pts "$mp/dev/pts"
+	mountpoint -q "$mp/sys" || mount --rbind /sys "$mp/sys"
 	mount --make-rslave "$mp/sys"
-	mount -t tmpfs tmpfs "$mp/run"
-	mount -o "subvol=$root_sub_vol/@home" /dev/mapper/root "$mp/home"
-	mount "/dev/$efi_dev" "$mp/boot/efi"
+	mountpoint -q "$mp/run" || mount -t tmpfs tmpfs "$mp/run"
+	if mountpoint -q "$mp/home"; then
+		mounted_source="$(findmnt -rn -M "$mp/home" -o SOURCE)"
+		mounted_source=${mounted_source%%\[*}
+		mounted_subvolume="$(findmnt -rn -M "$mp/home" -o FSROOT)"
+		[[ $(readlink -f -- "$mounted_source") == "$(readlink -f -- /dev/mapper/root)" ]] ||
+			log.die "Existing $mp/home mount uses $mounted_source instead of /dev/mapper/root."
+		[[ $mounted_subvolume == "/$root_sub_vol/@home" ]] ||
+			log.die "Existing $mp/home mount uses Btrfs path $mounted_subvolume instead of /$root_sub_vol/@home."
+		log.info "Reuse already-mounted home subvolume at $mp/home"
+	else
+		mount -o "subvol=$root_sub_vol/@home" /dev/mapper/root "$mp/home"
+	fi
+	if mountpoint -q "$mp/boot/efi"; then
+		mounted_source="$(setup.mounted_device "$mp/boot/efi" || true)"
+		[[ $mounted_source == "$(readlink -f -- "/dev/$efi_dev")" ]] ||
+			log.die "Existing ESP mount at $mp/boot/efi uses ${mounted_source:-unknown}, not /dev/$efi_dev."
+	else
+		mount "/dev/$efi_dev" "$mp/boot/efi"
+	fi
 	mkdir -p "$mp/sys/firmware/efi/efivars"
-	mount --bind /sys/firmware/efi/efivars "$mp/sys/firmware/efi/efivars"
+	mountpoint -q "$mp/sys/firmware/efi/efivars" ||
+		mount --bind /sys/firmware/efi/efivars "$mp/sys/firmware/efi/efivars"
 	mkdir -p "$mp/run/dbus"
 
-	if [[ -e $mp/etc/resolv.conf || -L $mp/etc/resolv.conf ]]; then
+	if [[ ! -e $mp/etc/resolv.conf.chroot-save && ! -L $mp/etc/resolv.conf.chroot-save ]] &&
+		[[ -e $mp/etc/resolv.conf || -L $mp/etc/resolv.conf ]]; then
 		mv "$mp/etc/resolv.conf" "$mp/etc/resolv.conf.chroot-save"
 	fi
 
@@ -848,12 +869,11 @@ setup.pre_download_all() {
 	apt install -y openssh-server open-vm-tools-desktop
 }
 
-setup.inner_installation() {
-	cd "$repository_root"
-	dbus-daemon --system --fork
+setup.cleanup_suite_efi() {
 	rm -rf -- "/boot/efi/EFI/$suite"
-	apt-get update
+}
 
+setup.install_target_packages() {
 	if [[ $pre_download == yes ]]; then
 		setup.pre_download_all
 	fi
@@ -865,6 +885,14 @@ setup.inner_installation() {
 		printf '%s\n' 'refind refind/install_to_esp boolean false' | debconf-set-selections
 		apt-get install -y --no-install-recommends refind
 	fi
+}
+
+setup.inner_installation() {
+	cd "$repository_root"
+	dbus-daemon --system --fork
+	apt-get update
+	setup.run_checkpointed "$INNER_MODE" efi-suite-cleanup setup.cleanup_suite_efi
+	setup.run_checkpointed "$INNER_MODE" target-packages setup.install_target_packages
 
 	# The Btrfs/LUKS storage phase has already completed outside the chroot.
 	# Security-sensitive phase coordinators execute as isolated entry points.
