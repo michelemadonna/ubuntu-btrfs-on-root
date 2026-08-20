@@ -160,7 +160,6 @@ setup.generate_configuration() {
 	root_dev=${root_path#/dev/}
 	efi_dev=${efi_path#/dev/}
 	boot_dev=${boot_path#/dev/}
-	rescue_dev=${rescue_path#/dev/}
 
 	log.section "Encryption and boot security"
 	secure_boot_mode="$(setup.detect_secure_boot_mode)"
@@ -219,6 +218,7 @@ setup.generate_configuration() {
 		rescue_path="$(tui.select_one "Select the oversized partition reserved for rescue" "/dev/$rescue_dev" "${rescue_items[@]}")" ||
 			log.die "Invalid rescue partition selection."
 	fi
+	rescue_dev=${rescue_path#/dev/}
 
 	log.section "TPM integration"
 	enable_tpm="$(tui.toggle "Install TPM integration" "$enable_tpm")" || log.die "Invalid TPM toggle."
