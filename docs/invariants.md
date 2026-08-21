@@ -57,6 +57,9 @@ producer and consumer before altering one.
 - `fstab` is regenerated from scratch using the UUIDs of the encrypted Btrfs
   filesystem and ESP, then includes the configured root, data and swap
   subvolume entries.
+- Before any chroot operation, all configured data subvolumes are mounted at
+  their final target paths; existing mounts require exact mapper and `FSROOT`
+  validation before reuse.
 - Kali conversion validates `@`, `@home`, `@root`, `@usr@local`, `@var@log`
   and `@.snapshots`; it copies their root, home, root-account, local, cache and
   log data into the `@kali` layout, then deletes migrated top-level source

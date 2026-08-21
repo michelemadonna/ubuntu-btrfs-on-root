@@ -39,6 +39,9 @@ Windows partitions are contiguous and terminal; `MSR` is 16 MiB, `WINDOWS` is
 Installed persistent data and swap live inside LUKS2. The ESP and optional
 rescue environment are outside that encryption boundary. A migrated old boot
 partition is unused afterward unless explicitly reformatted for rescue.
+Before chroot operations, every configured data subvolume is mounted at its
+final target path so package installation and service hooks see the same layout
+as the booted system.
 
 ## Orchestrator and framework
 

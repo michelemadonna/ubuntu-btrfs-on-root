@@ -36,7 +36,10 @@ existing target suite trees are preserved. A target without both labels enters
 the destructive partitioning flow and stops after GPT, filesystems and LUKS2
 initialization; it leaves the target mapper open and Btrfs top level mounted,
 and the next execution validates and reuses them when present or opens/mounts
-them again when absent before performing the import.
+them again when absent before performing the import. After all source and
+separate-boot copies complete, the importer opens an interactive inspection
+shell with source and target still mounted; exiting that shell resumes
+finalization and the subsequent installation phases.
 
 For a newly initialized target with Windows reservation enabled, the GPT
 creation phase places `ROOT` before the contiguous terminal group `MSR`,
@@ -59,8 +62,9 @@ unmounted only when it is a mount point; its absence is non-fatal.
 5. Shrink Btrfs, unmount it, perform in-place LUKS2 reencryption, open mapper
    `root`, mount the new root and grow Btrfs.
 6. Write crypttab and regenerate `fstab` from the Btrfs root and ESP UUIDs,
-   including the root, EFI, data and swap entries; then prepare chroot bind
-   mounts.
+   including the root, EFI, data and swap entries. Mount `@home`, `@log`,
+   `@cache`, `@tmp`, `@libvirt`, `@docker` and `@swap` at their final target
+   paths, validating any existing mount, then prepare the chroot bind mounts.
 
 7. Copy the repository into the target and invoke `setup.sh //inner` in an
    isolated mount namespace.

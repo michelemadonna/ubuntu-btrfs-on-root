@@ -92,6 +92,15 @@ cross-disk-migration.available_root_mib() {
 	printf '%s\n' "$((disk_mib - esp_mib - rescue_mib - msr_mib - windows_mib - 1024 - layout_overhead_mib))"
 }
 
+cross-disk-migration.log_copy_inventory() {
+	local label=$1 path=$2 entries usage
+
+	[[ -d $path ]] || log.die "Copy inventory path is missing: $path"
+	entries="$(find "$path" -mindepth 1 -maxdepth 1 -printf '\n' | awk 'END { print NR + 0 }')"
+	usage="$(du -sh --apparent-size -- "$path" | awk '{ print $1 }')"
+	log.info "$label: path=$path, direct entries=$entries, apparent size=$usage"
+}
+
 cross-disk-migration.layout() {
 	local disk=$1 esp_mib=$2 root_size=$3 rescue_mib=$4 windows=$5
 	local disk_mib windows_mib=0 root_mib
@@ -245,7 +254,7 @@ cross-disk-migration.import_source() {
 
 	source_mount="$(mktemp -d /tmp/cross-disk-source.XXXXXX)"
 	target_mount="$mp"
-	common.require_commands awk blkid mount mountpoint umount btrfs mkfs.btrfs rsync cryptsetup find findmnt grep readlink
+	common.require_commands awk bash blkid mount mountpoint umount btrfs mkfs.btrfs rsync cryptsetup du find findmnt grep readlink
 	[[ $(blkid -c /dev/null -s TYPE -o value "/dev/$source_root") == btrfs ]] ||
 		log.die "Source root /dev/$source_root must contain Btrfs."
 	if [[ $suite_type == kali ]]; then
@@ -321,14 +330,24 @@ cross-disk-migration.import_source() {
 		log.info "Copy Kali $source_mount/@var@log -> $target_mount/$root_sub_vol/@log"
 		rsync -aHAXx --numeric-ids --info=progress2 "$source_mount/@var@log/." "$target_mount/$root_sub_vol/@log/"
 	else
-		log.info "Copy Ubuntu $source_mount -> $target_mount/$root_sub_vol/@ (root filesystem)"
-		rsync -aHAXx --numeric-ids --info=progress2 "$source_mount/." "$target_mount/$root_sub_vol/@/"
+		log.info "BEGIN Ubuntu root copy: $source_mount -> $target_mount/$root_sub_vol/@"
+		cross-disk-migration.log_copy_inventory "Ubuntu root source" "$source_mount"
+		rsync -aHAXx --numeric-ids --itemize-changes --info=progress2 "$source_mount/." "$target_mount/$root_sub_vol/@/"
+		cross-disk-migration.log_copy_inventory "Ubuntu root destination" "$target_mount/$root_sub_vol/@"
+		log.success "END Ubuntu root copy: $source_mount -> $target_mount/$root_sub_vol/@"
 		for name in home var/cache var/log; do
 			destination="$target_mount/$root_sub_vol/@$([[ $name == home ]] && printf home || [[ $name == var/cache ]] && printf cache || printf log)"
 			mkdir -p "$destination"
-			log.info "Move Ubuntu $target_mount/$root_sub_vol/@/$name -> $destination"
-			rsync -aHAXx --numeric-ids --info=progress2 "$target_mount/$root_sub_vol/@/$name/." "$destination/"
+			log.info "BEGIN Ubuntu data copy: $target_mount/$root_sub_vol/@/$name -> $destination"
+			cross-disk-migration.log_copy_inventory "Ubuntu $name source" "$target_mount/$root_sub_vol/@/$name"
+			if [[ $name == home && -z $(find "$target_mount/$root_sub_vol/@/$name" -mindepth 1 -print -quit) ]]; then
+				log.warn "Ubuntu home is already empty immediately after the root copy; no home data can be moved to $destination"
+			fi
+			rsync -aHAXx --numeric-ids --itemize-changes --info=progress2 "$target_mount/$root_sub_vol/@/$name/." "$destination/"
+			cross-disk-migration.log_copy_inventory "Ubuntu $name destination" "$destination"
+			log.success "END Ubuntu data copy: $target_mount/$root_sub_vol/@/$name -> $destination"
 			find "$target_mount/$root_sub_vol/@/$name" -mindepth 1 -maxdepth 1 -exec rm -Rf -- {} +
+			log.info "Removed migrated contents from $target_mount/$root_sub_vol/@/$name"
 		done
 	fi
 	log.info "Remove source snapshot directories before creating target Snapper profiles"
@@ -343,6 +362,19 @@ cross-disk-migration.import_source() {
 		umount "$source_boot_mount"
 		rmdir "$source_boot_mount"
 	fi
+	log.warn "Source import copy completed. Opening an inspection shell before continuing."
+	log.info "Source root: $source_mount"
+	log.info "Target Btrfs top level: $target_mount"
+	log.info "Target suite: $target_mount/$root_sub_vol"
+	log.info "Run 'exit' to continue the installation."
+	(
+		cd "$target_mount"
+		export MIGRATION_SOURCE_ROOT="$source_mount"
+		export MIGRATION_TARGET_TOP_LEVEL="$target_mount"
+		export MIGRATION_TARGET_SUITE="$target_mount/$root_sub_vol"
+		bash --noprofile --norc -i
+	)
+	log.info "Inspection shell closed; continue source import finalization"
 	umount "$source_mount"
 	rmdir "$source_mount"
 	umount "$target_mount"

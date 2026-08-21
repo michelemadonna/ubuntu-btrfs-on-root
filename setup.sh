@@ -876,10 +876,37 @@ setup.install_rescue_system() {
 	log.section_end
 }
 
-setup.prepare_chroot() {
+setup.ensure_target_subvolume_mount() {
+	local target_path=$1 subvolume=$2 options=$3
 	local mounted_source mounted_subvolume
 
+	mkdir -p "$mp$target_path"
+	if mountpoint -q "$mp$target_path"; then
+		mounted_source="$(findmnt -rn -M "$mp$target_path" -o SOURCE)"
+		mounted_source=${mounted_source%%\[*}
+		mounted_subvolume="$(findmnt -rn -M "$mp$target_path" -o FSROOT)"
+		[[ $(readlink -f -- "$mounted_source") == "$(readlink -f -- /dev/mapper/root)" ]] ||
+			log.die "Existing $mp$target_path mount uses $mounted_source instead of /dev/mapper/root."
+		[[ $mounted_subvolume == "/$subvolume" ]] ||
+			log.die "Existing $mp$target_path mount uses Btrfs path $mounted_subvolume instead of /$subvolume."
+		log.info "Reuse target subvolume $subvolume mounted at $mp$target_path"
+		return
+	fi
+	log.info "Mount target subvolume $subvolume at $mp$target_path"
+	mount -o "$options,subvol=$subvolume" /dev/mapper/root "$mp$target_path"
+}
+
+setup.prepare_chroot() {
+	local mounted_source
+
 	log.info "Prepare $mp for chroot"
+	setup.ensure_target_subvolume_mount /home "$root_sub_vol/@home" "$btrfs_options"
+	setup.ensure_target_subvolume_mount /var/log "$root_sub_vol/@log" "$btrfs_options"
+	setup.ensure_target_subvolume_mount /var/cache "$root_sub_vol/@cache" "$btrfs_options"
+	setup.ensure_target_subvolume_mount /tmp "$root_sub_vol/@tmp" "$btrfs_options"
+	setup.ensure_target_subvolume_mount /var/lib/libvirt "$root_sub_vol/@libvirt" 'defaults,ssd,discard=async,noatime,space_cache=v2'
+	setup.ensure_target_subvolume_mount /var/lib/docker "$root_sub_vol/@docker" 'defaults,ssd,discard=async,noatime,compress=zstd:1'
+	setup.ensure_target_subvolume_mount /swap "$root_sub_vol/@swap" 'defaults,noatime'
 	mountpoint -q "$mp/dev" || mount --rbind /dev "$mp/dev"
 	mount --make-rslave "$mp/dev"
 	mountpoint -q "$mp/proc" || mount -t proc proc "$mp/proc"
@@ -887,18 +914,6 @@ setup.prepare_chroot() {
 	mountpoint -q "$mp/sys" || mount --rbind /sys "$mp/sys"
 	mount --make-rslave "$mp/sys"
 	mountpoint -q "$mp/run" || mount -t tmpfs tmpfs "$mp/run"
-	if mountpoint -q "$mp/home"; then
-		mounted_source="$(findmnt -rn -M "$mp/home" -o SOURCE)"
-		mounted_source=${mounted_source%%\[*}
-		mounted_subvolume="$(findmnt -rn -M "$mp/home" -o FSROOT)"
-		[[ $(readlink -f -- "$mounted_source") == "$(readlink -f -- /dev/mapper/root)" ]] ||
-			log.die "Existing $mp/home mount uses $mounted_source instead of /dev/mapper/root."
-		[[ $mounted_subvolume == "/$root_sub_vol/@home" ]] ||
-			log.die "Existing $mp/home mount uses Btrfs path $mounted_subvolume instead of /$root_sub_vol/@home."
-		log.info "Reuse already-mounted home subvolume at $mp/home"
-	else
-		mount -o "$btrfs_options,subvol=$root_sub_vol/@home" /dev/mapper/root "$mp/home"
-	fi
 	if mountpoint -q "$mp/boot/efi"; then
 		mounted_source="$(setup.mounted_device "$mp/boot/efi" || true)"
 		[[ $mounted_source == "$(readlink -f -- "/dev/$efi_dev")" ]] ||

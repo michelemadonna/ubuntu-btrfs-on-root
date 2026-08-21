@@ -243,7 +243,8 @@ The main flow performs these operations:
 5. encrypts `/dev/sda3` in place as LUKS2 and mounts it as
    `/dev/mapper/root`;
 6. generates the target fstab and crypttab configuration;
-7. enters the installed system in a mount-isolated chroot;
+7. mounts every data subvolume at its final target path and enters the installed
+   system in a mount-isolated chroot;
 8. configures Secure Boot, rEFInd and fwupd;
 9. installs Snapper and the optional early-boot snapshot selector;
 10. configures kernel-install, dracut and ukify, then generates and verifies UKIs;
