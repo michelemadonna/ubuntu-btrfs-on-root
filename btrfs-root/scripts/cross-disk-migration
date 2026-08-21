@@ -98,6 +98,9 @@ cross-disk-migration.layout() {
 	if ((rescue_mib > 0)); then
 		printf '\t\tRESCUE:     %s MiB, GPT type 0700, label RESCUE/UBUNTU_LIVE, FAT32\n' "$rescue_mib"
 	fi
+	cat <<-EOF
+		ROOT:        ${root_mib} MiB, GPT type 8300, label ROOT, LUKS2
+	EOF
 	if [[ $windows == yes ]]; then
 		cat <<-EOF
 			MSR:         16 MiB, GPT type 0C01, label MSR
@@ -106,7 +109,6 @@ cross-disk-migration.layout() {
 		EOF
 	fi
 	cat <<-EOF
-		ROOT:        ${root_mib} MiB, GPT type 8300, label ROOT, LUKS2
 		Warning: all existing data and partition metadata on $disk will be destroyed.
 	EOF
 }
@@ -156,6 +158,16 @@ cross-disk-migration.partition_new_target() {
 		)
 		next=$((next + 1))
 	fi
+	if [[ $root_size == all && $windows != yes ]]; then
+		partition_args+=(
+			-n "${next}:0:0" -t "${next}:8300" -c "${next}:ROOT"
+		)
+	else
+		partition_args+=(
+			-n "${next}:0:+${root_mib}M" -t "${next}:8300" -c "${next}:ROOT"
+		)
+	fi
+	next=$((next + 1))
 	if [[ $windows == yes ]]; then
 		partition_args+=(
 			-n "${next}:0:+16M" -t "${next}:0C01" -c "${next}:MSR"
@@ -167,16 +179,6 @@ cross-disk-migration.partition_new_target() {
 		next=$((next + 1))
 		partition_args+=(
 			-n "${next}:0:+1024M" -t "${next}:2700" -c "${next}:WINRE"
-		)
-		next=$((next + 1))
-	fi
-	if [[ $root_size == all ]]; then
-		partition_args+=(
-			-n "${next}:0:0" -t "${next}:8300" -c "${next}:ROOT"
-		)
-	else
-		partition_args+=(
-			-n "${next}:0:+${root_mib}M" -t "${next}:8300" -c "${next}:ROOT"
 		)
 	fi
 	sgdisk -a 2048 "${partition_args[@]}" "$disk"
@@ -248,7 +250,7 @@ cross-disk-migration.import_source() {
 	fi
 	mountpoint -q "$target_mount" &&
 		log.die "$target_mount is already mounted but does not identify a completed import for $root_sub_vol/@."
-	mount /dev/mapper/root -o subvolid=5 "$target_mount"
+	mount /dev/mapper/root -o "$btrfs_options,subvolid=5" "$target_mount"
 	if [[ -e $target_mount/$root_sub_vol ]]; then
 		if cross-disk-migration.import_checkpoint_valid "$target_mount" || {
 			[[ -f $target_mount/$root_sub_vol/@/etc/fstab ]] &&
@@ -258,7 +260,7 @@ cross-disk-migration.import_source() {
 			umount "$source_mount"
 			rmdir "$source_mount"
 			umount "$target_mount"
-			mount /dev/mapper/root -o "subvol=$root_sub_vol/@" "$target_mount"
+			mount /dev/mapper/root -o "$btrfs_options,subvol=$root_sub_vol/@" "$target_mount"
 			return 0
 		fi
 		log.die "Target already contains the suite container $root_sub_vol."
@@ -278,22 +280,28 @@ cross-disk-migration.import_source() {
 		for name in @ @home @root @usr@local @var@log; do
 			[[ -d $source_mount/$name ]] || log.die "Kali source subvolume is missing: $name"
 		done
-		log.info "Copy Kali root subvolume into $root_sub_vol/@"
+		log.info "Copy Kali $source_mount/@ -> $target_mount/$root_sub_vol/@ (root filesystem)"
 		rsync -aHAXx --numeric-ids --info=progress2 "$source_mount/@/." "$target_mount/$root_sub_vol/@/"
 		mkdir -p "$target_mount/$root_sub_vol/@/root" "$target_mount/$root_sub_vol/@/usr/local"
+		log.info "Copy Kali $source_mount/@root -> $target_mount/$root_sub_vol/@/root"
 		rsync -aHAXx --numeric-ids --info=progress2 "$source_mount/@root/." "$target_mount/$root_sub_vol/@/root/"
+		log.info "Copy Kali $source_mount/@usr@local -> $target_mount/$root_sub_vol/@/usr/local"
 		rsync -aHAXx --numeric-ids --info=progress2 "$source_mount/@usr@local/." "$target_mount/$root_sub_vol/@/usr/local/"
+		log.info "Copy Kali $source_mount/@home -> $target_mount/$root_sub_vol/@home"
 		rsync -aHAXx --numeric-ids --info=progress2 "$source_mount/@home/." "$target_mount/$root_sub_vol/@home/"
 		if [[ -d $source_mount/@/var/cache ]]; then
+			log.info "Copy Kali $source_mount/@/var/cache -> $target_mount/$root_sub_vol/@cache"
 			rsync -aHAXx --numeric-ids --info=progress2 "$source_mount/@/var/cache/." "$target_mount/$root_sub_vol/@cache/"
 		fi
+		log.info "Copy Kali $source_mount/@var@log -> $target_mount/$root_sub_vol/@log"
 		rsync -aHAXx --numeric-ids --info=progress2 "$source_mount/@var@log/." "$target_mount/$root_sub_vol/@log/"
 	else
-		log.info "Copy Ubuntu root filesystem into $root_sub_vol/@"
+		log.info "Copy Ubuntu $source_mount -> $target_mount/$root_sub_vol/@ (root filesystem)"
 		rsync -aHAXx --numeric-ids --info=progress2 "$source_mount/." "$target_mount/$root_sub_vol/@/"
 		for name in home var/cache var/log; do
 			destination="$target_mount/$root_sub_vol/@$([[ $name == home ]] && printf home || [[ $name == var/cache ]] && printf cache || printf log)"
 			mkdir -p "$destination"
+			log.info "Split Ubuntu $target_mount/$root_sub_vol/@/$name -> $destination"
 			rsync -aHAXx --numeric-ids --info=progress2 "$target_mount/$root_sub_vol/@/$name/." "$destination/"
 			find "$target_mount/$root_sub_vol/@/$name" -mindepth 1 -maxdepth 1 -exec rm -Rf -- {} +
 		done
@@ -305,6 +313,7 @@ cross-disk-migration.import_source() {
 		source_boot_mount="$(mktemp -d /tmp/cross-disk-boot.XXXXXX)"
 		mount "/dev/$source_boot" "$source_boot_mount"
 		mkdir -p "$target_mount/$root_sub_vol/@/boot"
+		log.info "Copy separate boot $source_boot_mount -> $target_mount/$root_sub_vol/@/boot"
 		rsync -aHAXx --numeric-ids --info=progress2 "$source_boot_mount/." "$target_mount/$root_sub_vol/@/boot/"
 		umount "$source_boot_mount"
 		rmdir "$source_boot_mount"
@@ -312,6 +321,6 @@ cross-disk-migration.import_source() {
 	umount "$source_mount"
 	rmdir "$source_mount"
 	umount "$target_mount"
-	mount /dev/mapper/root -o "subvol=$root_sub_vol/@" "$target_mount"
+	mount /dev/mapper/root -o "$btrfs_options,subvol=$root_sub_vol/@" "$target_mount"
 	log.success "Source root imported into $root_sub_vol/@"
 }

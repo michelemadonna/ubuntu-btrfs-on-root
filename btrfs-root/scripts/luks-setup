@@ -136,7 +136,7 @@ luks-setup.run() {
 	printf '%s\n' "$PASSPHRASE" |
 		cryptsetup open "$source_device" root
 	log.info "Mount normal root subvolume $root_sub_vol/@ from $mapper_device at $mp"
-	mount "$mapper_device" -o "subvol=$root_sub_vol/@" "$mp"
+	mount "$mapper_device" -o "$btrfs_options,subvol=$root_sub_vol/@" "$mp"
 	log.info "Grow the Btrfs filesystem to the maximum size exposed by the mapper"
 	btrfs filesystem resize max "$mp"
 

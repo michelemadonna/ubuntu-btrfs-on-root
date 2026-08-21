@@ -105,7 +105,8 @@ tui-test.generated_config_contract() {
 	rg -q 'Select the installation mode' "$repository_root/setup.sh"
 	rg -q 'setup\.show_target_inventory' "$repository_root/setup.sh"
 	rg -q 'setup\.ensure_live_storage_tools' "$repository_root/setup.sh"
-	rg -q 'apt-get install -y btrfs-progs rsync' "$repository_root/setup.sh"
+	rg -q 'apt-get install -y btrfs-progs cryptsetup rsync' "$repository_root/setup.sh"
+	rg -q 'command -v cryptsetup' "$repository_root/setup.sh"
 	rg -q 'Target disk inventory' "$repository_root/setup.sh"
 	rg -q 'Btrfs top-level content' "$repository_root/setup.sh"
 	rg -q "'in_place|In Place Migration'" "$repository_root/setup.sh"
@@ -165,6 +166,19 @@ tui-test.generated_config_contract() {
 	rg -q 'migration_mode' "$repository_root/setup.sh"
 	rg -q 'PARTLABEL' "$repository_root/btrfs-root/scripts/cross-disk-migration"
 	rg -q 'sgdisk --zap-all' "$repository_root/btrfs-root/scripts/cross-disk-migration"
+	local partition_file="$repository_root/btrfs-root/scripts/cross-disk-migration" root_line msr_line windows_line winre_line
+	root_line="$(rg -n 'c \"\$\{next\}:ROOT' "$partition_file" | head -1 | cut -d: -f1)"
+	msr_line="$(rg -n 'c \"\$\{next\}:MSR' "$partition_file" | head -1 | cut -d: -f1)"
+	windows_line="$(rg -n 'c \"\$\{next\}:WINDOWS' "$partition_file" | head -1 | cut -d: -f1)"
+	winre_line="$(rg -n 'c \"\$\{next\}:WINRE' "$partition_file" | head -1 | cut -d: -f1)"
+	[[ -n $root_line && -n $msr_line && -n $windows_line && -n $winre_line ]] || {
+		printf 'Expected ROOT and Windows partition definitions.\n' >&2
+		return 1
+	}
+	((root_line < msr_line && msr_line < windows_line && windows_line < winre_line)) || {
+		printf 'ROOT and Windows partitions must be defined in disk order.\n' >&2
+		return 1
+	}
 	rg -q 'luksFormat.*--label ROOT' "$repository_root/btrfs-root/scripts/cross-disk-migration"
 	rg -q 'mkfs\.btrfs /dev/mapper/root' "$repository_root/btrfs-root/scripts/cross-disk-migration"
 	if rg -q 'root-initialize' "$repository_root/btrfs-root/scripts/cross-disk-migration"; then

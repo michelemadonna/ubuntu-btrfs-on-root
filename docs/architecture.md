@@ -28,6 +28,11 @@ partition label `ESP` and one label `ROOT`. A new target can instead be
 partitioned, formatted and initialized as LUKS2; the operation ends after the
 destructive initialization and requires a second setup run for migration.
 
+When Windows reservation is enabled for a new target, partition ownership and
+order are `ESP`, optional `RESCUE`, `ROOT`, `MSR`, `WINDOWS`, `WINRE`. The
+Windows partitions are contiguous and terminal; `MSR` is 16 MiB, `WINDOWS` is
+65,536 MiB and `WINRE` is 1,024 MiB.
+
 Installed persistent data and swap live inside LUKS2. The ESP and optional
 rescue environment are outside that encryption boundary. A migrated old boot
 partition is unused afterward unless explicitly reformatted for rescue.

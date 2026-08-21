@@ -112,7 +112,7 @@ setup.detect_source_distribution() {
 setup.detect_cross_disk_distribution() {
 	local source_root=$1 source_mount
 	source_mount="$(mktemp -d /tmp/cross-disk-os-release.XXXXXX)"
-	mount -o ro,subvolid=5 "/dev/$source_root" "$source_mount" || {
+	mount -o subvolid=5 "/dev/$source_root" "$source_mount" || {
 		rmdir "$source_mount"
 		log.die "Unable to mount source Btrfs filesystem read-only for distribution detection."
 	}
@@ -761,14 +761,14 @@ setup.parse_arguments() {
 }
 
 setup.ensure_live_storage_tools() {
-	if command -v btrfs >/dev/null 2>&1 && command -v rsync >/dev/null 2>&1; then
+	if command -v btrfs >/dev/null 2>&1 && command -v cryptsetup >/dev/null 2>&1 && command -v rsync >/dev/null 2>&1; then
 		return 0
 	fi
 	common.require_commands apt-get
 	log.info "Install live-session storage tools required by discovery and migration"
 	apt-get update
-	apt-get install -y btrfs-progs rsync
-	common.require_commands btrfs rsync
+	apt-get install -y btrfs-progs cryptsetup rsync
+	common.require_commands btrfs cryptsetup rsync
 }
 
 setup.prepare_target() {
@@ -860,7 +860,7 @@ setup.prepare_chroot() {
 			log.die "Existing $mp/home mount uses Btrfs path $mounted_subvolume instead of /$root_sub_vol/@home."
 		log.info "Reuse already-mounted home subvolume at $mp/home"
 	else
-		mount -o "subvol=$root_sub_vol/@home" /dev/mapper/root "$mp/home"
+		mount -o "$btrfs_options,subvol=$root_sub_vol/@home" /dev/mapper/root "$mp/home"
 	fi
 	if mountpoint -q "$mp/boot/efi"; then
 		mounted_source="$(setup.mounted_device "$mp/boot/efi" || true)"

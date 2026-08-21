@@ -115,16 +115,17 @@ preconditions rather than cleanup work.
 secret-bearing. `setup.conf.example` is reference data only; wizard defaults
 remain built into `setup.sh`.
 
-The wizard discovers mounted Ubuntu targets or selects Kali target partitions,
-groups prompts, uses hidden secret input and yes/no toggles, validates its
-generated file, displays a non-secret summary and requires confirmation before
-installation. It does not prompt for `mp`, `keyslot_size`, `btrfs_options` or
-experimental sbctl append behavior.
+The wizard discovers the source installation, reads its `ID` and
+`VERSION_CODENAME` from `/etc/os-release`, groups prompts, uses hidden secret
+input and yes/no toggles, validates its generated file, displays a non-secret
+summary and requires confirmation before installation. It explicitly prompts
+for `root_sub_vol` with `@$suite` as the default. It does not prompt for `mp`,
+`keyslot_size`, `btrfs_options` or experimental sbctl append behavior.
 
 Only these closed selections are supported currently:
 
-- `suite`: `resolute`, `noble`, `kali`;
-- `suite_type`: `ubuntu`, `kali`; selecting suite `kali` forces type `kali`;
+- `suite`: source `/etc/os-release` `VERSION_CODENAME`;
+- `suite_type`: source `/etc/os-release` `ID` (`ubuntu` or `kali`);
 - `secure_boot_enrollment`: `sbctl`, `mok`;
 - `secure_boot_mode`: detected `setup`, `enabled`, `disabled`, `unknown`;
 - `EXPERIMENTAL_SBCTL_APPEND`: `true`, `false`.

@@ -28,6 +28,10 @@ requested GPT layout and a Btrfs filesystem inside LUKS2 `ROOT`; setup then stop
 to perform the migration. An initialized target is detected from its `ESP` and
 `ROOT` labels. Existing target suite subvolumes are never overwritten.
 
+When Windows space is reserved during new-target initialization, the created
+layout ends with one contiguous Windows group: `ROOT`, `MSR`, `WINDOWS`, then
+`WINRE`. Without Windows reservation, `ROOT` remains the final data partition.
+
 > [!WARNING]
 > Setup reformats the rescue partition, restructures the Btrfs filesystem,
 > encrypts the root partition in place and may enroll Secure Boot keys. A wrong
@@ -114,7 +118,7 @@ disk is always selected explicitly. Every prompt shows the corresponding support
 into `setup.sh`; the wizard does not depend on `setup.conf.example` being
 present. After target selection, the wizard lists every target partition and
 shows the Btrfs top-level subvolumes/content when a Btrfs root is available.
-Inputs are grouped into storage, distribution, encryption
+Inputs are grouped into storage, source distribution, encryption
 and boot security, and optional-feature sections. The wizard first lists block
 devices, then lists only the partitions belonging to the selected device for
 root selection. When `/target`, `/target/boot/efi` and an exact separate
@@ -125,8 +129,10 @@ enabled, an adequately sized `boot_dev` is suggested as the default rescue
 target after its files are migrated. If no boot partition exists or the user
 declines its reuse, the wizard asks for another partition. When rescue is
 disabled, no rescue partition is requested and `rescue_dev` remains empty.
-`suite` supports `resolute`, `noble` and `kali`; `suite_type` supports `ubuntu`
-and `kali`. Kali installations do not create a rescue system. Every `yes`/`no`
+The wizard reads `ID` and `VERSION_CODENAME` from the source installation's
+`/etc/os-release` into `suite_type` and `suite`; it does not ask the user to
+select either value. It explicitly asks for `root_sub_vol`, defaulting to
+`@$suite`, and persists the value entered. Kali installations do not create a rescue system. Every `yes`/`no`
 setting is presented as a toggle and normalized to one of those two literal
 values. Secrets use hidden input. The generated file is
 written atomically with mode `0600`, then checked for Bash syntax, required
@@ -171,12 +177,13 @@ Important current options are:
 | `rescue_dev` | `sda1` | partition that setup will reformat for rescue |
 | `install_rescue` | `yes` | create the persistent rescue system during the main setup |
 | `mp` | `/mnt/root` | target mount point used during conversion |
-| `suite` | `resolute` | UKI token and Btrfs distribution container; produces `@resolute/@` |
-| `suite_type` | `ubuntu` | distribution icon name used by rEFInd, such as `os_ubuntu.png` |
+| `suite` | source `VERSION_CODENAME` | UKI token and Btrfs distribution container; for example `noble` produces `@noble/@` |
+| `suite_type` | source `ID` | distribution icon name used by rEFInd, such as `os_ubuntu.png` |
+| `root_sub_vol` | `@$suite` | explicitly entered Btrfs distribution container, such as `@noble` |
 | `secure_boot_mode` | detected | temporary firmware-state snapshot: `setup`, `enabled`, `disabled` or `unknown` |
 | `secure_boot_enrollment` | `sbctl` | explicit trust-path choice: `sbctl` or `mok` |
 | `EXPERIMENTAL_SBCTL_APPEND` | `false` | opt into the experimental partial/append preservation of existing EFI trust material |
-| `btrfs_options` | repository default | mount options embedded in fstab and the UKI command line |
+| `btrfs_options` | repository default | mount options used during migration and embedded in fstab and the UKI command line |
 | `swap_size` | `4G` | Btrfs swap-file size |
 | `iter_time` | `3000` | Argon2id PBKDF calibration target in milliseconds |
 | `enlarge` | `no` | enlarge the root partition before conversion only when set to `yes` |
@@ -281,7 +288,8 @@ This allows multiple Ubuntu releases to coexist in the same encrypted Btrfs
 filesystem without nesting one distribution below another. Set `$suite` for the
 distribution/release being installed: `suite=noble` produces `@noble/@`, while
 `suite=resolute` produces `@resolute/@`. Each suite needs its own coherent fstab,
-UKI and rEFInd entry. Setup configures the suite selected for that invocation.
+UKI and rEFInd entry. Setup configures the source suite and the explicitly
+confirmed root container for that invocation.
 
 Snapper data is isolated with the suite as well. For example:
 

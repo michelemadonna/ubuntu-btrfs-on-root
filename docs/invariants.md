@@ -12,10 +12,14 @@ producer and consumer before altering one.
   devices and validated for expected type/source before mutation.
 - Cross-disk targets are recognized only by exactly one GPT `ESP` and `ROOT`
   partition label; source and target disks must be distinct.
-- Cross-disk import creates only the selected suite container and never deletes
+- Cross-disk import creates only the explicitly configured suite container and never deletes
   or overwrites pre-existing target suite containers.
+- A new target with Windows reservation places `MSR`, `WINDOWS` and `WINRE`
+  contiguously after `ROOT`, with `WINRE` as the final partition.
 - Root starts as unencrypted Btrfs mounted at `mp`; the ESP is FAT and receives
   label `ESP` without reformatting.
+- Target Btrfs mounts used during migration include the configured
+  `btrfs_options`; these are mount options and are not passed to `mkfs.btrfs`.
 - Kali mode may start with no filesystems mounted; setup mounts the configured
   root, ESP and optional separate `/boot` before conversion.
 - An exact separate mount at `/target/boot` is optional and never created for
@@ -140,8 +144,9 @@ producer and consumer before altering one.
 
 - Generated `setup.conf` is shell input, mode 0600 and secret-bearing. Wizard
   defaults do not depend on `setup.conf.example`.
-- Wizard yes/no values remain literal toggles; suite and enrollment selections
-  remain closed sets documented in `AGENTS.md`.
+- Wizard yes/no values remain literal toggles; `suite` and `suite_type` are
+  derived from the source `/etc/os-release`, while `root_sub_vol` is explicitly
+  entered with `@$suite` as its default.
 - `pre_download`, `enable_tpm` and `install_rescue` activate only on literal
   `yes`. `sb_key_dir` remains unused.
 - Declining final wizard confirmation retains configuration and starts no

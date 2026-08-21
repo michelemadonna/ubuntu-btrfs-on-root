@@ -21,16 +21,23 @@ The wizard then:
 2. uses `/target` as `mp` when mounted and offers detected devices as defaults;
 3. asks whether rescue is required, suggesting `boot_dev` only when it can hold
    the live source, reserve and `writable` partition;
-4. records suite, encryption, explicit Secure Boot path and optional features;
+4. reads `ID` and `VERSION_CODENAME` from the source `/etc/os-release`, asks
+   explicitly for `root_sub_vol` with `@$suite` as its default, then records
+   encryption, explicit Secure Boot path and optional features;
 5. writes mode-0600 shell-quoted configuration, validates it, shows a
    non-secret summary and asks for final confirmation.
 
 Before the normal source-disk prompts, the wizard selects a target disk. An
-`ESP` plus `ROOT` GPT label selects cross-disk import: the target LUKS volume is
-opened, a new `@$suite` tree is populated from the selected Btrfs source, and
+`ESP` plus `ROOT` GPT label selects cross-disk import: the source Btrfs
+filesystem is mounted read-only to read `/etc/os-release`, the target LUKS volume
+is opened, a new `$root_sub_vol` tree is populated from the selected Btrfs source, and
 existing target suite trees are preserved. A target without both labels enters
 the destructive partitioning flow and stops after GPT, filesystems and LUKS2
 initialization; the next execution performs the import.
+
+For a newly initialized target with Windows reservation enabled, the GPT
+creation phase places `ROOT` before the contiguous terminal group `MSR`,
+`WINDOWS` and `WINRE`.
 
 An exact separate `/target/boot` mount may be absent. `/target/cdrom` is
 unmounted only when it is a mount point; its absence is non-fatal.

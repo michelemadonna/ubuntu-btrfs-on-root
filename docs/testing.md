@@ -95,8 +95,8 @@ Package names installed/pre-downloaded by setup include providers such as
 `dosfstools`, `e2fsprogs`, `sbsigntool`, `systemd-ukify`, `tpm2-tools`,
 `tpm2-tss`, `refind`, `fwupd`, `snapper`, `inotify-tools`, `dracut` and build
 dependencies.
-Availability still depends on the selected distribution, suite and dependency
-fallback paths.
+Availability still depends on the source distribution and suite read from
+`/etc/os-release`, and on dependency fallback paths.
 
 ## Development tools used for repository validation
 
