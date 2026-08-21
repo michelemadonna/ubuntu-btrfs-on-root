@@ -1063,6 +1063,24 @@ setup.restore_chroot_files() {
 	fi
 }
 
+setup.remove_target_installer() {
+	local target_repository="$mp/root/$repository_name"
+
+	[[ $repository_name != . && $repository_name != .. && $repository_name != */* ]] ||
+		log.die "Unsafe installer repository name: $repository_name"
+	if [[ ! -e $target_repository && ! -L $target_repository ]]; then
+		log.info "Target installer directory is already absent: $target_repository"
+		return 0
+	fi
+	[[ -f $target_repository/$script_name ]] ||
+		log.die "Refusing to remove unexpected target directory without $script_name: $target_repository"
+	log.info "Remove installation scripts from target: $target_repository"
+	rm -Rf -- "$target_repository"
+	[[ ! -e $target_repository && ! -L $target_repository ]] ||
+		log.die "Unable to remove target installer directory: $target_repository"
+	log.success "Installation scripts removed from target"
+}
+
 setup.unmount_everything() {
 	local lazy_fallback="${1:-false}"
 	local target
@@ -1157,6 +1175,7 @@ setup.main() {
 		log.info "Persistent rescue-system creation was not requested"
 	fi
 	setup.restore_chroot_files
+	setup.remove_target_installer
 	cleanup_required=false
 	trap - EXIT
 	log.info "Finished; target filesystems and the root mapper remain mounted"

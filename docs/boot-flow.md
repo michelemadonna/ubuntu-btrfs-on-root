@@ -78,8 +78,10 @@ unmounted only when it is a mount point; its absence is non-fatal.
 7. Optionally install TPM support without enrolling a LUKS token.
 
 After chroot return, the outer phase creates rescue only when requested. It then
-restores temporary resolver/service-policy files. On success it deliberately
-leaves target mounts and `/dev/mapper/root` open.
+restores temporary resolver/service-policy files and removes the copied
+installer repository from the target root account. On success it deliberately
+leaves target mounts and `/dev/mapper/root` open. A failed installation retains
+the copied repository for diagnosis and resume.
 
 After successful source import, storage conversion, Secure Boot, snapshot
 management, UKI generation and rescue creation, setup atomically records a
