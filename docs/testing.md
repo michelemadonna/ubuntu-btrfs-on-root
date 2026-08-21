@@ -18,37 +18,13 @@ Dracut sources hook files through `/bin/sh` regardless of their shebang. Run
 `dash -n` on sourced hooks as well; function names and syntax must therefore be
 accepted by Dash even when the hook file declares Bash.
 
-Run relevant tests directly from the repository root:
-
-```bash
-for test_file in tests/unit/*_test.sh; do
-    bash "$test_file"
-done
-```
-
 Then run `git diff --check`, inspect the full diff and search for credentials,
 private keys and unintended device paths.
 
 `tests/validate.sh` is not authoritative: its root calculation currently walks
 above this repository, it selects only `*.sh`, misses extensionless commands and
-does not execute the unit tests.
-
-## Unit-test coverage
-
-| Test | Current focus |
-| --- | --- |
-| `common_test.sh` | framework and logging |
-| `tui_test.sh` | prompts, defaults and generated configuration contract |
-| `btrfs_root_test.sh` | subvolume paths, Kali cleanup, fstab and storage summaries |
-| `rescue_test.sh` | sizing, persistence and optional orchestration |
-| `secure_boot_test.sh` | trust-path selection, certificate export and sbctl contract |
-| `snapshot_management_test.sh` | distro menu configuration, B/b trigger and installed artifacts |
-| `uki_test.sh` | command line, UKI and kernel-hook behavior |
-| `tpm_test.sh` | TPM configuration and enrollment argv |
-
-Prefer fixtures and command doubles for transformations, path selection,
-configuration rendering, ordering and failure propagation. Never require root
-for logic that can be isolated.
+is intentionally limited to static validation. This repository contains no
+unit-test suite.
 
 ## Artifact checks
 
@@ -101,7 +77,7 @@ Availability still depends on the source distribution and suite read from
 
 ## Development tools used for repository validation
 
-- `bash` for parsing and unit tests;
+- `bash` for syntax parsing;
 - ShellCheck for static shell analysis;
 - shfmt for formatting conformance;
 - ripgrep (`rg`) for complete file/text discovery;
@@ -124,13 +100,12 @@ credentials and exercise:
 8. successful setup leaving target mounts and mapper open.
 
 The environment must tolerate partition formatting, in-place encryption and
-firmware/MOK changes. Static and mocked tests cannot establish bootability.
+firmware/MOK changes. Static checks cannot establish bootability.
 
 ## Reporting evidence
 
 - **verified**: directly observed in the stated environment;
 - **statically validated**: syntax/lint/format check passed;
-- **unit tested**: non-privileged test passed;
 - **inferred**: follows from code inspection only;
 - **not tested**: requires destructive hardware, firmware or reboot testing.
 

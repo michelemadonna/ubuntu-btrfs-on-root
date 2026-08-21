@@ -162,12 +162,14 @@ summarize every modification or provide per-file diffs; report only the outcome,
 important caveats and failed validation.
 
 For every modified shell file, including extensionless executables, run
-`bash -n`, ShellCheck and `shfmt -d`, then relevant unit tests. Do not rely on
-`tests/validate.sh` alone; its coverage is incomplete. Inspect the final diff
-for secrets, private keys and boot/security regressions.
+`bash -n`, ShellCheck and `shfmt -d`. Unit tests are intentionally not part of
+this repository. Do not rely on `tests/validate.sh` alone; its coverage is
+incomplete. Inspect the final diff for secrets, private keys and boot/security
+regressions.
 
-Never describe static or mocked checks as proof of boot, reencryption, firmware,
-MOK or TPM behavior. Use the evidence labels defined in `docs/testing.md`.
+Never describe static checks or artifact inspection as proof of boot,
+reencryption, firmware, MOK or TPM behavior. Use the evidence labels defined in
+`docs/testing.md`.
 
 The repository is GPL-3.0-only. Preserve `LICENSE` and follow `SECURITY.md` for
 private vulnerability reports.

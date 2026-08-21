@@ -595,14 +595,14 @@ installer still requires typing the exact target device before making changes.
 ## Safety and validation
 
 Never test the installation flow against a workstation disk merely to validate
-a code change. Static checks, mocked unit tests and artifact inspection are the
-safe default. End-to-end validation requires a dedicated UEFI machine or VM
-with disposable disks and, for TPM coverage, a dedicated or virtual TPM.
+a code change. Static checks and artifact inspection are the safe default.
+End-to-end validation requires a dedicated UEFI machine or VM with disposable
+disks and, for TPM coverage, a dedicated or virtual TPM.
 
 The current `tests/validate.sh` is not a complete repository validator: it does
-not cover every extensionless shell executable and does not run the unit suite.
-See [docs/testing.md](docs/testing.md) for the actual validation scope and known
-limitations. Security and boot assumptions are listed in
+not cover every extensionless shell executable. The repository intentionally
+contains no unit-test suite. See [docs/testing.md](docs/testing.md) for the
+actual validation scope and known limitations. Security and boot assumptions are listed in
 [docs/invariants.md](docs/invariants.md).
 
 ## Repository layout
@@ -618,7 +618,7 @@ limitations. Security and boot assumptions are listed in
 ├── btrfs-snapshots-mng/     Snapper and early-boot snapshot selection
 ├── uki/                     kernel-install, dracut and ukify integration
 ├── tpm/                     TPM configuration and standalone commands
-├── tests/                   static helper and non-destructive unit tests
+├── tests/                   non-destructive static validation helper
 └── docs/                    architecture, boot flow, invariants and testing
 ```
 
