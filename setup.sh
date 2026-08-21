@@ -88,6 +88,39 @@ setup.mounted_device() {
 	readlink -f -- "$source"
 }
 
+setup.read_os_release_value() {
+	local file=$1 key=$2 value
+	value="$(awk -v key="$key" '$0 ~ "^" key "=" { value = substr($0, index($0, "=") + 1); if (value ~ /^\".*\"$/ || value ~ /^\047.*\047$/) value = substr(value, 2, length(value) - 2); print value; exit }' "$file")"
+	[[ -n $value ]] || log.die "Missing $key in $file."
+	printf '%s\n' "$value"
+}
+
+setup.detect_source_distribution() {
+	local root=$1 os_release
+	if [[ -r $root/etc/os-release ]]; then
+		os_release=$root/etc/os-release
+	elif [[ -r $root/@/etc/os-release ]]; then
+		os_release=$root/@/etc/os-release
+	else log.die "Unable to find /etc/os-release in source root $root."; fi
+	suite_type="$(setup.read_os_release_value "$os_release" ID)"
+	suite="$(setup.read_os_release_value "$os_release" VERSION_CODENAME)"
+	[[ $suite_type == ubuntu || $suite_type == kali ]] || log.die "Unsupported source distribution ID: $suite_type."
+	[[ $suite =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Source VERSION_CODENAME is invalid: $suite."
+	log.info "Detected source distribution: $suite_type $suite"
+}
+
+setup.detect_cross_disk_distribution() {
+	local source_root=$1 source_mount
+	source_mount="$(mktemp -d /tmp/cross-disk-os-release.XXXXXX)"
+	mount -o ro,subvolid=5 "/dev/$source_root" "$source_mount" || {
+		rmdir "$source_mount"
+		log.die "Unable to mount source Btrfs filesystem read-only for distribution detection."
+	}
+	setup.detect_source_distribution "$source_mount"
+	umount "$source_mount"
+	rmdir "$source_mount"
+}
+
 setup.minimum_rescue_size_mib() {
 	local source_directory=${1:-/cdrom}
 	local source_size_mib=0
@@ -269,14 +302,15 @@ setup.generate_configuration() {
 	local disk target_disk default_disk root_path efi_path boot_path rescue_path name type size detail confirmation config_mode config_name
 	local detected_root_path detected_efi_path detected_boot_path boot_default reuse_boot_as_rescue=no install_rescue=yes rescue_filesystem_label=''
 	local minimum_rescue_mib boot_size_mib
-	local root_dev=sda3 efi_dev=sda2 boot_dev='' rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu
+	local root_dev=sda3 efi_dev=sda2 boot_dev='' rescue_dev=sda1 iter_time=3000 swap_size=4G suite='' suite_type=''
+	local root_sub_vol=''
 	local source_root_dev='' source_boot_dev='' target_root_dev='' target_efi_dev='' migration_mode=in_place install_mode=in_place sbctl_import_keyroot=''
 	local PASSPHRASE=password mok_pin='' secure_boot_enrollment=sbctl secure_boot_mode EXPERIMENTAL_SBCTL_APPEND=false
 	local pre_download=yes enable_tpm=yes snapshot_menu=yes enlarge=no snapshot_menu_pin=yes snapshot_menu_pin_value=123456
 	local mp=/mnt/root keyslot_size=32m btrfs_options='defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1'
 	local -a disk_items=() partition_items=() efi_items=() boot_items=() rescue_items=()
 
-	common.require_commands bash blockdev du find findmnt grep lsblk mktemp mv od readlink stat tr
+	common.require_commands awk bash blockdev du find findmnt grep lsblk mktemp mount mv od readlink stat tr umount
 	[[ -r $TUI_INPUT_DEVICE ]] || log.die "Interactive terminal is unavailable: $TUI_INPUT_DEVICE"
 	log.section "Guided setup.conf creation"
 	log.warn "This procedure is intended only for a freshly installed Ubuntu system created from the live environment."
@@ -385,6 +419,11 @@ setup.generate_configuration() {
 		log.die "Invalid root partition selection."
 	source_root_dev=${root_path#/dev/}
 	if [[ $install_mode == in_place ]]; then
+		setup.detect_source_distribution /target
+	else
+		setup.detect_cross_disk_distribution "$source_root_dev"
+	fi
+	if [[ $install_mode == in_place ]]; then
 		for detail in "${partition_items[@]}"; do
 			[[ ${detail%%|*} == "$root_path" ]] || efi_items+=("$detail")
 		done
@@ -420,16 +459,9 @@ setup.generate_configuration() {
 	[[ -n $PASSPHRASE ]] || log.die "LUKS passphrase cannot be empty."
 
 	log.section "Distribution configuration"
-	suite_type="$(tui.select_one "Select the distribution type used for the rEFInd icon" "$suite_type" 'ubuntu|Ubuntu' 'kali|Kali Linux')" ||
-		log.die "Invalid distribution type selection."
-	if [[ $suite_type == kali ]]; then
-		suite=kali
-	else
-		suite="$(tui.select_one "Select the Ubuntu suite/release" "$suite" 'resolute|Ubuntu Resolute' 'noble|Ubuntu Noble')" ||
-			log.die "Invalid Ubuntu suite selection."
-	fi
-	[[ $suite =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Suite must be a safe lowercase identifier."
-	[[ $suite_type =~ ^[a-z0-9][a-z0-9._-]*$ ]] || log.die "Distribution icon identifier is invalid."
+	root_sub_vol="$(tui.input "Btrfs root subvolume container" "@$suite")"
+	[[ $root_sub_vol != /* && $root_sub_vol != *..* && $root_sub_vol =~ ^[a-zA-Z0-9_@./-]+$ ]] ||
+		log.die "Btrfs root subvolume container must be a safe relative path."
 
 	if [[ $migration_mode == cross_disk ]]; then
 		root_dev=$target_root_dev
@@ -553,7 +585,7 @@ setup.generate_configuration() {
 	setup.write_config_value "$temporary_config" EXPERIMENTAL_SBCTL_APPEND "$EXPERIMENTAL_SBCTL_APPEND"
 	setup.write_config_value "$temporary_config" PASSPHRASE "$PASSPHRASE"
 	setup.write_config_value "$temporary_config" pre_download "$pre_download"
-	setup.write_config_value "$temporary_config" root_sub_vol "@$suite"
+	setup.write_config_value "$temporary_config" root_sub_vol "$root_sub_vol"
 	setup.write_config_value "$temporary_config" enable_tpm "$enable_tpm"
 	setup.write_config_value "$temporary_config" snapshot_menu "$snapshot_menu"
 	setup.write_config_value "$temporary_config" snapshot_menu_pin "$snapshot_menu_pin"

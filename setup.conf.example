@@ -11,8 +11,9 @@ export iter_time="3000"
 export enlarge=no
 export swap_size="4G"
 export btrfs_options="defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1" #lsm=landlock,lockdown,yama,integrity,apparmor,bpf audit=1 audit_backlog_limit=256
-export suite="resolute"
-export suite_type="ubuntu" # ubuntu or kali; Kali forces install_rescue=no
+# Derived from the source installation's /etc/os-release.
+export suite="noble"
+export suite_type="ubuntu"
 export secure_boot_mode="unknown"
 export secure_boot_enrollment="sbctl"
 export EXPERIMENTAL_SBCTL_APPEND="false"

@@ -63,7 +63,7 @@ tui-test.generated_config_contract() {
 		printf 'setup.sh must not depend on setup.conf.example\n' >&2
 		return 1
 	fi
-	rg -q "local root_dev=sda3 efi_dev=sda2 boot_dev='' rescue_dev=sda1 iter_time=3000 swap_size=4G suite=resolute suite_type=ubuntu" "$repository_root/setup.sh"
+	rg -q "local root_dev=sda3 efi_dev=sda2 boot_dev='' rescue_dev=sda1 iter_time=3000 swap_size=4G suite='' suite_type=''" "$repository_root/setup.sh"
 	rg -q 'setup\.mounted_device /target' "$repository_root/setup.sh"
 	rg -q 'setup\.mounted_device /target/boot/efi' "$repository_root/setup.sh"
 	rg -q 'setup\.mounted_device /target/boot' "$repository_root/setup.sh"
@@ -88,9 +88,15 @@ tui-test.generated_config_contract() {
 	rg -q 'setup\.write_config_value "\$temporary_config" mp "\$mp"' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" keyslot_size "\$keyslot_size"' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" btrfs_options "\$btrfs_options"' "$repository_root/setup.sh"
-	rg -q "suite_type=\"\$\(tui\.select_one.*'ubuntu|Ubuntu' 'kali|Kali Linux'" "$repository_root/setup.sh"
-	rg -q "'resolute|Ubuntu Resolute' 'noble|Ubuntu Noble'" "$repository_root/setup.sh"
-	rg -q 'suite=kali' "$repository_root/setup.sh"
+	rg -q 'setup\.detect_source_distribution' "$repository_root/setup.sh"
+	rg -q 'setup\.read_os_release_value' "$repository_root/setup.sh"
+	rg -q 'VERSION_CODENAME' "$repository_root/setup.sh"
+	if rg -q 'Select the distribution type used|Select the Ubuntu suite/release' "$repository_root/setup.sh"; then
+		printf 'Distribution values must not be selected manually.\n' >&2
+		return 1
+	fi
+	rg -q 'Btrfs root subvolume container' "$repository_root/setup.sh"
+	rg -q 'root_sub_vol "@\$suite"' "$repository_root/setup.sh"
 	rg -q 'not suitable for converting an existing production system' "$repository_root/setup.sh"
 	rg -q "'ubuntu|Ubuntu' 'kali|Kali Linux'" "$repository_root/setup.sh"
 	rg -q 'suite_type == kali' "$repository_root/setup.sh"
