@@ -254,7 +254,7 @@ cross-disk-migration.import_source() {
 
 	source_mount="$(mktemp -d /tmp/cross-disk-source.XXXXXX)"
 	target_mount="$mp"
-	common.require_commands awk bash blkid mount mountpoint umount btrfs mkfs.btrfs rsync cryptsetup du find findmnt grep readlink
+	common.require_commands awk blkid mount mountpoint umount btrfs mkfs.btrfs rsync cryptsetup du find findmnt grep readlink
 	[[ $(blkid -c /dev/null -s TYPE -o value "/dev/$source_root") == btrfs ]] ||
 		log.die "Source root /dev/$source_root must contain Btrfs."
 	if [[ $suite_type == kali ]]; then
@@ -336,7 +336,11 @@ cross-disk-migration.import_source() {
 		cross-disk-migration.log_copy_inventory "Ubuntu root destination" "$target_mount/$root_sub_vol/@"
 		log.success "Copied files from Ubuntu root $source_mount to $target_mount/$root_sub_vol/@"
 		for name in home var/cache var/log; do
-			destination="$target_mount/$root_sub_vol/@$([[ $name == home ]] && printf home || [[ $name == var/cache ]] && printf cache || printf log)"
+			case $name in
+			home) destination="$target_mount/$root_sub_vol/@home" ;;
+			var/cache) destination="$target_mount/$root_sub_vol/@cache" ;;
+			var/log) destination="$target_mount/$root_sub_vol/@log" ;;
+			esac
 			mkdir -p "$destination"
 			log.info "Move files from $target_mount/$root_sub_vol/@/$name to $destination"
 			cross-disk-migration.log_copy_inventory "Ubuntu $name source" "$target_mount/$root_sub_vol/@/$name"
@@ -362,19 +366,6 @@ cross-disk-migration.import_source() {
 		umount "$source_boot_mount"
 		rmdir "$source_boot_mount"
 	fi
-	log.warn "Source import copy completed. Opening an inspection shell before continuing."
-	log.info "Source root: $source_mount"
-	log.info "Target Btrfs top level: $target_mount"
-	log.info "Target suite: $target_mount/$root_sub_vol"
-	log.info "Run 'exit' to continue the installation."
-	(
-		cd "$target_mount"
-		export MIGRATION_SOURCE_ROOT="$source_mount"
-		export MIGRATION_TARGET_TOP_LEVEL="$target_mount"
-		export MIGRATION_TARGET_SUITE="$target_mount/$root_sub_vol"
-		bash --noprofile --norc -i
-	)
-	log.info "Inspection shell closed; continue source import finalization"
 	umount "$source_mount"
 	rmdir "$source_mount"
 	umount "$target_mount"

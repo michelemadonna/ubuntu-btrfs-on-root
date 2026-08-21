@@ -36,10 +36,7 @@ existing target suite trees are preserved. A target without both labels enters
 the destructive partitioning flow and stops after GPT, filesystems and LUKS2
 initialization; it leaves the target mapper open and Btrfs top level mounted,
 and the next execution validates and reuses them when present or opens/mounts
-them again when absent before performing the import. After all source and
-separate-boot copies complete, the importer opens an interactive inspection
-shell with source and target still mounted; exiting that shell resumes
-finalization and the subsequent installation phases.
+them again when absent before performing the import.
 
 For a newly initialized target with Windows reservation enabled, the GPT
 creation phase places `ROOT` before the contiguous terminal group `MSR`,

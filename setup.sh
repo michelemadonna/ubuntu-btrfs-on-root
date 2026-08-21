@@ -90,7 +90,7 @@ setup.mounted_device() {
 
 setup.read_os_release_value() {
 	local file=$1 key=$2 value
-	value="$(awk -v key="$key" '$0 ~ "^" key "=" { value = substr($0, index($0, "=") + 1); if (value ~ /^\".*\"$/ || value ~ /^\047.*\047$/) value = substr(value, 2, length(value) - 2); print value; exit }' "$file")"
+	value="$(awk -v key="$key" '$0 ~ "^" key "=" { value = substr($0, index($0, "=") + 1); if (value ~ /^".*"$/ || value ~ /^\047.*\047$/) value = substr(value, 2, length(value) - 2); print value; exit }' "$file")"
 	[[ -n $value ]] || log.die "Missing $key in $file."
 	printf '%s\n' "$value"
 }
