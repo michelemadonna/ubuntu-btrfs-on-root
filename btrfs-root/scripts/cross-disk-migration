@@ -48,6 +48,7 @@ cross-disk-migration.ensure_target_mapper() {
 	local mapped_device
 
 	if [[ ! -e /dev/mapper/root ]]; then
+		log.info "Open target ROOT mapper $expected_device as /dev/mapper/root"
 		printf '%s' "$PASSPHRASE" | cryptsetup open --key-file=- "$expected_device" root
 		return
 	fi
@@ -133,7 +134,7 @@ cross-disk-migration.partition_new_target() {
 	local next
 	local -a partition_args=()
 
-	common.require_commands awk blkid blockdev cryptsetup mkfs.btrfs mkfs.fat partprobe sgdisk
+	common.require_commands awk blkid blockdev cryptsetup mkdir mkfs.btrfs mkfs.fat mount mountpoint partprobe sgdisk
 	if [[ $windows == yes ]]; then
 		common.require_commands mkfs.ntfs
 	fi
@@ -227,15 +228,20 @@ cross-disk-migration.partition_new_target() {
 		cryptsetup close root || true
 		log.die "Btrfs validation failed inside the new ROOT LUKS container."
 	}
-	cryptsetup close root || log.die "Unable to close mapper root after Btrfs creation."
-	log.summary_item "Target ROOT" "$root_dev (LUKS2 label ROOT, Btrfs filesystem)"
+	mkdir -p "$mp"
+	if mountpoint -q "$mp"; then
+		log.die "Target mount point is already in use: $mp"
+	fi
+	mount /dev/mapper/root -o "$btrfs_options,subvolid=5" "$mp"
+	log.summary_item "Target ROOT" "$root_dev (LUKS2 label ROOT, Btrfs mounted at $mp)"
+	log.success "Target mapper remains open and its Btrfs top level remains mounted at $mp"
 	log.success "Target disk initialized; run setup.sh again to migrate the source."
 	log.section_end
 }
 
 cross-disk-migration.import_source() {
 	local source_root=$1 source_boot=${2:-}
-	local source_mount target_mount source_boot_mount destination mapper_filesystem
+	local source_mount target_mount source_boot_mount destination mapper_filesystem target_fsroot
 
 	source_mount="$(mktemp -d /tmp/cross-disk-source.XXXXXX)"
 	target_mount="$mp"
@@ -261,9 +267,15 @@ cross-disk-migration.import_source() {
 		rmdir "$source_mount"
 		return 0
 	fi
-	mountpoint -q "$target_mount" &&
-		log.die "$target_mount is already mounted but does not identify a completed import for $root_sub_vol/@."
-	mount /dev/mapper/root -o "$btrfs_options,subvolid=5" "$target_mount"
+	if mountpoint -q "$target_mount"; then
+		target_fsroot="$(findmnt -rn -M "$target_mount" -o FSROOT)"
+		[[ $target_fsroot == / ]] ||
+			log.die "$target_mount is already mounted from Btrfs path $target_fsroot instead of the top level."
+		log.info "Reuse already-mounted target Btrfs top level at $target_mount"
+	else
+		log.info "Mount target Btrfs top level from /dev/mapper/root at $target_mount"
+		mount /dev/mapper/root -o "$btrfs_options,subvolid=5" "$target_mount"
+	fi
 	if [[ -e $target_mount/$root_sub_vol ]]; then
 		if cross-disk-migration.import_checkpoint_valid "$target_mount" || {
 			[[ -f $target_mount/$root_sub_vol/@/etc/fstab ]] &&

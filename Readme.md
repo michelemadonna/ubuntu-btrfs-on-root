@@ -25,7 +25,10 @@ content before continuing.
 
 In the second mode, a target without `ESP` and `ROOT` is initialized with the
 requested GPT layout and a Btrfs filesystem inside LUKS2 `ROOT`; setup then stops and must be run again
-to perform the migration. An initialized target is detected from its `ESP` and
+to perform the migration. The `root` mapper remains open and the new Btrfs
+top level remains mounted at `mp` for inspection and immediate reuse. On the
+next run, setup validates and reuses them when still present, or unlocks and
+mounts the target again when necessary. An initialized target is detected from its `ESP` and
 `ROOT` labels. Existing target suite subvolumes are never overwritten.
 
 When Windows space is reserved during new-target initialization, the created

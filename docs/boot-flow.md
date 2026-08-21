@@ -34,7 +34,9 @@ filesystem is mounted read-only to read `/etc/os-release`, the target LUKS volum
 is opened, a new `$root_sub_vol` tree is populated from the selected Btrfs source, and
 existing target suite trees are preserved. A target without both labels enters
 the destructive partitioning flow and stops after GPT, filesystems and LUKS2
-initialization; the next execution performs the import.
+initialization; it leaves the target mapper open and Btrfs top level mounted,
+and the next execution validates and reuses them when present or opens/mounts
+them again when absent before performing the import.
 
 For a newly initialized target with Windows reservation enabled, the GPT
 creation phase places `ROOT` before the contiguous terminal group `MSR`,

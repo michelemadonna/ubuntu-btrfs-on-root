@@ -26,7 +26,10 @@ the Kali installation flow.
 The cross-disk wizard identifies an initialized target by exactly one GPT
 partition label `ESP` and one label `ROOT`. A new target can instead be
 partitioned, formatted and initialized as LUKS2; the operation ends after the
-destructive initialization and requires a second setup run for migration.
+destructive initialization and requires a second setup run for migration. The
+successful initialization leaves `/dev/mapper/root` open and its Btrfs top
+level mounted at `mp`; the next run validates and reuses either resource when
+present, or recreates the mapper/mount when absent.
 
 When Windows reservation is enabled for a new target, partition ownership and
 order are `ESP`, optional `RESCUE`, `ROOT`, `MSR`, `WINDOWS`, `WINRE`. The

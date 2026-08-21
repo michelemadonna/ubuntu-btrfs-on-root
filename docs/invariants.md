@@ -19,6 +19,9 @@ producer and consumer before altering one.
   `$root_sub_vol/@home`, `@cache` and `@log` respectively.
 - A new target with Windows reservation places `MSR`, `WINDOWS` and `WINRE`
   contiguously after `ROOT`, with `WINRE` as the final partition.
+- Successful new-target initialization leaves `/dev/mapper/root` open and its
+  Btrfs top level mounted at `mp`; resume validates and reuses each when
+  present, and safely recreates either state when absent.
 - Root starts as unencrypted Btrfs mounted at `mp`; the ESP is FAT and receives
   label `ESP` without reformatting.
 - Target Btrfs mounts used during migration include the configured

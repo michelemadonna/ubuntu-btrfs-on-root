@@ -185,7 +185,7 @@ setup.cleanup_sbctl_key_scan() {
 
 setup.stage_existing_sbctl_keys() {
 	local target_disk=$1
-	local root_device='' scan_device=/dev/mapper/root key_search_root partition partition_type partition_label mapper_filesystem
+	local root_device='' scan_device=/dev/mapper/root key_search_root partition partition_type partition_label mapper_filesystem mapped_device mounted_source mounted_fsroot
 	local scan_mount staged_root="$repository_root/.sbctl-key-import" password selected
 	local -a key_paths=() key_items=()
 	SETUP_SBCTL_STAGED_ROOT=''
@@ -222,6 +222,20 @@ setup.stage_existing_sbctl_keys() {
 				return 0
 			fi
 		fi
+	else
+		mapped_device="$(cryptsetup status root | awk '$1 == "device:" { print $2; exit }')"
+		[[ -n $mapped_device && $(readlink -f -- "$mapped_device") == "$(readlink -f -- "$root_device")" ]] ||
+			log.die "Existing mapper root does not belong to target ROOT $root_device."
+		password="$(tui.password "ROOT LUKS password for configuration" password)"
+		if ! printf '%s' "$password" | cryptsetup open --test-passphrase --key-file=- "$root_device"; then
+			if printf '%s\n' "$password" | cryptsetup open --test-passphrase --key-file=- "$root_device"; then
+				password=$password$'\n'
+				log.warn "Validated the legacy newline-terminated ROOT passphrase format"
+			else
+				log.die "ROOT LUKS password validation failed for the already-open target mapper."
+			fi
+		fi
+		SETUP_TARGET_LUKS_PASSWORD=$password
 	fi
 	mapper_filesystem="$(blkid -c /dev/null -s TYPE -o value "$scan_device" 2>/dev/null || true)"
 	if [[ $mapper_filesystem != btrfs ]]; then
@@ -229,15 +243,25 @@ setup.stage_existing_sbctl_keys() {
 		setup.cleanup_sbctl_key_scan "$scan_mount"
 		return 0
 	fi
-	if ! mount -o ro,subvolid=5 "$scan_device" "$scan_mount"; then
-		log.warn "Unable to mount target Btrfs for sbctl key discovery; continue without imported keys"
-		setup.cleanup_sbctl_key_scan "$scan_mount"
-		return 0
+	if [[ $scan_device == /dev/mapper/root ]] && mountpoint -q "$mp"; then
+		mounted_source="$(findmnt -rn -M "$mp" -o SOURCE)"
+		mounted_source=${mounted_source%%\[*}
+		mounted_fsroot="$(findmnt -rn -M "$mp" -o FSROOT)"
+		[[ $(readlink -f -- "$mounted_source") == "$(readlink -f -- /dev/mapper/root)" && $mounted_fsroot == / ]] ||
+			log.die "Existing target mount at $mp is not the Btrfs top level from /dev/mapper/root."
+		key_search_root=$mp
+		log.info "Reuse mounted target Btrfs top level at $mp for sbctl key discovery"
+	else
+		if ! mount -o subvolid=5 "$scan_device" "$scan_mount"; then
+			log.warn "Unable to mount target Btrfs for sbctl key discovery; continue without imported keys"
+			setup.cleanup_sbctl_key_scan "$scan_mount"
+			return 0
+		fi
+		key_search_root=$scan_mount
 	fi
 	log.info "Btrfs top-level content from LUKS ROOT on $target_disk"
-	btrfs subvolume list "$scan_mount" | awk 'index($0, "/.snapshots") == 0' || true
-	find "$scan_mount" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort
-	key_search_root="$scan_mount"
+	btrfs subvolume list "$key_search_root" | awk 'index($0, "/.snapshots") == 0' || true
+	find "$key_search_root" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort
 	[[ -d $key_search_root ]] || {
 		log.info "No sbctl key directory found at /var/lib/sbctl/keys"
 		setup.cleanup_sbctl_key_scan "$scan_mount"
@@ -248,7 +272,7 @@ setup.stage_existing_sbctl_keys() {
 		[[ -f $selected/KEK/KEK.key && -f $selected/KEK/KEK.pem ]] || continue
 		[[ -f $selected/db/db.key && -f $selected/db/db.pem ]] || continue
 		key_paths+=("$selected")
-		key_items+=("$selected|${selected#"$scan_mount"}")
+		key_items+=("$selected|${selected#"$key_search_root"}")
 	done < <(
 		find "$key_search_root" -type d -name .snapshots -prune -o -type d -print
 	)
@@ -270,7 +294,7 @@ setup.stage_existing_sbctl_keys() {
 		log.die "Existing sbctl key directory is empty."
 	fi
 	SETUP_SBCTL_STAGED_ROOT=/root/.sbctl-key-import
-	log.success "Staged selected sbctl keys from ${selected#"$scan_mount"} for chroot import"
+	log.success "Staged selected sbctl keys from ${selected#"$key_search_root"} for chroot import"
 	setup.cleanup_sbctl_key_scan "$scan_mount"
 }
 
