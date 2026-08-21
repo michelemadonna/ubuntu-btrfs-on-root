@@ -116,16 +116,28 @@ cross-disk-migration.copy_ubuntu_directory() {
 	fi
 }
 
-cross-disk-migration.layout() {
-	local disk=$1 esp_mib=$2 root_size=$3 rescue_mib=$4 windows=$5
-	local disk_mib windows_mib=0 msr_mib=0 root_mib
-	disk_mib=$(($(blockdev --getsize64 "$disk") / 1024 / 1024))
+cross-disk-migration.available_root_mib() {
+	local disk_mib=$1 esp_mib=$2 rescue_mib=$3 windows=$4
+	local windows_mib=0 msr_mib=0 layout_overhead_mib=0
+
 	if [[ $windows == yes ]]; then
 		windows_mib=65536
 		msr_mib=16
+		# Reserve the leading 1 MiB alignment gap and trailing backup GPT area.
+		layout_overhead_mib=2
+	fi
+	printf '%s\n' "$((disk_mib - esp_mib - rescue_mib - msr_mib - windows_mib - 1024 - layout_overhead_mib))"
+}
+
+cross-disk-migration.layout() {
+	local disk=$1 esp_mib=$2 root_size=$3 rescue_mib=$4 windows=$5
+	local disk_mib windows_mib=0 root_mib
+	disk_mib=$(($(blockdev --getsize64 "$disk") / 1024 / 1024))
+	if [[ $windows == yes ]]; then
+		windows_mib=65536
 	fi
 	if [[ $root_size == all ]]; then
-		root_mib=$((disk_mib - esp_mib - rescue_mib - msr_mib - windows_mib - 1024))
+		root_mib="$(cross-disk-migration.available_root_mib "$disk_mib" "$esp_mib" "$rescue_mib" "$windows")"
 	else
 		root_mib=$((root_size * 1024))
 	fi
@@ -155,7 +167,7 @@ cross-disk-migration.partition_new_target() {
 	local disk=$1 esp_mib=$2 root_size=$3 rescue=$4 windows=$5 iter_time=$6 passphrase=$7
 	local disk_mib total_mib
 	local esp_dev rescue_dev windows_dev winre_dev root_dev
-	local windows_mib=0 msr_mib=0 root_mib
+	local windows_mib=0 msr_mib=0 layout_overhead_mib=0 root_mib
 	local next
 	local -a partition_args=()
 
@@ -172,15 +184,16 @@ cross-disk-migration.partition_new_target() {
 	if [[ $windows == yes ]]; then
 		windows_mib=65536
 		msr_mib=16
+		layout_overhead_mib=2
 	fi
 	if [[ $root_size == all ]]; then
-		root_mib=$((disk_mib - esp_mib - rescue - msr_mib - windows_mib - 1024))
+		root_mib="$(cross-disk-migration.available_root_mib "$disk_mib" "$esp_mib" "$rescue" "$windows")"
 	else
 		root_mib=$((root_size * 1024))
 	fi
 	((root_mib >= 10240)) || log.die "ROOT must have at least 10 GiB after reserved partitions."
 
-	total_mib=$((esp_mib + rescue + msr_mib + windows_mib + 1024 + root_mib))
+	total_mib=$((esp_mib + rescue + msr_mib + windows_mib + 1024 + root_mib + layout_overhead_mib))
 	((total_mib <= disk_mib)) || log.die "Requested target layout exceeds disk capacity."
 
 	log.section "Create target GPT layout"

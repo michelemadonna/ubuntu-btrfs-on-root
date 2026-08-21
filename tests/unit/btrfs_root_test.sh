@@ -146,6 +146,17 @@ test_ubuntu_source_subvolume_detection() {
 		fail "in-place migration does not preserve a separately mounted home"
 }
 
+test_windows_layout_capacity() {
+	local disk_mib=264192 root_mib final_partition_end_sector last_usable_sector
+
+	root_mib="$(cross-disk-migration.available_root_mib "$disk_mib" 1024 10240 yes)"
+	assert_equal "186350" "$root_mib"
+	final_partition_end_sector=$(((1 + 1024 + 10240 + root_mib + 16 + 65536 + 1024) * 2048 - 1))
+	last_usable_sector=$((disk_mib * 2048 - 34))
+	((final_partition_end_sector <= last_usable_sector)) ||
+		fail "Windows layout exceeds the GPT last usable sector"
+}
+
 test_crypttab_entry
 test_subvolume_paths
 test_fstab_entries
@@ -153,4 +164,5 @@ test_summary
 test_configuration_validation
 test_kali_source_removal_without_mapfile
 test_ubuntu_source_subvolume_detection
+test_windows_layout_capacity
 printf 'Btrfs root helper tests passed.\n'
