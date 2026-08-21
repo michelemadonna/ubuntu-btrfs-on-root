@@ -134,7 +134,9 @@ The wizard reads `ID` and `VERSION_CODENAME` from the source installation's
 select either value. It explicitly asks for `root_sub_vol`, defaulting to
 `@$suite`, and persists the value entered. Kali installations do not create a rescue system. Every `yes`/`no`
 setting is presented as a toggle and normalized to one of those two literal
-values. Secrets use hidden input. The generated file is
+values. Ubuntu also asks whether to install the HWE kernel, defaulting to no;
+the package is derived from Ubuntu's `VERSION_ID`. Kali never shows this prompt.
+Secrets use hidden input. The generated file is
 written atomically with mode `0600`, then checked for Bash syntax, required
 values and permissions. After showing the complete non-secret configuration
 summary, setup asks whether installation should proceed. Answering `no` leaves
@@ -188,6 +190,7 @@ Important current options are:
 | `iter_time` | `3000` | Argon2id PBKDF calibration target in milliseconds |
 | `enlarge` | `no` | enlarge the root partition before conversion only when set to `yes` |
 | `pre_download` | `yes` | pre-download target packages only for literal `yes` |
+| `install_hwe_kernel` | `no` | install Ubuntu's `linux-generic-hwe-<VERSION_ID>` meta-package; forced to `no` for Kali |
 | `snapshot_menu` | `yes` | install the dracut snapshot selector |
 | `snapshot_menu_pin` | `yes` | require its PIN for snapshot selection |
 | `enable_tpm` | `yes` | install TPM integration; it does not enroll a token |

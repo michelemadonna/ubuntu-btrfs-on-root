@@ -143,6 +143,9 @@ initramfs, so changes require `generate-uki --all`.
 
 ## UKI and kernel lifecycle
 
+For Ubuntu, the wizard may install `linux-generic-hwe-<VERSION_ID>` before the
+UKI phase. The choice defaults to disabled and is not available for Kali.
+
 `uki/scripts/install-uki` configures kernel-install `layout=uki`, dracut and
 ukify. UKIs are stored in `/boot/efi/EFI/Linux` and include kernel, initramfs,
 command line, metadata, splash and PCR signature.

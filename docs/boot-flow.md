@@ -23,7 +23,8 @@ The wizard then:
    the live source, reserve and `writable` partition;
 4. reads `ID` and `VERSION_CODENAME` from the source `/etc/os-release`, asks
    explicitly for `root_sub_vol` with `@$suite` as its default, then records
-   encryption, explicit Secure Boot path and optional features;
+   encryption, explicit Secure Boot path and optional features; Ubuntu also
+   asks whether to install the HWE kernel;
 5. writes mode-0600 shell-quoted configuration, validates it, shows a
    non-secret summary and asks for final confirmation.
 
@@ -69,7 +70,8 @@ unmounted only when it is a mount point; its absence is non-fatal.
 3. Detect current firmware state and execute the user-selected Secure Boot path.
 4. Install/sign/verify rEFInd and fwupd; export public certificates to the ESP.
 5. Configure Snapper and the optional snapshot-menu dracut module.
-6. Configure kernel-install, dracut and ukify; generate and validate UKIs.
+6. Install the selected Ubuntu HWE meta-package when requested, then configure
+   kernel-install, dracut and ukify; generate and validate UKIs.
 7. Optionally install TPM support without enrolling a LUKS token.
 
 After chroot return, the outer phase creates rescue only when requested. It then

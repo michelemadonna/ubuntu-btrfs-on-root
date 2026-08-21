@@ -88,6 +88,14 @@ tui-test.generated_config_contract() {
 	rg -q 'setup\.write_config_value "\$temporary_config" mp "\$mp"' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" keyslot_size "\$keyslot_size"' "$repository_root/setup.sh"
 	rg -q 'setup\.write_config_value "\$temporary_config" btrfs_options "\$btrfs_options"' "$repository_root/setup.sh"
+	rg -q 'setup\.write_config_value "\$temporary_config" install_hwe_kernel "\$install_hwe_kernel"' "$repository_root/setup.sh"
+	rg -q 'Install the Ubuntu HWE kernel' "$repository_root/setup.sh"
+	rg -q 'install_hwe_kernel=\$\{install_hwe_kernel:-no\}' "$repository_root/setup.sh"
+	rg -q 'linux-generic-hwe-' "$repository_root/setup.sh"
+	if rg -q 'suite_type == kali.*Install the Ubuntu HWE kernel' "$repository_root/setup.sh"; then
+		printf 'Kali must not prompt for the Ubuntu HWE kernel.\n' >&2
+		return 1
+	fi
 	rg -q 'setup\.detect_source_distribution' "$repository_root/setup.sh"
 	rg -q 'setup\.read_os_release_value' "$repository_root/setup.sh"
 	rg -q 'VERSION_CODENAME' "$repository_root/setup.sh"

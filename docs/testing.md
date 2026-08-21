@@ -58,6 +58,7 @@ Safe checks may inspect temporary or prebuilt artifacts:
 - rescue GRUB/loopback configuration and sizing calculations;
 - public ESP certificates and absence of private material;
 - kernel-install, ukify, TPM and snapshot-menu configuration;
+- Ubuntu HWE selection and version-derived kernel meta-package installation;
 - rEFInd ordering and UKI filename correspondence;
 - UKI signature, PE sections, embedded version and initramfs file list.
 

@@ -121,6 +121,8 @@ input and yes/no toggles, validates its generated file, displays a non-secret
 summary and requires confirmation before installation. It explicitly prompts
 for `root_sub_vol` with `@$suite` as the default. It does not prompt for `mp`,
 `keyslot_size`, `btrfs_options` or experimental sbctl append behavior.
+Ubuntu alone prompts for `install_hwe_kernel` (default `no`) and derives the
+package from the target `VERSION_ID`; Kali forces it to `no`.
 
 Only these closed selections are supported currently:
 

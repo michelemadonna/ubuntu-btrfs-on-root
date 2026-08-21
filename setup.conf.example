@@ -12,12 +12,13 @@ export enlarge=no
 export swap_size="4G"
 export btrfs_options="defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1" #lsm=landlock,lockdown,yama,integrity,apparmor,bpf audit=1 audit_backlog_limit=256
 # Derived from the source installation's /etc/os-release.
-export suite="noble"
+export suite="resolute"
 export suite_type="ubuntu"
 export secure_boot_mode="unknown"
 export secure_boot_enrollment="sbctl"
 export EXPERIMENTAL_SBCTL_APPEND="false"
 export PASSPHRASE="password"
+export install_hwe_kernel="no"
 export pre_download="yes"
 export root_sub_vol="@$suite"
 export enable_tpm="yes"

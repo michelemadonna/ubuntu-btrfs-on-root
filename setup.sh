@@ -307,6 +307,7 @@ setup.generate_configuration() {
 	local source_root_dev='' source_boot_dev='' target_root_dev='' target_efi_dev='' migration_mode=in_place install_mode=in_place sbctl_import_keyroot=''
 	local PASSPHRASE=password mok_pin='' secure_boot_enrollment=sbctl secure_boot_mode EXPERIMENTAL_SBCTL_APPEND=false
 	local pre_download=yes enable_tpm=yes snapshot_menu=yes enlarge=no snapshot_menu_pin=yes snapshot_menu_pin_value=123456
+	local install_hwe_kernel=no
 	local mp=/mnt/root keyslot_size=32m btrfs_options='defaults,ssd,discard=async,noatime,space_cache=v2,compress=zstd:1'
 	local -a disk_items=() partition_items=() efi_items=() boot_items=() rescue_items=()
 
@@ -497,6 +498,11 @@ setup.generate_configuration() {
 	log.section "Optional features"
 	pre_download="$(tui.toggle "Pre-download target packages" "$pre_download")" || log.die "Invalid pre-download toggle."
 	enlarge="$(tui.toggle "Extend the root partition to available space" "$enlarge")" || log.die "Invalid enlargement toggle."
+	if [[ $suite_type == ubuntu ]]; then
+		install_hwe_kernel="$(tui.toggle "Install the Ubuntu HWE kernel" "$install_hwe_kernel")" || log.die "Invalid HWE-kernel toggle."
+	else
+		install_hwe_kernel=no
+	fi
 	if [[ $suite_type == kali ]]; then
 		install_rescue=no
 		log.info "Kali Linux does not support rescue-system creation during installation"
@@ -585,6 +591,7 @@ setup.generate_configuration() {
 	setup.write_config_value "$temporary_config" EXPERIMENTAL_SBCTL_APPEND "$EXPERIMENTAL_SBCTL_APPEND"
 	setup.write_config_value "$temporary_config" PASSPHRASE "$PASSPHRASE"
 	setup.write_config_value "$temporary_config" pre_download "$pre_download"
+	setup.write_config_value "$temporary_config" install_hwe_kernel "$install_hwe_kernel"
 	setup.write_config_value "$temporary_config" root_sub_vol "$root_sub_vol"
 	setup.write_config_value "$temporary_config" enable_tpm "$enable_tpm"
 	setup.write_config_value "$temporary_config" snapshot_menu "$snapshot_menu"
@@ -620,6 +627,7 @@ setup.generate_configuration() {
 	log.summary_item "Btrfs options" "$btrfs_options"
 	log.summary_item "Suite" "$suite"
 	log.summary_item "Distribution icon" "$suite_type"
+	log.summary_item "Ubuntu HWE kernel" "$install_hwe_kernel"
 	log.summary_item "Detected Secure Boot mode" "$secure_boot_mode"
 	log.summary_item "Secure Boot enrollment" "$secure_boot_enrollment"
 	log.summary_item "Argon2id target" "${iter_time} ms"
@@ -637,7 +645,7 @@ setup.generate_configuration() {
 	bash -n "$config_file" || log.die "Generated configuration contains invalid Bash syntax: $config_file"
 	config_mode=$(stat -c '%a' "$config_file")
 	[[ $config_mode == 600 ]] || log.die "Generated configuration permissions are $config_mode; expected 600."
-	for config_name in root_dev efi_dev boot_dev mp rescue_dev install_rescue keyslot_size iter_time enlarge swap_size btrfs_options suite suite_type secure_boot_mode secure_boot_enrollment EXPERIMENTAL_SBCTL_APPEND \
+	for config_name in root_dev efi_dev boot_dev mp rescue_dev install_rescue install_hwe_kernel keyslot_size iter_time enlarge swap_size btrfs_options suite suite_type secure_boot_mode secure_boot_enrollment EXPERIMENTAL_SBCTL_APPEND \
 		PASSPHRASE pre_download root_sub_vol source_root_dev source_boot_dev migration_mode install_mode SBCTL_IMPORT_KEYROOT enable_tpm snapshot_menu snapshot_menu_pin snapshot_menu_pin_value mok_pin; do
 		grep -q "^export ${config_name}=" "$config_file" ||
 			log.die "Generated configuration is missing required value: $config_name"
@@ -681,6 +689,11 @@ setup.load_configuration() {
 		log.die "suite=kali requires suite_type=kali."
 	fi
 	common.require_nonempty "pre_download" "${pre_download:-}"
+	install_hwe_kernel=${install_hwe_kernel:-no}
+	[[ $install_hwe_kernel == yes || $install_hwe_kernel == no ]] || log.die "install_hwe_kernel must be yes or no."
+	if [[ $suite_type == kali ]]; then
+		install_hwe_kernel=no
+	fi
 	common.require_nonempty "secure_boot_mode" "${secure_boot_mode:-}"
 	common.require_nonempty "secure_boot_enrollment" "${secure_boot_enrollment:-}"
 	[[ $secure_boot_mode == setup || $secure_boot_mode == enabled || $secure_boot_mode == disabled || $secure_boot_mode == unknown ]] ||
@@ -906,6 +919,7 @@ setup.run_inner_installation() {
 }
 
 setup.pre_download_all() {
+	local hwe_package
 	local -a packages=(
 		asciidoc-base binutils build-essential ca-certificates coreutils cryptsetup-bin
 		cryptsetup-initramfs curl dialog dosfstools dracut e2fsprogs efibootmgr findutils fwupd
@@ -919,6 +933,10 @@ setup.pre_download_all() {
 	else
 		packages+=(libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64)
 		apt-cache show refind >/dev/null 2>&1 && packages+=(refind)
+		if [[ $install_hwe_kernel == yes ]]; then
+			hwe_package="$(setup.ubuntu_hwe_package)"
+			packages+=("$hwe_package")
+		fi
 	fi
 
 	apt install --no-install-recommends -y --download-only \
@@ -927,17 +945,34 @@ setup.pre_download_all() {
 	apt install -y openssh-server open-vm-tools-desktop
 }
 
+setup.ubuntu_hwe_package() {
+	local version_id
+
+	[[ $suite_type == ubuntu ]] || log.die "The Ubuntu HWE kernel is only supported for Ubuntu targets."
+	version_id="$(setup.read_os_release_value /etc/os-release VERSION_ID)"
+	[[ $version_id =~ ^[0-9]+\.[0-9]+$ ]] || log.die "Ubuntu VERSION_ID is invalid for HWE kernel selection: $version_id."
+	printf 'linux-generic-hwe-%s\n' "$version_id"
+}
+
 setup.cleanup_suite_efi() {
 	rm -rf -- "/boot/efi/EFI/$suite"
 }
 
 setup.install_target_packages() {
+	local hwe_package
 	if [[ $pre_download == yes ]]; then
 		setup.pre_download_all
 	fi
 
 	log.info "Install target initramfs integration for the configured LUKS root"
 	apt-get install -y btrfs-progs cryptsetup-initramfs
+	if [[ $install_hwe_kernel == yes ]]; then
+		hwe_package="$(setup.ubuntu_hwe_package)"
+		apt-cache show "$hwe_package" | grep -q '^Package:' ||
+			log.die "Requested Ubuntu HWE kernel package is unavailable: $hwe_package"
+		log.info "Install Ubuntu HWE kernel package $hwe_package"
+		apt-get install -y "$hwe_package"
+	fi
 	if [[ $secure_boot_enrollment == existing && $suite_type != kali ]]; then
 		log.info "Install rEFInd in the new system without installing it into the ESP"
 		printf '%s\n' 'refind refind/install_to_esp boolean false' | debconf-set-selections

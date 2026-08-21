@@ -149,5 +149,8 @@ producer and consumer before altering one.
   entered with `@$suite` as its default.
 - `pre_download`, `enable_tpm` and `install_rescue` activate only on literal
   `yes`. `sb_key_dir` remains unused.
+- `install_hwe_kernel` is `yes` or `no`, defaults to `no`, applies only to
+  Ubuntu, and selects `linux-generic-hwe-<VERSION_ID>` without removing the
+  existing kernel.
 - Declining final wizard confirmation retains configuration and starts no
   installation work.
