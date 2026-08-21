@@ -37,7 +37,7 @@ cross-disk-migration.import_checkpoint_valid() {
 
 	marker="$target_mount/$root_sub_vol/@/var/lib/ubuntu-btrfs-on-root/checkpoints/$suite.source-import"
 	[[ -r $marker ]] || return 1
-	luks_uuid="$(cryptsetup luksUUID "/dev/$root_dev")"
+	luks_uuid="$(blkid -c /dev/null -s UUID -o value "/dev/$root_dev")"
 	expected="$luks_uuid:$suite"
 	[[ $(<"$marker") == "$expected" ]] ||
 		log.die "Source-import checkpoint identity mismatch: $marker"
@@ -68,7 +68,7 @@ cross-disk-migration.mounted_import_valid() {
 		log.die "$target_mount is mounted from $mounted_source instead of /dev/mapper/root."
 	marker="$target_mount/var/lib/ubuntu-btrfs-on-root/checkpoints/$suite.source-import"
 	if [[ -r $marker ]]; then
-		luks_uuid="$(cryptsetup luksUUID "/dev/$root_dev")"
+		luks_uuid="$(blkid -c /dev/null -s UUID -o value "/dev/$root_dev")"
 		expected="$luks_uuid:$suite"
 		[[ $(<"$marker") == "$expected" ]] ||
 			log.die "Source-import checkpoint identity mismatch: $marker"

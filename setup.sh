@@ -35,7 +35,7 @@ setup.checkpoint_dir() {
 setup.checkpoint_identity() {
 	local luks_uuid
 
-	luks_uuid="$(cryptsetup luksUUID "/dev/$root_dev")"
+	luks_uuid="$(blkid -c /dev/null -s UUID -o value "/dev/$root_dev")"
 	common.require_nonempty "Target LUKS UUID" "$luks_uuid"
 	printf '%s:%s\n' "$luks_uuid" "$suite"
 }
