@@ -73,7 +73,20 @@ btrfs-subvol-setup.move_directory_contents() {
 
 	log.info "Copy directory contents from $source_directory to $destination_directory"
 	rsync -aHAXx --numeric-ids --info=progress2 "$source_directory/." "$destination_directory/"
+	[[ -n $(find "$destination_directory" -mindepth 1 -print -quit) ]] ||
+		log.die "Destination is empty after copying non-empty source $source_directory."
 	find "$source_directory" -mindepth 1 -maxdepth 1 -exec rm -Rf -- {} +
+}
+
+btrfs-subvol-setup.copy_mounted_home() {
+	local source_home=$1 destination_home=$2
+
+	log.info "Copy mounted source home $source_home -> $destination_home"
+	rsync -aHAXx --numeric-ids --info=progress2 "$source_home/." "$destination_home/"
+	if [[ -n $(find "$source_home" -mindepth 1 -print -quit) ]]; then
+		[[ -n $(find "$destination_home" -mindepth 1 -print -quit) ]] ||
+			log.die "Destination home is empty after copying non-empty source $source_home."
+	fi
 }
 
 btrfs-subvol-setup.create_data_subvolume() {
@@ -177,10 +190,15 @@ btrfs-subvol-setup.run() {
 	local source_device="/dev/$root_dev"
 	local copied_root="$root_sub_vol/@"
 	local boot_backup=''
+	local mounted_home=false
 
 	log.section "Btrfs subvolume layout"
 	btrfs-subvol-setup.validate_source_filesystem
 	log.info "Use existing source Btrfs mount $source_device at $mp"
+	if mountpoint -q "$mp/home"; then
+		mounted_home=true
+		log.info "Detected separately mounted source home at $mp/home"
+	fi
 	if [[ $suite_type == kali && -n ${boot_dev:-} ]]; then
 		boot_backup="$(mktemp -d /tmp/kali-boot.XXXXXX)"
 		log.info "Back up separate /boot before switching to the Kali top-level mount"
@@ -209,7 +227,13 @@ btrfs-subvol-setup.run() {
 	btrfs-subvol-setup.copy_separate_boot "$copied_root"
 
 	btrfs-subvol-setup.create_data_subvolume "@home"
-	btrfs-subvol-setup.move_directory_contents "$copied_root/home" "$root_sub_vol/@home"
+	if [[ $mounted_home == true ]]; then
+		btrfs-subvol-setup.copy_mounted_home "$mp/home" "$root_sub_vol/@home"
+		log.info "Unmount migrated source home from $mp/home"
+		umount "$mp/home"
+	else
+		btrfs-subvol-setup.move_directory_contents "$copied_root/home" "$root_sub_vol/@home"
+	fi
 	btrfs-subvol-setup.create_data_subvolume "@cache"
 	btrfs-subvol-setup.move_directory_contents "$copied_root/var/cache" "$root_sub_vol/@cache"
 	btrfs-subvol-setup.create_data_subvolume "@log"

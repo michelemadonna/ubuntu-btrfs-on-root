@@ -78,6 +78,44 @@ cross-disk-migration.mounted_import_valid() {
 		grep -Fq "subvol=$root_sub_vol/@" "$target_mount/etc/fstab"
 }
 
+cross-disk-migration.ubuntu_data_subvolume() {
+	local root_fsroot=${1#/} source_path=$2 parent
+
+	case $root_fsroot in
+	@) parent='' ;;
+	*/@) parent=${root_fsroot%/@} ;;
+	'') parent='' ;;
+	*) return 1 ;;
+	esac
+	printf '%s@%s\n' "${parent:+$parent/}" "${source_path##*/}"
+}
+
+cross-disk-migration.copy_ubuntu_directory() {
+	local source_device=$1 source_mount=$2 target_mount=$3 source_path=$4 target_subvolume=$5
+	local source_directory="$source_mount$source_path"
+	local root_fsroot source_subvolume temporary_mount=''
+
+	root_fsroot="$(findmnt -rn -M "$source_mount" -o FSROOT)"
+	source_subvolume="$(cross-disk-migration.ubuntu_data_subvolume "$root_fsroot" "$source_path" || true)"
+	if [[ -n $source_subvolume ]] && btrfs subvolume list "$source_mount" | awk -v path="$source_subvolume" '$NF == path { found=1 } END { exit !found }'; then
+		temporary_mount="$(mktemp -d /tmp/cross-disk-ubuntu-data.XXXXXX)"
+		mount -o "subvol=$source_subvolume" "$source_device" "$temporary_mount"
+		source_directory=$temporary_mount
+		log.info "Mounted source $source_path subvolume $source_subvolume from $source_device"
+	fi
+	[[ -d $source_directory ]] || log.die "Ubuntu source directory is missing: $source_directory"
+	log.info "Copy Ubuntu $source_directory -> $target_mount/$target_subvolume"
+	rsync -aHAXx --numeric-ids --info=progress2 "$source_directory/." "$target_mount/$target_subvolume/"
+	if [[ -n $(find "$source_directory" -mindepth 1 -print -quit) ]]; then
+		[[ -n $(find "$target_mount/$target_subvolume" -mindepth 1 -print -quit) ]] ||
+			log.die "Ubuntu $source_path copy is empty although the source contains data."
+	fi
+	if [[ -n $temporary_mount ]]; then
+		umount "$temporary_mount"
+		rmdir "$temporary_mount"
+	fi
+}
+
 cross-disk-migration.layout() {
 	local disk=$1 esp_mib=$2 root_size=$3 rescue_mib=$4 windows=$5
 	local disk_mib windows_mib=0 msr_mib=0 root_mib
@@ -301,8 +339,7 @@ cross-disk-migration.import_source() {
 		for name in home var/cache var/log; do
 			destination="$target_mount/$root_sub_vol/@$([[ $name == home ]] && printf home || [[ $name == var/cache ]] && printf cache || printf log)"
 			mkdir -p "$destination"
-			log.info "Split Ubuntu $target_mount/$root_sub_vol/@/$name -> $destination"
-			rsync -aHAXx --numeric-ids --info=progress2 "$target_mount/$root_sub_vol/@/$name/." "$destination/"
+			cross-disk-migration.copy_ubuntu_directory "/dev/$source_root" "$source_mount" "$target_mount" "/$name" "${destination#"$target_mount/"}"
 			find "$target_mount/$root_sub_vol/@/$name" -mindepth 1 -maxdepth 1 -exec rm -Rf -- {} +
 		done
 	fi

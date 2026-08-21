@@ -63,6 +63,24 @@ them on the development host or infer a target from ambiguous input.
 Priorities are: bootability, data integrity, encryption/recovery, Secure Boot,
 TPM sealing, rollback, maintainability, then user experience.
 
+## Preserve working flows
+
+Do not modify an existing working installation or migration path while adding
+or fixing a different path. Keep changes strictly inside the mode and scenario
+requested by the user. In particular, new-install and cross-disk work must not
+alter the established in-place Ubuntu/Kali migration behavior unless the user
+explicitly requests that change.
+
+Do not generalize, refactor or move shared code merely because a new path looks
+similar. A change to code used by multiple modes requires concrete evidence
+that every affected mode needs it, plus regression tests for each affected
+mode. If investigation reveals a possible defect outside the requested path,
+report it and ask before changing that path.
+
+Before completion, compare the final diff against the requested scenario and
+remove unrelated behavioral changes. Passing static tests is not permission to
+change a previously working flow.
+
 ## Repository boundaries
 
 - `setup.sh`: live/chroot orchestration and configuration wizard;

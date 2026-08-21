@@ -11,6 +11,8 @@ export SETUP_CONFIG_FILE="$repository_root/setup.conf.example"
 source "$repository_root/lib/common.sh"
 # shellcheck disable=SC1090,SC1091
 source "$repository_root/btrfs-root/scripts/btrfs-root-setup"
+# shellcheck disable=SC1090,SC1091
+source "$repository_root/btrfs-root/scripts/cross-disk-migration"
 
 fail() {
 	printf 'FAIL: %s\n' "$*" >&2
@@ -135,10 +137,20 @@ test_kali_source_removal_without_mapfile() {
 	fi
 }
 
+test_ubuntu_source_subvolume_detection() {
+	assert_equal "@home" "$(cross-disk-migration.ubuntu_data_subvolume /@ /home)"
+	assert_equal "@noble/@home" "$(cross-disk-migration.ubuntu_data_subvolume /@noble/@ /home)"
+	assert_equal "@noble/@cache" "$(cross-disk-migration.ubuntu_data_subvolume /@noble/@ /var/cache)"
+
+	rg -q 'copy_mounted_home "\$mp/home"' "$repository_root/btrfs-root/scripts/btrfs-subvol-setup" ||
+		fail "in-place migration does not preserve a separately mounted home"
+}
+
 test_crypttab_entry
 test_subvolume_paths
 test_fstab_entries
 test_summary
 test_configuration_validation
 test_kali_source_removal_without_mapfile
+test_ubuntu_source_subvolume_detection
 printf 'Btrfs root helper tests passed.\n'

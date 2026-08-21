@@ -14,6 +14,9 @@ producer and consumer before altering one.
   partition label; source and target disks must be distinct.
 - Cross-disk import creates only the explicitly configured suite container and never deletes
   or overwrites pre-existing target suite containers.
+- Ubuntu migration copies separately mounted or sibling Btrfs `@home`,
+  `@cache` and `@log` data with rsync; a non-empty source must not produce an
+  empty destination.
 - A new target with Windows reservation places `MSR`, `WINDOWS` and `WINRE`
   contiguously after `ROOT`, with `WINRE` as the final partition.
 - Root starts as unencrypted Btrfs mounted at `mp`; the ESP is FAT and receives
