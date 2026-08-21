@@ -157,6 +157,30 @@ test_windows_layout_capacity() {
 		fail "Windows layout exceeds the GPT last usable sector"
 }
 
+test_windows_layout_with_sgdisk() {
+	local image root_mib
+
+	command -v sgdisk >/dev/null 2>&1 || return 0
+	image="$(mktemp "${TMPDIR:-/tmp}/windows-layout.XXXXXX.img")"
+	truncate -s 80G "$image"
+	root_mib="$(cross-disk-migration.available_root_mib 81920 1024 0 yes)"
+	if ! sgdisk -a 2048 --clear \
+		-n 1:0:+1024M -t 1:ef00 -c 1:ESP \
+		-n "2:0:+${root_mib}M" -t 2:8300 -c 2:ROOT \
+		-n 3:0:+16M -t 3:0C01 -c 3:MSR \
+		-n 4:0:+65536M -t 4:0700 -c 4:WINDOWS \
+		-n 5:0:+1024M -t 5:2700 -c 5:WINRE \
+		"$image" >/dev/null; then
+		rm -f -- "$image"
+		fail "sgdisk rejected the Windows-at-end GPT geometry"
+	fi
+	sgdisk -v "$image" >/dev/null || {
+		rm -f -- "$image"
+		fail "sgdisk validation rejected the generated GPT"
+	}
+	rm -f -- "$image"
+}
+
 test_crypttab_entry
 test_subvolume_paths
 test_fstab_entries
@@ -165,4 +189,5 @@ test_configuration_validation
 test_kali_source_removal_without_mapfile
 test_ubuntu_source_subvolume_detection
 test_windows_layout_capacity
+test_windows_layout_with_sgdisk
 printf 'Btrfs root helper tests passed.\n'
