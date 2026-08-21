@@ -819,6 +819,7 @@ setup.prepare_target() {
 	mkdir -p -- "$mp"
 	if [[ $migration_mode == cross_disk ]]; then
 		log.info "Cross-disk mode: import the selected Btrfs source into the initialized target"
+		log.info "Cross-disk migration code: $repository_root/btrfs-root/scripts/cross-disk-migration"
 		cross-disk-migration.import_source "$source_root_dev" "$source_boot_dev"
 		if ! setup.checkpoint_reached outer source-import; then
 			setup.persist_checkpoint outer source-import
