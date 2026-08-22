@@ -185,7 +185,7 @@ setup.cleanup_sbctl_key_scan() {
 
 setup.stage_existing_sbctl_keys() {
 	local target_disk=$1
-	local root_device='' scan_device=/dev/mapper/root key_search_root partition partition_type partition_label mapper_filesystem mapped_device mounted_source mounted_fsroot
+	local root_device='' scan_device=/dev/mapper/root key_search_root partition partition_type partition_label mapper_filesystem mapped_device mounted_source mounted_fsroot stale_scan_device
 	local scan_mount staged_root="$repository_root/.sbctl-key-import" password selected
 	local -a key_paths=() key_items=()
 	SETUP_SBCTL_STAGED_ROOT=''
@@ -206,6 +206,15 @@ setup.stage_existing_sbctl_keys() {
 	if [[ -z $root_device ]]; then
 		log.info "No LUKS partition labelled ROOT found on $target_disk"
 		return 0
+	fi
+	if [[ -e /dev/mapper/sbctl-key-scan ]]; then
+		stale_scan_device="$(cryptsetup status sbctl-key-scan 2>/dev/null | awk '$1 == "device:" { print $2; exit }')"
+		if [[ $(readlink -f -- "$stale_scan_device") != "$(readlink -f -- "$root_device")" ]]; then
+			log.warn "Existing mapper sbctl-key-scan does not belong to target ROOT; continue without imported keys"
+			return 0
+		fi
+		log.info "Close stale temporary mapper sbctl-key-scan before key discovery"
+		cryptsetup close sbctl-key-scan || log.die "Unable to close stale temporary mapper sbctl-key-scan"
 	fi
 	scan_mount="$(mktemp -d /tmp/sbctl-key-scan.XXXXXX)"
 	if [[ ! -e $scan_device ]]; then
