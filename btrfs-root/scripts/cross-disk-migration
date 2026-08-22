@@ -12,7 +12,12 @@ source "$repository_root/lib/common.sh"
 
 cross-disk-migration.partition_by_label() {
 	local disk=$1 label=$2
-	lsblk -nrpo PATH,PARTLABEL "$disk" | awk -v label="$label" '$2 == label { print $1 }'
+	# Existing installations may carry the contract label on the filesystem
+	# rather than in the GPT partition name.  Accept either representation,
+	# while de-duplicating a partition that has both labels.
+	lsblk -nrpo PATH,PARTLABEL,LABEL "$disk" |
+		awk -v label="$label" '$2 == label || $3 == label { print $1 }' |
+		awk '!seen[$0]++'
 }
 
 cross-disk-migration.initialized_target() {
