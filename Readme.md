@@ -642,3 +642,104 @@ Security-sensitive issues should be reported privately according to
 
 This project is licensed under the GNU General Public License version 3.0 only
 (`GPL-3.0-only`). See [LICENSE](LICENSE) for the complete terms.
+
+## Two installation modes at a glance
+
+```mermaid
+flowchart TD
+    A[Start setup.sh] --> B{Installation mode}
+    B -->|In Place Migration| C[Use current mounted installation]
+    C --> D[Create suite layout and convert root in place]
+    B -->|New Setup or Migrate From another Disk| E[Select distinct target disk]
+    E --> F{Target already has ESP and ROOT labels?}
+    F -->|No| G[Initialize GPT, filesystems and LUKS2]
+    G --> H[Stop with mapper and top-level mounted]
+    H --> E
+    F -->|Yes| I[Validate and reuse target]
+    I --> J[Import source into selected suite]
+    D --> K[Common chroot installation]
+    J --> K
+    K --> L[Secure Boot, Snapper, UKIs, TPM, rescue]
+```
+
+The first mode converts the installation currently mounted by the live
+session. The second mode never assumes that the source and target are the same
+disk: it identifies a target by exactly one GPT `ESP` and one `ROOT` label,
+preserves existing target suites, and resumes a newly initialized target on a
+later run. Checkpoint markers are tied to the target LUKS UUID and suite;
+preflight, discovery and mount validation are always repeated.
+
+## Example: Ubuntu Noble and Resolute on one encrypted Btrfs filesystem
+
+To keep two Ubuntu releases as independent suite trees:
+
+1. Install Ubuntu Noble on an unencrypted Btrfs root from Ubiquity, remain in
+   the live session, choose `In Place Migration`, and accept `suite=noble` and
+   `root_sub_vol=@noble`.
+2. Complete the conversion and verify that the resulting root is
+   `@noble/@`, with data subvolumes such as `@noble/@home` and
+   `@noble/@log`.
+3. Start the second Ubuntu release from its full live environment and choose
+   `New Setup or Migrate From another Disk`.
+4. Select the initialized target containing the `ESP` and `ROOT` labels, never
+   the source disk, and enter `root_sub_vol=@resolute`.
+5. Confirm that the existing `@noble` tree is preserved before importing the
+   Resolute source into `@resolute`.
+
+The resulting Btrfs top level is conceptually:
+
+```text
+subvolid=5
+├── @noble/
+│   ├── @       /
+│   ├── @home   /home
+│   ├── @cache  /var/cache
+│   └── @log    /var/log
+└── @resolute/
+    ├── @       /
+    ├── @home   /home
+    ├── @cache  /var/cache
+    └── @log    /var/log
+```
+
+For Ubuntu cross-disk import, setup copies the source root into the selected
+suite first, then synchronizes source `/home`, `/var/cache` and `/var/log` into
+the destination `@home`, `@cache` and `@log`. Do not select an existing suite
+as the destination unless replacing it is intentional. Each invocation has one
+active suite configuration; validate the generated UKI, fstab, crypttab and
+rEFInd entries after installing the second release.
+
+## Snapshot selector: boot-time sequence
+
+```mermaid
+sequenceDiagram
+    participant Firmware
+    participant UKI
+    participant Listener as evdev listener
+    participant Cryptsetup
+    participant Menu as snapshot menu
+    participant Root as real root
+    Firmware->>UKI: verify and start signed UKI
+    UKI->>Listener: watch B/b during early window
+    Listener-->>UKI: no request or request marker
+    UKI->>Cryptsetup: unlock LUKS
+    Cryptsetup-->>Menu: root device available
+    Menu->>Menu: mount Btrfs top-level read-only
+    Menu->>Menu: list current system and compatible root snapshots
+    alt snapshot selected
+        Menu->>Menu: mount selected snapshot read-only
+        Menu->>Root: attach ephemeral overlay
+    else cancel or any error
+        Menu->>Root: continue with current suite root
+    end
+```
+
+The listener closes its input descriptors before cryptsetup can request a
+password. The menu supports the current system, compatible numbered Snapper
+snapshots, pagination, arrow keys or `j`/`k`, and `Ctrl+C` cancellation. A
+snapshot missing modules for the running kernel is rejected. The selected
+snapshot is never modified: runtime writes go to the ephemeral overlay.
+Home snapshots are managed separately and are not boot targets. The optional
+menu PIN is an accidental-selection guard, not a cryptographic boundary.
+On Kali, do not configure an `Alt` trigger because Plymouth changes to a text
+console before the LUKS prompt.
