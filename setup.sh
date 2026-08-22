@@ -274,7 +274,8 @@ setup.stage_existing_sbctl_keys() {
 		key_paths+=("$selected")
 		key_items+=("$selected|${selected#"$key_search_root"}")
 	done < <(
-		find "$key_search_root" -type d -name .snapshots -prune -o -type d -print
+		find "$key_search_root" -type d -name .snapshots -prune -o \
+			-type d -path '*/var/lib/sbctl/keys' -print
 	)
 	if ((${#key_items[@]} == 0)); then
 		log.info "No complete sbctl key hierarchy found anywhere in the target Btrfs filesystem"
