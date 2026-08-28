@@ -34,7 +34,9 @@ present, or recreates the mapper/mount when absent.
 When Windows reservation is enabled for a new target, partition ownership and
 order are `ESP`, optional `RESCUE`, `ROOT`, `MSR`, `WINDOWS`, `WINRE`. The
 Windows partitions are contiguous and terminal; `MSR` is 16 MiB, `WINDOWS` is
-65,536 MiB and `WINRE` is 1,024 MiB.
+65,536 MiB when ROOT is `all`; with an explicit ROOT size, WINDOWS consumes
+the remaining space after the fixed partitions and GPT/layout overhead. `WINRE`
+is 1,024 MiB.
 
 Installed persistent data and swap live inside LUKS2. The ESP and optional
 rescue environment are outside that encryption boundary. A migrated old boot

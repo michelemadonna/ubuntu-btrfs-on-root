@@ -33,7 +33,9 @@ mounts the target again when necessary. An initialized target is detected from i
 
 When Windows space is reserved during new-target initialization, the created
 layout ends with one contiguous Windows group: `ROOT`, `MSR`, `WINDOWS`, then
-`WINRE`. Without Windows reservation, `ROOT` remains the final data partition.
+`WINRE`. With an explicit ROOT size, WINDOWS uses the remaining space after the
+fixed partitions; with ROOT set to `all`, the existing Windows reservation is
+retained. Without Windows reservation, `ROOT` remains the final data partition.
 
 > [!WARNING]
 > Setup reformats the rescue partition, restructures the Btrfs filesystem,

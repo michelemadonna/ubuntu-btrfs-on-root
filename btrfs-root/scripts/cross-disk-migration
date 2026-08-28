@@ -97,6 +97,12 @@ cross-disk-migration.available_root_mib() {
 	printf '%s\n' "$((disk_mib - esp_mib - rescue_mib - msr_mib - windows_mib - 1024 - layout_overhead_mib))"
 }
 
+cross-disk-migration.available_windows_mib() {
+	local disk_mib=$1 esp_mib=$2 rescue_mib=$3 root_mib=$4
+	# Reserve MSR, WINRE, Btrfs headroom and GPT/layout overhead.
+	printf '%s\n' "$((disk_mib - esp_mib - rescue_mib - 16 - 1024 - root_mib - 1024 - 2))"
+}
+
 cross-disk-migration.log_copy_inventory() {
 	local label=$1 path=$2 entries usage
 
@@ -110,13 +116,18 @@ cross-disk-migration.layout() {
 	local disk=$1 esp_mib=$2 root_size=$3 rescue_mib=$4 windows=$5
 	local disk_mib windows_mib=0 root_mib
 	disk_mib=$(($(blockdev --getsize64 "$disk") / 1024 / 1024))
-	if [[ $windows == yes ]]; then
-		windows_mib=65536
-	fi
 	if [[ $root_size == all ]]; then
 		root_mib="$(cross-disk-migration.available_root_mib "$disk_mib" "$esp_mib" "$rescue_mib" "$windows")"
 	else
 		root_mib=$((root_size * 1024))
+	fi
+	if [[ $windows == yes ]]; then
+		if [[ $root_size == all ]]; then
+			windows_mib=65536
+		else
+			windows_mib="$(cross-disk-migration.available_windows_mib "$disk_mib" "$esp_mib" "$rescue_mib" "$root_mib")"
+			((windows_mib > 0)) || log.die "Requested ROOT size leaves no space for WINDOWS."
+		fi
 	fi
 	cat <<-EOF
 		Target disk: $disk
@@ -159,7 +170,6 @@ cross-disk-migration.partition_new_target() {
 	((esp_mib >= 256)) || log.die "ESP must be at least 256 MiB."
 	((disk_mib > esp_mib + 10240)) || log.die "Target disk is too small for the requested layout."
 	if [[ $windows == yes ]]; then
-		windows_mib=65536
 		msr_mib=16
 		layout_overhead_mib=2
 	fi
@@ -167,6 +177,14 @@ cross-disk-migration.partition_new_target() {
 		root_mib="$(cross-disk-migration.available_root_mib "$disk_mib" "$esp_mib" "$rescue" "$windows")"
 	else
 		root_mib=$((root_size * 1024))
+	fi
+	if [[ $windows == yes ]]; then
+		if [[ $root_size == all ]]; then
+			windows_mib=65536
+		else
+			windows_mib="$(cross-disk-migration.available_windows_mib "$disk_mib" "$esp_mib" "$rescue" "$root_mib")"
+			((windows_mib > 0)) || log.die "Requested ROOT size leaves no space for WINDOWS."
+		fi
 	fi
 	((root_mib >= 10240)) || log.die "ROOT must have at least 10 GiB after reserved partitions."
 
