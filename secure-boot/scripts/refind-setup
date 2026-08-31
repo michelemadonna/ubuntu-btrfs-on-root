@@ -269,12 +269,18 @@ refind-setup.install_direct() {
 	cat >>"$REFIND_EFI/refind.conf" <<-'EOF'
 		#scanfor external,optical,manual
 		dont_scan_dirs EFI/systemd,EFI/Linux,ESP:EFI/BOOT
-		dont_scan_files shimx64.efi,grubx64.efi,mmx64.efi,fbx64.efi
+		dont_scan_files shimx64.efi,grubx64.efi,mmx64.efi,fbx64.efi,bootmgfw.efi
 		linux_prefixes ubuntu,kali
 		enable_touch
 		enable_mouse
 		use_graphics_for osx,linux,windows
 		include themes/refind-theme-regular/theme.conf
+		showtools bootorder
+		menuentry "Windows 11" {
+			icon /EFI/refind/themes/refind-theme-regular/icons/256-96/os_win.png
+			firmware_bootnum 0004
+			disabled
+		}
 	EOF
 
 	cp "$REFIND_EFI/refind_x64.efi" "$REFIND_FALLBACK_EFI/BOOTX64.EFI"
@@ -319,12 +325,17 @@ refind-setup.install_with_shim() {
 	cat >>"$REFIND_EFI/refind.conf" <<-'EOF'
 		#scanfor external,optical,manual
 		dont_scan_dirs EFI/systemd,EFI/Linux,ESP:EFI/BOOT
-		dont_scan_files grubx64.efi,mmx64.efi,fbx64.efi
+		dont_scan_files grubx64.efi,mmx64.efi,fbx64.efi,bootmgfw.efi
 		linux_prefixes ubuntu,kali
 		enable_touch
 		enable_mouse
 		use_graphics_for osx,linux,windows
 		include themes/refind-theme-regular/theme.conf
+		menuentry "Windows 11" {
+			icon /EFI/refind/themes/refind-theme-regular/icons/256-96/os_win.png
+			firmware_bootnum 0004
+			disabled
+		}
 	EOF
 	cp "$REFIND_EFI/shimx64.efi" "$REFIND_FALLBACK_EFI/BOOTX64.EFI"
 	cp "$REFIND_EFI/mmx64.efi" "$REFIND_FALLBACK_EFI/mmx64.efi"
